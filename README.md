@@ -16,14 +16,14 @@ Tomato is an online-only service. It does not support dine-in reservations or ph
 
 ## User categories
 
-Tomato supports three account categories:
+Tomato supports four account categories:
 
-- `customer`: places orders and manages delivery addresses. Public registration creates this role.
-- `restaurant`: manages restaurant details, menus, and incoming orders. These accounts should be provisioned through a protected onboarding workflow.
-- `deliveryPartner`: accepts deliveries and updates delivery status. These accounts should also be provisioned through a protected onboarding workflow.
-- `admin`: manages users, restaurants, delivery partners, and platform operations. These accounts must be provisioned securely and cannot be self-registered.
+- `customer`: places orders and manages delivery addresses.
+- `restaurant`: manages restaurant details, menus, and incoming orders.
+- `deliveryPartner`: accepts deliveries and updates delivery status.
+- `admin`: manages users, restaurants, delivery partners, and platform operations.
 
-Clients cannot choose `restaurant`, `deliveryPartner`, or `admin` during public registration.
+The registration form allows a user to choose one of these roles. Production deployments should add approval and protected onboarding controls for privileged roles.
 
 ## Project layout
 

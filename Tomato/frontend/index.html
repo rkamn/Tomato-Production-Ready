@@ -263,6 +263,60 @@
 
       .field { margin-bottom: 1.2rem; }
 
+      .name-control { position: relative; }
+      .name-control input { padding-right: 3.2rem; }
+      .role-trigger {
+        position: absolute;
+        right: 0.35rem;
+        top: 0.35rem;
+        z-index: 2;
+        width: 2.35rem;
+        min-height: 2.45rem;
+        padding: 0;
+        color: var(--tomato-dark);
+        background: transparent;
+        box-shadow: none;
+        font-size: 1.1rem;
+        letter-spacing: 0;
+      }
+      .role-trigger:hover { color: var(--ink); background: transparent; box-shadow: none; transform: none; }
+      .role-trigger::after {
+        content: "";
+        display: inline-block;
+        width: 0.5rem;
+        height: 0.5rem;
+        border-right: 2px solid currentColor;
+        border-bottom: 2px solid currentColor;
+        transform: translateY(-0.15rem) rotate(45deg);
+      }
+      .role-menu {
+        position: absolute;
+        right: 0;
+        top: calc(100% + 0.35rem);
+        z-index: 5;
+        display: none;
+        width: min(100%, 18rem);
+        padding: 0.35rem;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+      .role-menu.visible { display: block; animation: rise 160ms ease both; }
+      .role-option {
+        display: block;
+        width: 100%;
+        min-height: auto;
+        padding: 0.7rem 0.8rem;
+        color: var(--ink);
+        background: transparent;
+        box-shadow: none;
+        text-align: left;
+        text-transform: none;
+        letter-spacing: 0;
+      }
+      .role-option:hover { color: var(--tomato-dark); background: #f8eee8; box-shadow: none; transform: none; }
+      .role-option small { display: block; margin-top: 0.2rem; color: var(--muted); font-size: 0.68rem; }
+
       .mode-switch {
         display: flex;
         gap: 1.2rem;
@@ -289,6 +343,28 @@
       }
 
       .hidden { display: none; }
+
+      .reset-link {
+        display: block;
+        width: fit-content;
+        margin: 1rem auto 0;
+        padding: 0;
+        min-height: auto;
+        color: var(--tomato-dark);
+        background: transparent;
+        box-shadow: none;
+        font-size: 0.72rem;
+        letter-spacing: 0.04em;
+        text-transform: none;
+      }
+
+      .reset-link:hover { color: var(--ink); background: transparent; box-shadow: none; transform: none; }
+
+      .reset-form { margin-top: 1.4rem; padding-top: 1.4rem; border-top: 1px solid var(--line); }
+      .reset-form h3 { margin: 0 0 0.5rem; font-size: 1.25rem; font-weight: 400; }
+      .reset-form p { margin: 0 0 1.2rem; color: var(--muted); font: 0.84rem/1.45 "Trebuchet MS", sans-serif; }
+      .reset-form .field { margin-bottom: 1rem; }
+      .reset-token { color: var(--muted); font-size: 0.75rem; word-break: break-all; }
 
       button {
         width: 100%;
@@ -403,7 +479,16 @@
           <form id="auth-form">
             <div id="name-field" class="field hidden">
               <label for="name">Full name</label>
-              <input id="name" name="name" type="text" autocomplete="name" placeholder="Aman Sharma" />
+              <div class="name-control">
+                <input id="name" name="name" type="text" autocomplete="name" placeholder="Aman Sharma" />
+                <button id="role-trigger" class="role-trigger" type="button" aria-label="Choose account type" aria-expanded="false"></button>
+                <div id="role-menu" class="role-menu" role="menu">
+                  <button class="role-option" type="button" data-role="customer" data-label="Customer" role="menuitem">Customer<small>Personal ordering account</small></button>
+                  <button class="role-option" type="button" data-role="restaurant" data-label="Restaurant" role="menuitem">Restaurant<small>Restaurant management account</small></button>
+                  <button class="role-option" type="button" data-role="deliveryPartner" data-label="Delivery partner" role="menuitem">Delivery partner<small>Delivery operations account</small></button>
+                  <button class="role-option" type="button" data-role="admin" data-label="Admin" role="menuitem">Admin<small>Platform management account</small></button>
+                </div>
+              </div>
             </div>
             <div class="field">
               <label for="identifier">Email or mobile number</label>
@@ -414,6 +499,32 @@
               <input id="password" name="password" type="password" autocomplete="current-password" minlength="8" placeholder="At least 8 characters" required />
             </div>
             <button id="submit-button" type="submit">Sign in</button>
+          </form>
+
+          <button id="forgot-password" class="reset-link" type="button">Forgot password?</button>
+
+          <form id="reset-form" class="reset-form hidden">
+            <h3>Reset your password</h3>
+            <p id="reset-intro">Enter your email or mobile number to start a password reset.</p>
+            <div id="reset-identifier-field" class="field">
+              <label for="reset-identifier">Email or mobile number</label>
+              <input id="reset-identifier" type="text" autocomplete="username" required />
+            </div>
+            <div id="reset-token-field" class="field hidden">
+              <label for="reset-token">Reset token</label>
+              <input id="reset-token" type="text" autocomplete="one-time-code" />
+              <small class="reset-token">For this local development flow, the token is returned here automatically.</small>
+            </div>
+            <div id="new-password-field" class="field hidden">
+              <label for="new-password">New password</label>
+              <input id="new-password" type="password" minlength="8" autocomplete="new-password" />
+            </div>
+            <div id="confirm-password-field" class="field hidden">
+              <label for="confirm-password">Confirm new password</label>
+              <input id="confirm-password" type="password" minlength="8" autocomplete="new-password" />
+            </div>
+            <button id="reset-submit" type="submit">Send reset token</button>
+            <button id="cancel-reset" class="reset-link" type="button">Back to sign in</button>
           </form>
 
           <div id="account" class="account" aria-live="polite">
@@ -435,6 +546,9 @@
       const form = document.getElementById('auth-form');
       const nameField = document.getElementById('name-field');
       const nameInput = document.getElementById('name');
+      const roleTrigger = document.getElementById('role-trigger');
+      const roleMenu = document.getElementById('role-menu');
+      let selectedRole = 'customer';
       const identifierInput = document.getElementById('identifier');
       const passwordInput = document.getElementById('password');
       const submitButton = document.getElementById('submit-button');
@@ -446,6 +560,19 @@
       const loginMode = document.getElementById('login-mode');
       const registerMode = document.getElementById('register-mode');
       const serviceStatus = document.getElementById('service-status');
+      const forgotPassword = document.getElementById('forgot-password');
+      const resetForm = document.getElementById('reset-form');
+      const resetIntro = document.getElementById('reset-intro');
+      const resetIdentifier = document.getElementById('reset-identifier');
+      const resetIdentifierField = document.getElementById('reset-identifier-field');
+      const resetTokenField = document.getElementById('reset-token-field');
+      const resetToken = document.getElementById('reset-token');
+      const newPasswordField = document.getElementById('new-password-field');
+      const confirmPasswordField = document.getElementById('confirm-password-field');
+      const newPassword = document.getElementById('new-password');
+      const confirmPassword = document.getElementById('confirm-password');
+      const resetSubmit = document.getElementById('reset-submit');
+      const cancelReset = document.getElementById('cancel-reset');
 
       fetch(`${API_ROOT}/health`)
         .then((response) => {
@@ -481,6 +608,113 @@
       loginMode.addEventListener('click', () => setMode('login'));
       registerMode.addEventListener('click', () => setMode('register'));
 
+      roleTrigger.addEventListener('click', () => {
+        const isOpen = roleMenu.classList.toggle('visible');
+        roleTrigger.setAttribute('aria-expanded', String(isOpen));
+      });
+
+      document.querySelectorAll('.role-option').forEach((option) => option.addEventListener('click', () => {
+        selectedRole = option.dataset.role;
+        roleMenu.classList.remove('visible');
+        roleTrigger.setAttribute('aria-expanded', 'false');
+        message.textContent = `${option.dataset.label} account selected.`;
+        message.className = 'message';
+      }));
+
+      document.addEventListener('click', (event) => {
+        if (!event.target.closest('.name-control')) {
+          roleMenu.classList.remove('visible');
+          roleTrigger.setAttribute('aria-expanded', 'false');
+        }
+      });
+
+      forgotPassword.addEventListener('click', () => {
+        form.classList.add('hidden');
+        forgotPassword.classList.add('hidden');
+        account.classList.remove('visible');
+        resetForm.classList.remove('hidden');
+        message.textContent = 'Enter your account identifier to begin.';
+        message.className = 'message';
+        resetIdentifier.focus();
+      });
+
+      cancelReset.addEventListener('click', () => {
+        resetForm.classList.add('hidden');
+        form.classList.remove('hidden');
+        forgotPassword.classList.remove('hidden');
+        resetIdentifierField.classList.remove('hidden');
+        resetTokenField.classList.add('hidden');
+        newPasswordField.classList.add('hidden');
+        confirmPasswordField.classList.add('hidden');
+        resetToken.value = '';
+        newPassword.value = '';
+        confirmPassword.value = '';
+        resetToken.required = false;
+        newPassword.required = false;
+        confirmPassword.required = false;
+        resetSubmit.textContent = 'Send reset token';
+        resetIntro.textContent = 'Enter your email or mobile number to start a password reset.';
+        message.textContent = 'Ready to sign you in.';
+        message.className = 'message';
+      });
+
+      resetForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        resetSubmit.disabled = true;
+        message.textContent = '';
+        message.className = 'message';
+
+        try {
+          if (resetTokenField.classList.contains('hidden')) {
+            resetSubmit.textContent = 'Requesting...';
+            const response = await fetch(`${API_ROOT}/api/auth/password-reset/request`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ identifier: resetIdentifier.value })
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.message || 'Unable to start password reset.');
+            resetToken.value = data.resetToken || '';
+            resetIdentifierField.classList.add('hidden');
+            resetTokenField.classList.remove('hidden');
+            newPasswordField.classList.remove('hidden');
+            confirmPasswordField.classList.remove('hidden');
+            resetToken.required = true;
+            newPassword.required = true;
+            confirmPassword.required = true;
+            resetSubmit.textContent = 'Set new password';
+            resetIntro.textContent = data.message || 'Choose a new password.';
+            message.textContent = 'Reset token ready. Choose a new password.';
+            message.className = 'message success';
+            return;
+          }
+
+          if (newPassword.value !== confirmPassword.value) {
+            throw new Error('The new passwords do not match.');
+          }
+
+          resetSubmit.textContent = 'Saving...';
+          const response = await fetch(`${API_ROOT}/api/auth/password-reset/confirm`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ resetToken: resetToken.value, password: newPassword.value })
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.message || 'Unable to reset password.');
+          cancelReset.click();
+          message.textContent = 'Password reset successful. You can sign in now.';
+          message.className = 'message success';
+        } catch (error) {
+          message.textContent = error instanceof TypeError
+            ? 'The auth service is unavailable. Start it on port 5050.'
+            : error.message;
+          message.className = 'message error';
+        } finally {
+          resetSubmit.disabled = false;
+          if (!resetTokenField.classList.contains('hidden')) resetSubmit.textContent = 'Set new password';
+        }
+      });
+
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
         message.textContent = '';
@@ -496,7 +730,8 @@
             body: JSON.stringify({
               name: nameInput.value,
               identifier: identifierInput.value,
-              password: passwordInput.value
+              password: passwordInput.value,
+              role: mode === 'register' ? selectedRole : undefined
             })
           });
           const data = await response.json().catch(() => ({}));
@@ -506,6 +741,7 @@
           }
 
           localStorage.setItem('tomatoToken', data.token);
+          localStorage.setItem('tomatoUser', JSON.stringify(data.user));
           document.getElementById('account-name').textContent = data.user.name;
           document.getElementById('account-email').textContent = data.user.email || 'Not provided';
           document.getElementById('account-phone').textContent = data.user.phone || 'Not provided';
@@ -514,6 +750,9 @@
           account.classList.add('visible');
           message.textContent = mode === 'register' ? 'Registration successful.' : 'Login successful.';
           message.className = 'message success';
+          window.setTimeout(() => {
+            window.location.href = 'dashboard/loginDashboard.html';
+          }, 450);
         } catch (error) {
           message.textContent = error instanceof TypeError
             ? 'The auth service is unavailable. Start it on port 5050.'

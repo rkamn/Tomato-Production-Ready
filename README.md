@@ -6,10 +6,24 @@ A Node.js/Express authentication service with a standalone browser UI and MongoD
 
 - TypeScript Express API
 - MongoDB Atlas connection through Mongoose
-- Email/password registration and login
+- Email-or-mobile/password registration and login
 - Salted `scrypt` password hashes
 - One-hour JWT access tokens
 - Plain HTML frontend for creating an account and signing in
+- Online food ordering and delivery workflow
+
+Tomato is an online-only service. It does not support dine-in reservations or physical restaurant-table management. Customer orders are delivered to saved addresses.
+
+## User categories
+
+Tomato supports three account categories:
+
+- `customer`: places orders and manages delivery addresses. Public registration creates this role.
+- `restaurant`: manages restaurant details, menus, and incoming orders. These accounts should be provisioned through a protected onboarding workflow.
+- `deliveryPartner`: accepts deliveries and updates delivery status. These accounts should also be provisioned through a protected onboarding workflow.
+- `admin`: manages users, restaurants, delivery partners, and platform operations. These accounts must be provisioned securely and cannot be self-registered.
+
+Clients cannot choose `restaurant`, `deliveryPartner`, or `admin` during public registration.
 
 ## Project layout
 
@@ -86,7 +100,7 @@ cd Tomato/frontend
 python3 -m http.server 3000 --bind 127.0.0.1
 ```
 
-Open `http://127.0.0.1:3000`. Create an account, then log in with the same email and password.
+Open `http://127.0.0.1:3000`. Create an account, then log in with the same email or mobile number and password.
 
 ## API
 
@@ -132,7 +146,7 @@ Successful response: `201 Created`
     "name": "Aman",
     "email": "aman@example.com",
     "image": "",
-    "role": "user"
+    "role": "customer"
   }
 }
 ```
@@ -168,7 +182,7 @@ Successful response: `200 OK`
     "name": "Aman",
     "email": "aman@example.com",
     "image": "",
-    "role": "user"
+    "role": "customer"
   }
 }
 ```

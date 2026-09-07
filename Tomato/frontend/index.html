@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tomato | Sign in</title>
+    <style>
+      :root {
+        --ink: #1e1d1a;
+        --muted: #706d67;
+        --paper: #f7f2e9;
+        --panel: #fffdf8;
+        --line: #ded7ca;
+        --tomato: #d94b35;
+        --tomato-dark: #a9382a;
+        --sage: #637568;
+        --kitchen: #263a31;
+        --shadow: 0 24px 70px rgba(55, 42, 25, 0.18);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--ink);
+        overflow-x: hidden;
+        background:
+          radial-gradient(circle at 88% 18%, rgba(217, 75, 53, 0.1), transparent 24%),
+          linear-gradient(135deg, #f7f2e9 0%, #ebe4d7 100%);
+        font-family: Georgia, "Times New Roman", serif;
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0.28;
+        background-image: linear-gradient(rgba(30, 29, 26, 0.03) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(30, 29, 26, 0.03) 1px, transparent 1px);
+        background-size: 4rem 4rem;
+        mask-image: linear-gradient(to bottom, black, transparent 78%);
+      }
+
+      .page {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: minmax(260px, 0.8fr) minmax(360px, 1.2fr);
+        align-items: stretch;
+      }
+
+      .story {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: clamp(2rem, 6vw, 6rem);
+        isolation: isolate;
+        background:
+          radial-gradient(circle at 78% 22%, rgba(217, 75, 53, 0.3), transparent 24%),
+          linear-gradient(145deg, #2c4639 0%, var(--kitchen) 100%);
+        color: #fff9f0;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .story::after {
+        content: "";
+        width: 22rem;
+        height: 22rem;
+        border: 1px solid rgba(244, 231, 203, 0.3);
+        border-radius: 50%;
+        position: absolute;
+        right: -9rem;
+        bottom: -6rem;
+        box-shadow: 0 0 0 2rem rgba(244, 231, 203, 0.07), 0 0 0 4rem rgba(244, 231, 203, 0.05);
+        animation: orbit 18s ease-in-out infinite alternate;
+      }
+
+      .story::before {
+        content: "";
+        position: absolute;
+        width: 16rem;
+        height: 16rem;
+        left: -10rem;
+        top: 38%;
+        border: 1px solid rgba(244, 231, 203, 0.18);
+        border-radius: 50%;
+        box-shadow: 0 0 0 1.4rem rgba(244, 231, 203, 0.05);
+        animation: drift 13s ease-in-out infinite alternate;
+      }
+
+      .brand {
+        position: relative;
+        z-index: 1;
+        font-size: 1.1rem;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      .story h1 {
+        position: relative;
+        z-index: 1;
+        max-width: 8ch;
+        margin: 0;
+        font-size: clamp(3rem, 6vw, 6.4rem);
+        line-height: 0.9;
+        font-weight: 400;
+        animation: titleIn 700ms cubic-bezier(.2, .8, .2, 1) both;
+      }
+
+      .story p {
+        position: relative;
+        z-index: 1;
+        max-width: 28rem;
+        margin: 1.5rem 0 0;
+        color: rgba(244, 231, 203, 0.78);
+        font: 1rem/1.6 "Trebuchet MS", sans-serif;
+      }
+
+      .story small {
+        position: relative;
+        z-index: 1;
+        color: rgba(244, 231, 203, 0.65);
+        font: 0.75rem/1.4 "Trebuchet MS", sans-serif;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .dish-mark {
+        position: absolute;
+        right: 12%;
+        top: 38%;
+        z-index: 0;
+        width: 9.5rem;
+        height: 9.5rem;
+        border: 1px solid rgba(244, 231, 203, 0.32);
+        border-radius: 50%;
+        box-shadow: 0 0 0 0.7rem rgba(244, 231, 203, 0.08), inset 0 0 0 1.5rem rgba(244, 231, 203, 0.05);
+        animation: dishFloat 7s ease-in-out infinite;
+      }
+
+      .dish-mark::before,
+      .dish-mark::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 2.8rem;
+        height: 1.9rem;
+        border-radius: 90% 10% 90% 10%;
+        background: var(--tomato);
+        transform: translate(-50%, -50%) rotate(-18deg);
+        box-shadow: 0 0 1.6rem rgba(217, 75, 53, 0.35);
+      }
+
+      .dish-mark::after {
+        width: 1.1rem;
+        height: 2.4rem;
+        background: #879b73;
+        transform: translate(-10%, -78%) rotate(35deg);
+        box-shadow: none;
+      }
+
+      .panel-wrap {
+        display: grid;
+        place-items: center;
+        padding: 2rem;
+      }
+
+      .panel {
+        position: relative;
+        width: min(100%, 31rem);
+        padding: clamp(1.8rem, 5vw, 3.2rem);
+        background: var(--panel);
+        border: 1px solid rgba(222, 215, 202, 0.9);
+        box-shadow: var(--shadow);
+        animation: rise 500ms ease both;
+      }
+
+      .panel::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 4.5rem;
+        height: 4px;
+        background: var(--tomato);
+      }
+
+      .eyebrow {
+        margin: 0 0 0.8rem;
+        color: var(--tomato-dark);
+        font: 0.72rem/1 "Trebuchet MS", sans-serif;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+      }
+
+      .panel h2 {
+        margin: 0;
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1;
+        font-weight: 400;
+      }
+
+      .intro {
+        margin: 1rem 0 2rem;
+        color: var(--muted);
+        font: 0.95rem/1.55 "Trebuchet MS", sans-serif;
+      }
+
+      .service-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        margin: 0 0 1.4rem;
+        color: var(--muted);
+        font: 0.68rem/1 "Trebuchet MS", sans-serif;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .service-status::before {
+        content: "";
+        width: 0.45rem;
+        height: 0.45rem;
+        border-radius: 50%;
+        background: #c9a33a;
+        box-shadow: 0 0 0 4px rgba(201, 163, 58, 0.12);
+        animation: pulse 1.8s ease-in-out infinite;
+      }
+
+      .service-status.online::before { background: var(--sage); box-shadow: 0 0 0 4px rgba(99, 117, 104, 0.12); }
+      .service-status.offline::before { background: var(--tomato-dark); box-shadow: 0 0 0 4px rgba(169, 56, 42, 0.12); }
+
+      label {
+        display: block;
+        margin-bottom: 0.55rem;
+        font: 700 0.76rem/1 "Trebuchet MS", sans-serif;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      input {
+        width: 100%;
+        min-height: 3.2rem;
+        padding: 0.8rem 0.9rem;
+        border: 1px solid var(--line);
+        border-radius: 0;
+        outline: none;
+        color: var(--ink);
+        background: #fffefa;
+        font: 1rem "Trebuchet MS", sans-serif;
+        transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+      }
+
+      input:hover { border-color: #b9afa0; }
+      input:focus {
+        border-color: var(--tomato);
+        box-shadow: 0 0 0 3px rgba(217, 75, 53, 0.15);
+        transform: translateY(-1px);
+      }
+
+      .field { margin-bottom: 1.2rem; }
+
+      .mode-switch {
+        display: flex;
+        gap: 1.2rem;
+        margin-bottom: 1.5rem;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .mode-switch button {
+        width: auto;
+        min-height: 2.4rem;
+        margin-bottom: -1px;
+        color: var(--muted);
+        background: transparent;
+        border-bottom: 2px solid transparent;
+        font-size: 0.7rem;
+      }
+
+      .mode-switch button:hover,
+      .mode-switch button.active {
+        color: var(--tomato-dark);
+        background: transparent;
+        border-bottom-color: var(--tomato);
+        transform: translateY(-1px);
+      }
+
+      .hidden { display: none; }
+
+      button {
+        width: 100%;
+        min-height: 3.2rem;
+        border: 0;
+        border-radius: 0;
+        cursor: pointer;
+        color: #fffaf2;
+        background: var(--ink);
+        font: 700 0.8rem "Trebuchet MS", sans-serif;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        box-shadow: 0 8px 18px rgba(30, 29, 26, 0.1);
+        transition: background 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+      }
+
+      button:hover { background: var(--tomato-dark); box-shadow: 0 12px 24px rgba(169, 56, 42, 0.2); transform: translateY(-2px); }
+      button:active { transform: translateY(1px); }
+      button:disabled { cursor: wait; opacity: 0.6; }
+
+      .message {
+        min-height: 1.35rem;
+        margin: 1.4rem 0 0;
+        padding-top: 1rem;
+        border-top: 1px solid var(--line);
+        font: 0.86rem/1.4 "Trebuchet MS", sans-serif;
+      }
+
+      .message.error { color: var(--tomato-dark); }
+      .message.success { color: var(--sage); }
+
+      .account {
+        display: none;
+        margin-top: 1.5rem;
+        padding-top: 1.3rem;
+        border-top: 1px solid var(--line);
+      }
+
+      .account.visible { display: block; animation: rise 300ms ease both; }
+      .account h3 { margin: 0 0 0.7rem; font-size: 1.35rem; font-weight: 400; }
+      .account p { margin: 0.35rem 0; color: var(--muted); font: 0.88rem/1.4 "Trebuchet MS", sans-serif; }
+      .account strong { color: var(--ink); }
+
+      @keyframes rise {
+        from { opacity: 0; transform: translateY(12px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+
+      @keyframes titleIn {
+        from { opacity: 0; letter-spacing: 0.06em; transform: translateY(16px); }
+        to { opacity: 1; letter-spacing: normal; transform: translateY(0); }
+      }
+
+      @keyframes orbit {
+        from { transform: translate(0, 0) rotate(-7deg); }
+        to { transform: translate(-2rem, -1.5rem) rotate(9deg); }
+      }
+
+      @keyframes drift {
+        from { transform: translateY(-1rem); }
+        to { transform: translate(2rem, 1rem); }
+      }
+
+      @keyframes dishFloat {
+        0%, 100% { transform: translateY(0) rotate(-4deg); }
+        50% { transform: translateY(-0.7rem) rotate(4deg); }
+      }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 0.65; transform: scale(0.9); }
+        50% { opacity: 1; transform: scale(1.15); }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+      }
+
+      @media (max-width: 760px) {
+        .page { grid-template-columns: 1fr; }
+        .story { min-height: 42vh; padding: 2rem; }
+        .story h1 { font-size: clamp(3.2rem, 15vw, 5rem); }
+        .story p { margin-top: 1rem; }
+        .story small { margin-top: 3rem; }
+        .panel-wrap { padding: 1.25rem; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="story" aria-label="Tomato introduction">
+        <div class="brand">Tomato / Kitchen</div>
+        <div class="dish-mark" aria-hidden="true"></div>
+        <div>
+          <h1>Good food, delivered.</h1>
+          <p>Order warm plates online, follow every delivery, and keep tonight's kitchen moving.</p>
+        </div>
+        <small>Tonight's service &nbsp; / &nbsp; Open until 11:00 pm</small>
+      </section>
+
+      <section class="panel-wrap">
+        <div class="panel">
+          <p class="eyebrow">Online ordering</p>
+          <h2>Welcome back.</h2>
+          <p id="intro" class="intro">Use your email or mobile number and password to access your Tomato account.</p>
+          <p id="service-status" class="service-status">Checking service</p>
+
+          <div class="mode-switch" role="tablist" aria-label="Authentication mode">
+            <button id="login-mode" class="active" type="button" role="tab" aria-selected="true">Sign in</button>
+            <button id="register-mode" type="button" role="tab" aria-selected="false">Create account</button>
+          </div>
+
+          <form id="auth-form">
+            <div id="name-field" class="field hidden">
+              <label for="name">Full name</label>
+              <input id="name" name="name" type="text" autocomplete="name" placeholder="Aman Sharma" />
+            </div>
+            <div class="field">
+              <label for="identifier">Email or mobile number</label>
+              <input id="identifier" name="identifier" type="text" autocomplete="username" inputmode="email" placeholder="you@example.com or +919900000001" required />
+            </div>
+            <div class="field">
+              <label for="password">Password</label>
+              <input id="password" name="password" type="password" autocomplete="current-password" minlength="8" placeholder="At least 8 characters" required />
+            </div>
+            <button id="submit-button" type="submit">Sign in</button>
+          </form>
+
+          <div id="account" class="account" aria-live="polite">
+            <h3 id="account-heading">Signed in</h3>
+            <p>Name: <strong id="account-name"></strong></p>
+            <p>Email: <strong id="account-email"></strong></p>
+            <p>Mobile: <strong id="account-phone"></strong></p>
+            <p>Role: <strong id="account-role"></strong></p>
+          </div>
+
+          <p id="message" class="message" role="status" aria-live="polite">Choose an action to begin.</p>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const API_ROOT = 'http://localhost:5050';
+      let mode = 'login';
+      const form = document.getElementById('auth-form');
+      const nameField = document.getElementById('name-field');
+      const nameInput = document.getElementById('name');
+      const identifierInput = document.getElementById('identifier');
+      const passwordInput = document.getElementById('password');
+      const submitButton = document.getElementById('submit-button');
+      const message = document.getElementById('message');
+      const account = document.getElementById('account');
+      const accountHeading = document.getElementById('account-heading');
+      const heading = document.querySelector('.panel h2');
+      const intro = document.getElementById('intro');
+      const loginMode = document.getElementById('login-mode');
+      const registerMode = document.getElementById('register-mode');
+      const serviceStatus = document.getElementById('service-status');
+
+      fetch(`${API_ROOT}/health`)
+        .then((response) => {
+          if (!response.ok) throw new Error('offline');
+          serviceStatus.textContent = 'Auth service online';
+          serviceStatus.classList.add('online');
+        })
+        .catch(() => {
+          serviceStatus.textContent = 'Auth service offline';
+          serviceStatus.classList.add('offline');
+        });
+
+      function setMode(nextMode) {
+        mode = nextMode;
+        const isRegistering = mode === 'register';
+        heading.textContent = isRegistering ? 'Create account' : 'Sign in';
+        intro.textContent = isRegistering
+          ? 'Create your Tomato account with an email or mobile number and password.'
+          : 'Use your email or mobile number and password to access your Tomato account.';
+        nameField.classList.toggle('hidden', !isRegistering);
+        nameInput.required = isRegistering;
+        passwordInput.autocomplete = isRegistering ? 'new-password' : 'current-password';
+        submitButton.textContent = isRegistering ? 'Create account' : 'Sign in';
+        message.textContent = isRegistering ? 'Ready to create your delivery account.' : 'Ready to sign you in.';
+        message.className = 'message';
+        account.classList.remove('visible');
+        loginMode.classList.toggle('active', !isRegistering);
+        registerMode.classList.toggle('active', isRegistering);
+        loginMode.setAttribute('aria-selected', String(!isRegistering));
+        registerMode.setAttribute('aria-selected', String(isRegistering));
+      }
+
+      loginMode.addEventListener('click', () => setMode('login'));
+      registerMode.addEventListener('click', () => setMode('register'));
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        message.textContent = '';
+        message.className = 'message';
+        account.classList.remove('visible');
+        submitButton.disabled = true;
+        submitButton.textContent = mode === 'register' ? 'Creating...' : 'Checking...';
+
+        try {
+          const response = await fetch(`${API_ROOT}/api/auth/${mode}` , {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: nameInput.value,
+              identifier: identifierInput.value,
+              password: passwordInput.value
+            })
+          });
+          const data = await response.json().catch(() => ({}));
+
+          if (!response.ok) {
+            throw new Error(data.message || 'Unable to sign in.');
+          }
+
+          localStorage.setItem('tomatoToken', data.token);
+          document.getElementById('account-name').textContent = data.user.name;
+          document.getElementById('account-email').textContent = data.user.email || 'Not provided';
+          document.getElementById('account-phone').textContent = data.user.phone || 'Not provided';
+          document.getElementById('account-role').textContent = data.user.role || 'user';
+          accountHeading.textContent = mode === 'register' ? 'Your account is ready' : 'Welcome back';
+          account.classList.add('visible');
+          message.textContent = mode === 'register' ? 'Registration successful.' : 'Login successful.';
+          message.className = 'message success';
+        } catch (error) {
+          message.textContent = error instanceof TypeError
+            ? 'The auth service is unavailable. Start it on port 5050.'
+            : error.message;
+          message.className = 'message error';
+        } finally {
+          submitButton.disabled = false;
+          submitButton.textContent = mode === 'register' ? 'Create account' : 'Sign in';
+        }
+      });
+    </script>
+  </body>
+</html>

@@ -1,22 +1,28 @@
-import mongoose, {Document, Schema} from "mongoose";
-import { timeStamp } from "node:console";
+import mongoose, { Document, Schema } from 'mongoose';
 
-export interface IUser extends Document{
+export const USER_ROLES = ['customer', 'restaurant', 'deliveryPartner', 'admin'] as const;
+export type UserRole = (typeof USER_ROLES)[number];
+
+export interface IUser extends Document {
     name: string;
-    email: string;
-    image : string;
-    role : string;
+    email?: string;
+    phone?: string;
+    image: string;
+    role: UserRole;
+    passwordHash: string;
 }
 
-const schema : Schema<IUser> = new Schema({
-    name : {type : String, required : true},
-    email : {type : String, required : true, unique : true},
-    image : {type : String, required : true},
-    role : {type : String, default : null}
-},
-{
-    timestamps : true
-});
+const schema: Schema<IUser> = new Schema(
+    {
+        name: { type: String, required: true, trim: true },
+        email: { type: String, unique: true, sparse: true, lowercase: true, trim: true },
+        phone: { type: String, unique: true, sparse: true, trim: true },
+        image: { type: String, default: '' },
+        role: { type: String, enum: USER_ROLES, default: 'customer', required: true },
+        passwordHash: { type: String, required: true, select: false },
+    },
+    { timestamps: true },
+);
 
 const User = mongoose.model<IUser>('User', schema);
 

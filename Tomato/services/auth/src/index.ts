@@ -1,17 +1,21 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { fileURLToPath } from 'node:url';
 import connectDB from './config/db.js';
-import outhRoute from './routes/auth.js';
+import authRoute from './routes/auth.js';
 
-dotenv.config();
+dotenv.config({ path: fileURLToPath(new URL('../.env', import.meta.url)) });
 
 const app = express();
 
-app.use("/api/auth", outhRoute);
+app.use(cors({ origin: process.env.CORS_ORIGIN || true }));
+app.use(express.json());
+app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+app.use('/api/auth', authRoute);
+app.use((_req, res) => res.status(404).json({ message: 'Route not found.' }));
 
-
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5050;
 
 app.listen(PORT, () => {
   console.log(`Auth service running on port ${PORT}`);

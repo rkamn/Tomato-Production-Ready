@@ -10,6 +10,8 @@ export interface IUser extends Document {
     image: string;
     role: UserRole;
     passwordHash: string;
+    resetPasswordTokenHash?: string;
+    resetPasswordExpiresAt?: Date;
 }
 
 const schema: Schema<IUser> = new Schema(
@@ -20,6 +22,8 @@ const schema: Schema<IUser> = new Schema(
         image: { type: String, default: '' },
         role: { type: String, enum: USER_ROLES, default: 'customer', required: true },
         passwordHash: { type: String, required: true, select: false },
+        resetPasswordTokenHash: { type: String, select: false },
+        resetPasswordExpiresAt: { type: Date, select: false },
     },
     { timestamps: true },
 );

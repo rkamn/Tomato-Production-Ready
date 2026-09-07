@@ -25,7 +25,7 @@ Stores the four application account categories: customers, restaurants, delivery
 
 Allowed roles: `customer`, `restaurant`, `deliveryPartner`, `admin`.
 
-Public registration always creates a `customer`. Restaurant, delivery-partner, and admin accounts must be created through a protected admin or onboarding workflow; clients must not be allowed to choose those roles during public registration.
+Registration accepts one of the allowed roles. Production deployments should add approval and protected onboarding controls for restaurant, delivery-partner, and admin accounts.
 
 Indexes:
 

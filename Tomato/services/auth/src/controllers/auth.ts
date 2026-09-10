@@ -40,8 +40,9 @@ const getIdentifier = (body: Request['body']) => {
 };
 
 const getRegistrationPayload = (body: Request['body']) => {
-	const email = typeof body?.email === 'string' ? normalizeEmail(body.email) : '';
-	const phone = typeof body?.phone === 'string' ? normalizePhone(body.phone) : '';
+	const rawIdentifier = typeof body?.identifier === 'string' ? body.identifier.trim() : '';
+	const email = typeof body?.email === 'string' ? normalizeEmail(body.email) : rawIdentifier.includes('@') ? normalizeEmail(rawIdentifier) : '';
+	const phone = typeof body?.phone === 'string' ? normalizePhone(body.phone) : rawIdentifier && !rawIdentifier.includes('@') ? normalizePhone(rawIdentifier) : '';
 	const payload: { email?: string; phone?: string } = {};
 
 	if (email) payload.email = email;

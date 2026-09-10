@@ -1,0 +1,9 @@
+{
+  "name": "tomato-production-ready",
+  "private": true,
+  "scripts": {
+    "start": "npm --prefix Tomato/services/auth start",
+    "build": "npm --prefix Tomato/services/auth run build",
+    "dev": "npm --prefix Tomato/services/auth run dev"
+  }
+}

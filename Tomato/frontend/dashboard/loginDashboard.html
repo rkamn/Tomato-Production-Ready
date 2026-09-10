@@ -733,6 +733,17 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 1rem;
       }
+      .default-address-card {
+        display: grid;
+        gap: 0.7rem;
+        padding: 1rem;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: linear-gradient(135deg, rgba(196, 61, 43, 0.04), #fff);
+      }
+      .default-address-badge {
+        width: fit-content;
+      }
       .address-list {
         display: grid;
         gap: 0.9rem;
@@ -981,6 +992,17 @@
                 <div class="detail">
                   <span>Account ID</span><strong id="profile-id"></strong>
                 </div>
+              </div>
+            </section>
+
+            <section class="panel" id="default-address-panel">
+              <h2>Default delivery address</h2>
+              <p class="panel-intro">
+                This is the address used for most order deliveries.
+              </p>
+              <div class="default-address-card">
+                <span id="default-address-badge" class="badge default-address-badge" style="display: none;">Default address</span>
+                <div id="default-address-text">No default address set.</div>
               </div>
             </section>
           </div>
@@ -1557,7 +1579,8 @@
         if (!token || normalizedRole !== 'customer') return;
 
         const list = document.getElementById('saved-address-list');
-        if (!list) return;
+        const defaultBadge = document.getElementById('default-address-badge');
+        const defaultText = document.getElementById('default-address-text');
 
         try {
           const response = await fetch(`${API_ROOT}/api/customer/addresses`, {
@@ -1567,6 +1590,30 @@
           if (!response.ok) throw new Error(data.message || 'Unable to load addresses');
 
           const addresses = Array.isArray(data.addresses) ? data.addresses : [];
+          const defaultAddress = addresses.find((address) => address.isDefault) || addresses[0] || null;
+
+          if (defaultText) {
+            if (defaultAddress) {
+              const summaryParts = [
+                defaultAddress.label ? `${defaultAddress.label}:` : 'Delivery address:',
+                defaultAddress.line1 || '',
+                defaultAddress.line2 || '',
+                defaultAddress.city || '',
+                defaultAddress.state || '',
+                defaultAddress.postalCode || '',
+              ].filter(Boolean);
+              defaultText.innerHTML = summaryParts.join(', ');
+            } else {
+              defaultText.textContent = 'No default address set.';
+            }
+          }
+
+          if (defaultBadge) {
+            defaultBadge.style.display = defaultAddress ? 'inline-flex' : 'none';
+          }
+
+          if (!list) return;
+
           if (!addresses.length) {
             list.innerHTML = '<div class="address-empty">No saved addresses yet.</div>';
             return;
@@ -1608,7 +1655,10 @@
           });
         } catch (error) {
           console.error('Customer address load failed', error);
-          list.innerHTML = '<div class="address-empty">Unable to load addresses right now.</div>';
+          const badge = document.getElementById('default-address-badge');
+          if (badge) badge.style.display = 'none';
+          if (defaultText) defaultText.textContent = 'Unable to load default address.';
+          if (list) list.innerHTML = '<div class="address-empty">Unable to load addresses right now.</div>';
         }
       }
 

@@ -3,6 +3,9 @@ import { promisify } from 'node:util';
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import User, { USER_ROLES, UserRole } from '../model/User.js';
+import Notification from '../model/Notification.js';
+import { AuthenticatedRequest } from '../middleware/authenticate.js';
+import { PUBLIC_BASE_URL } from '../index.js';
 
 const scrypt = promisify(scryptCallback);
 
@@ -112,6 +115,15 @@ export const registerUser = async (req: Request, res: Response) => {
 			passwordHash: await hashPassword(password),
 			role,
 		});
+
+		await Notification.create({
+			userId: String(user._id),
+			role: user.role,
+			title: 'Welcome to Tomato',
+			message: `Your ${user.role} account is ready. Service updates will appear here.`,
+			type: 'service',
+		});
+
 		return res.status(201).json({ token: createToken(user), user: userResponse(user) });
 	} catch (error) {
 		console.error('Registration failed:', error);
@@ -207,5 +219,96 @@ export const resetPassword = async (req: Request, res: Response) => {
 	} catch (error) {
 		console.error('Password reset failed:', error);
 		return res.status(500).json({ message: 'Unable to reset password' });
+	}
+};
+
+export const updateProfile = async (req: AuthenticatedRequest & { file?: Express.Multer.File | undefined }, res: Response) => {
+	const userId = req.user?.userId;
+	if (!userId) {
+		return res.status(401).json({ message: 'Authentication required' });
+	}
+
+	console.log('PROFILE UPDATE BODY', req.body);
+	console.log('PROFILE UPDATE FILE', req.file);
+
+	const nextName = typeof req.body?.name === 'string' ? req.body.name.trim() : undefined;
+	const nextEmailRaw = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
+	const nextPhoneRaw = typeof req.body?.phone === 'string' ? req.body.phone.trim() : '';
+	const uploadedFile = req.file?.filename ? `${PUBLIC_BASE_URL}/uploads/${req.file.filename}` : undefined;
+	const nextImage = typeof req.body?.image === 'string' ? req.body.image.trim() : uploadedFile;
+	const nextEmail = nextEmailRaw ? normalizeEmail(nextEmailRaw) : undefined;
+	const nextPhone = nextPhoneRaw ? normalizePhone(nextPhoneRaw) : undefined;
+
+	if (!nextName && !nextEmail && !nextPhone && !nextImage) {
+		return res.status(400).json({
+			message: 'No profile changes provided',
+			body: req.body,
+			file: req.file ? { fieldname: req.file.fieldname, originalname: req.file.originalname, mimetype: req.file.mimetype, size: req.file.size } : null,
+		});
+	}
+
+	if (nextPhone && !isPhone(nextPhone)) {
+		return res.status(400).json({ message: 'Enter a valid mobile number' });
+	}
+
+	try {
+		const updates: Partial<{ name: string; email?: string; phone?: string; image: string }> = {};
+		if (nextName) updates.name = nextName;
+		if (nextEmail) updates.email = nextEmail;
+		if (nextPhone) updates.phone = nextPhone;
+		if (nextImage) updates.image = nextImage;
+
+		const existingUser = await User.findOne({
+			$and: [
+				{ _id: { $ne: userId } },
+				{
+					$or: [
+						...(nextEmail ? [{ email: nextEmail }] : []),
+						...(nextPhone ? [{ phone: nextPhone }] : []),
+					],
+				},
+			],
+		});
+
+		if (existingUser) {
+			return res.status(409).json({ message: 'An account with that email or mobile number already exists' });
+		}
+
+		const user = await User.findByIdAndUpdate(
+			userId,
+			updates,
+			{ new: true, runValidators: true },
+		).lean();
+
+		if (!user) {
+			return res.status(404).json({ message: 'User not found' });
+		}
+
+		const profileUser: {
+			_id: unknown;
+			name: string;
+			email?: string;
+			phone?: string;
+			image: string;
+			role: string;
+		} = {
+			_id: user._id,
+			name: user.name,
+			image: user.image || '',
+			role: user.role,
+		};
+		if (user.email) profileUser.email = user.email;
+		if (user.phone) profileUser.phone = user.phone;
+
+		return res.status(200).json({
+			message: 'Profile updated successfully',
+			user: userResponse(profileUser),
+		});
+	} catch (error) {
+		console.error('Profile update failed:', error);
+		if (typeof error === 'object' && error !== null && 'code' in error && error.code === 11000) {
+			return res.status(409).json({ message: 'An account with that email or mobile number already exists' });
+		}
+		return res.status(500).json({ message: 'Unable to update profile' });
 	}
 };

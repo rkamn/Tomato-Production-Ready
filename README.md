@@ -1,9 +1,9 @@
 ### Reach to project location and exacute below command
 
 eg. cd /Users/rakeshkumar/Documents/Projects/workspace/Web/Tomato-Production-Ready
-npm run build
-BUILD: npm run build
-START server : npm start
+
+BUILD: npm run build,
+START server : npm start,
 CLOSE server : Ctrl + C
 
 # Tomato

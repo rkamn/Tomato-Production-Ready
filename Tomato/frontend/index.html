@@ -18,7 +18,9 @@
         --shadow: 0 24px 70px rgba(55, 42, 25, 0.18);
       }
 
-      * { box-sizing: border-box; }
+      * {
+        box-sizing: border-box;
+      }
 
       body {
         margin: 0;
@@ -26,18 +28,23 @@
         color: var(--ink);
         overflow-x: hidden;
         background:
-          radial-gradient(circle at 88% 18%, rgba(217, 75, 53, 0.1), transparent 24%),
+          radial-gradient(
+            circle at 88% 18%,
+            rgba(217, 75, 53, 0.1),
+            transparent 24%
+          ),
           linear-gradient(135deg, #f7f2e9 0%, #ebe4d7 100%);
-        font-family: Georgia, "Times New Roman", serif;
+        font-family: Georgia, 'Times New Roman', serif;
       }
 
       body::before {
-        content: "";
+        content: '';
         position: fixed;
         inset: 0;
         pointer-events: none;
         opacity: 0.28;
-        background-image: linear-gradient(rgba(30, 29, 26, 0.03) 1px, transparent 1px),
+        background-image:
+          linear-gradient(rgba(30, 29, 26, 0.03) 1px, transparent 1px),
           linear-gradient(90deg, rgba(30, 29, 26, 0.03) 1px, transparent 1px);
         background-size: 4rem 4rem;
         mask-image: linear-gradient(to bottom, black, transparent 78%);
@@ -57,7 +64,11 @@
         padding: clamp(2rem, 6vw, 6rem);
         isolation: isolate;
         background:
-          radial-gradient(circle at 78% 22%, rgba(217, 75, 53, 0.3), transparent 24%),
+          radial-gradient(
+            circle at 78% 22%,
+            rgba(217, 75, 53, 0.3),
+            transparent 24%
+          ),
           linear-gradient(145deg, #2c4639 0%, var(--kitchen) 100%);
         color: #fff9f0;
         position: relative;
@@ -65,7 +76,7 @@
       }
 
       .story::after {
-        content: "";
+        content: '';
         width: 22rem;
         height: 22rem;
         border: 1px solid rgba(244, 231, 203, 0.3);
@@ -73,12 +84,14 @@
         position: absolute;
         right: -9rem;
         bottom: -6rem;
-        box-shadow: 0 0 0 2rem rgba(244, 231, 203, 0.07), 0 0 0 4rem rgba(244, 231, 203, 0.05);
+        box-shadow:
+          0 0 0 2rem rgba(244, 231, 203, 0.07),
+          0 0 0 4rem rgba(244, 231, 203, 0.05);
         animation: orbit 18s ease-in-out infinite alternate;
       }
 
       .story::before {
-        content: "";
+        content: '';
         position: absolute;
         width: 16rem;
         height: 16rem;
@@ -106,7 +119,7 @@
         font-size: clamp(3rem, 6vw, 6.4rem);
         line-height: 0.9;
         font-weight: 400;
-        animation: titleIn 700ms cubic-bezier(.2, .8, .2, 1) both;
+        animation: titleIn 700ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
       }
 
       .story p {
@@ -115,14 +128,18 @@
         max-width: 28rem;
         margin: 1.5rem 0 0;
         color: rgba(244, 231, 203, 0.78);
-        font: 1rem/1.6 "Trebuchet MS", sans-serif;
+        font:
+          1rem/1.6 'Trebuchet MS',
+          sans-serif;
       }
 
       .story small {
         position: relative;
         z-index: 1;
         color: rgba(244, 231, 203, 0.65);
-        font: 0.75rem/1.4 "Trebuchet MS", sans-serif;
+        font:
+          0.75rem/1.4 'Trebuchet MS',
+          sans-serif;
         letter-spacing: 0.08em;
         text-transform: uppercase;
       }
@@ -136,13 +153,15 @@
         height: 9.5rem;
         border: 1px solid rgba(244, 231, 203, 0.32);
         border-radius: 50%;
-        box-shadow: 0 0 0 0.7rem rgba(244, 231, 203, 0.08), inset 0 0 0 1.5rem rgba(244, 231, 203, 0.05);
+        box-shadow:
+          0 0 0 0.7rem rgba(244, 231, 203, 0.08),
+          inset 0 0 0 1.5rem rgba(244, 231, 203, 0.05);
         animation: dishFloat 7s ease-in-out infinite;
       }
 
       .dish-mark::before,
       .dish-mark::after {
-        content: "";
+        content: '';
         position: absolute;
         left: 50%;
         top: 50%;
@@ -179,7 +198,7 @@
       }
 
       .panel::before {
-        content: "";
+        content: '';
         position: absolute;
         top: 0;
         left: 0;
@@ -191,7 +210,9 @@
       .eyebrow {
         margin: 0 0 0.8rem;
         color: var(--tomato-dark);
-        font: 0.72rem/1 "Trebuchet MS", sans-serif;
+        font:
+          0.72rem/1 'Trebuchet MS',
+          sans-serif;
         letter-spacing: 0.15em;
         text-transform: uppercase;
       }
@@ -206,7 +227,9 @@
       .intro {
         margin: 1rem 0 2rem;
         color: var(--muted);
-        font: 0.95rem/1.55 "Trebuchet MS", sans-serif;
+        font:
+          0.95rem/1.55 'Trebuchet MS',
+          sans-serif;
       }
 
       .service-status {
@@ -215,13 +238,15 @@
         gap: 0.45rem;
         margin: 0 0 1.4rem;
         color: var(--muted);
-        font: 0.68rem/1 "Trebuchet MS", sans-serif;
+        font:
+          0.68rem/1 'Trebuchet MS',
+          sans-serif;
         letter-spacing: 0.08em;
         text-transform: uppercase;
       }
 
       .service-status::before {
-        content: "";
+        content: '';
         width: 0.45rem;
         height: 0.45rem;
         border-radius: 50%;
@@ -230,13 +255,21 @@
         animation: pulse 1.8s ease-in-out infinite;
       }
 
-      .service-status.online::before { background: var(--sage); box-shadow: 0 0 0 4px rgba(99, 117, 104, 0.12); }
-      .service-status.offline::before { background: var(--tomato-dark); box-shadow: 0 0 0 4px rgba(169, 56, 42, 0.12); }
+      .service-status.online::before {
+        background: var(--sage);
+        box-shadow: 0 0 0 4px rgba(99, 117, 104, 0.12);
+      }
+      .service-status.offline::before {
+        background: var(--tomato-dark);
+        box-shadow: 0 0 0 4px rgba(169, 56, 42, 0.12);
+      }
 
       label {
         display: block;
         margin-bottom: 0.55rem;
-        font: 700 0.76rem/1 "Trebuchet MS", sans-serif;
+        font:
+          700 0.76rem/1 'Trebuchet MS',
+          sans-serif;
         letter-spacing: 0.08em;
         text-transform: uppercase;
       }
@@ -250,21 +283,34 @@
         outline: none;
         color: var(--ink);
         background: #fffefa;
-        font: 1rem "Trebuchet MS", sans-serif;
-        transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+        font:
+          1rem 'Trebuchet MS',
+          sans-serif;
+        transition:
+          border-color 160ms ease,
+          box-shadow 160ms ease,
+          transform 160ms ease;
       }
 
-      input:hover { border-color: #b9afa0; }
+      input:hover {
+        border-color: #b9afa0;
+      }
       input:focus {
         border-color: var(--tomato);
         box-shadow: 0 0 0 3px rgba(217, 75, 53, 0.15);
         transform: translateY(-1px);
       }
 
-      .field { margin-bottom: 1.2rem; }
+      .field {
+        margin-bottom: 1.2rem;
+      }
 
-      .name-control { position: relative; }
-      .name-control input { padding-right: 3.2rem; }
+      .name-control {
+        position: relative;
+      }
+      .name-control input {
+        padding-right: 3.2rem;
+      }
       .role-trigger {
         position: absolute;
         right: 0.35rem;
@@ -279,9 +325,14 @@
         font-size: 1.1rem;
         letter-spacing: 0;
       }
-      .role-trigger:hover { color: var(--ink); background: transparent; box-shadow: none; transform: none; }
+      .role-trigger:hover {
+        color: var(--ink);
+        background: transparent;
+        box-shadow: none;
+        transform: none;
+      }
       .role-trigger::after {
-        content: "";
+        content: '';
         display: inline-block;
         width: 0.5rem;
         height: 0.5rem;
@@ -301,7 +352,10 @@
         background: var(--panel);
         box-shadow: var(--shadow);
       }
-      .role-menu.visible { display: block; animation: rise 160ms ease both; }
+      .role-menu.visible {
+        display: block;
+        animation: rise 160ms ease both;
+      }
       .role-option {
         display: block;
         width: 100%;
@@ -314,8 +368,18 @@
         text-transform: none;
         letter-spacing: 0;
       }
-      .role-option:hover { color: var(--tomato-dark); background: #f8eee8; box-shadow: none; transform: none; }
-      .role-option small { display: block; margin-top: 0.2rem; color: var(--muted); font-size: 0.68rem; }
+      .role-option:hover {
+        color: var(--tomato-dark);
+        background: #f8eee8;
+        box-shadow: none;
+        transform: none;
+      }
+      .role-option small {
+        display: block;
+        margin-top: 0.2rem;
+        color: var(--muted);
+        font-size: 0.68rem;
+      }
 
       .mode-switch {
         display: flex;
@@ -342,7 +406,9 @@
         transform: translateY(-1px);
       }
 
-      .hidden { display: none; }
+      .hidden {
+        display: none;
+      }
 
       .reset-link {
         display: block;
@@ -358,13 +424,38 @@
         text-transform: none;
       }
 
-      .reset-link:hover { color: var(--ink); background: transparent; box-shadow: none; transform: none; }
+      .reset-link:hover {
+        color: var(--ink);
+        background: transparent;
+        box-shadow: none;
+        transform: none;
+      }
 
-      .reset-form { margin-top: 1.4rem; padding-top: 1.4rem; border-top: 1px solid var(--line); }
-      .reset-form h3 { margin: 0 0 0.5rem; font-size: 1.25rem; font-weight: 400; }
-      .reset-form p { margin: 0 0 1.2rem; color: var(--muted); font: 0.84rem/1.45 "Trebuchet MS", sans-serif; }
-      .reset-form .field { margin-bottom: 1rem; }
-      .reset-token { color: var(--muted); font-size: 0.75rem; word-break: break-all; }
+      .reset-form {
+        margin-top: 1.4rem;
+        padding-top: 1.4rem;
+        border-top: 1px solid var(--line);
+      }
+      .reset-form h3 {
+        margin: 0 0 0.5rem;
+        font-size: 1.25rem;
+        font-weight: 400;
+      }
+      .reset-form p {
+        margin: 0 0 1.2rem;
+        color: var(--muted);
+        font:
+          0.84rem/1.45 'Trebuchet MS',
+          sans-serif;
+      }
+      .reset-form .field {
+        margin-bottom: 1rem;
+      }
+      .reset-token {
+        color: var(--muted);
+        font-size: 0.75rem;
+        word-break: break-all;
+      }
 
       button {
         width: 100%;
@@ -374,27 +465,47 @@
         cursor: pointer;
         color: #fffaf2;
         background: var(--ink);
-        font: 700 0.8rem "Trebuchet MS", sans-serif;
+        font:
+          700 0.8rem 'Trebuchet MS',
+          sans-serif;
         letter-spacing: 0.1em;
         text-transform: uppercase;
         box-shadow: 0 8px 18px rgba(30, 29, 26, 0.1);
-        transition: background 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+        transition:
+          background 160ms ease,
+          transform 160ms ease,
+          box-shadow 160ms ease;
       }
 
-      button:hover { background: var(--tomato-dark); box-shadow: 0 12px 24px rgba(169, 56, 42, 0.2); transform: translateY(-2px); }
-      button:active { transform: translateY(1px); }
-      button:disabled { cursor: wait; opacity: 0.6; }
+      button:hover {
+        background: var(--tomato-dark);
+        box-shadow: 0 12px 24px rgba(169, 56, 42, 0.2);
+        transform: translateY(-2px);
+      }
+      button:active {
+        transform: translateY(1px);
+      }
+      button:disabled {
+        cursor: wait;
+        opacity: 0.6;
+      }
 
       .message {
         min-height: 1.35rem;
         margin: 1.4rem 0 0;
         padding-top: 1rem;
         border-top: 1px solid var(--line);
-        font: 0.86rem/1.4 "Trebuchet MS", sans-serif;
+        font:
+          0.86rem/1.4 'Trebuchet MS',
+          sans-serif;
       }
 
-      .message.error { color: var(--tomato-dark); }
-      .message.success { color: var(--sage); }
+      .message.error {
+        color: var(--tomato-dark);
+      }
+      .message.success {
+        color: var(--sage);
+      }
 
       .account {
         display: none;
@@ -403,52 +514,120 @@
         border-top: 1px solid var(--line);
       }
 
-      .account.visible { display: block; animation: rise 300ms ease both; }
-      .account h3 { margin: 0 0 0.7rem; font-size: 1.35rem; font-weight: 400; }
-      .account p { margin: 0.35rem 0; color: var(--muted); font: 0.88rem/1.4 "Trebuchet MS", sans-serif; }
-      .account strong { color: var(--ink); }
+      .account.visible {
+        display: block;
+        animation: rise 300ms ease both;
+      }
+      .account h3 {
+        margin: 0 0 0.7rem;
+        font-size: 1.35rem;
+        font-weight: 400;
+      }
+      .account p {
+        margin: 0.35rem 0;
+        color: var(--muted);
+        font:
+          0.88rem/1.4 'Trebuchet MS',
+          sans-serif;
+      }
+      .account strong {
+        color: var(--ink);
+      }
 
       @keyframes rise {
-        from { opacity: 0; transform: translateY(12px); }
-        to { opacity: 1; transform: translateY(0); }
+        from {
+          opacity: 0;
+          transform: translateY(12px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
       }
 
       @keyframes titleIn {
-        from { opacity: 0; letter-spacing: 0.06em; transform: translateY(16px); }
-        to { opacity: 1; letter-spacing: normal; transform: translateY(0); }
+        from {
+          opacity: 0;
+          letter-spacing: 0.06em;
+          transform: translateY(16px);
+        }
+        to {
+          opacity: 1;
+          letter-spacing: normal;
+          transform: translateY(0);
+        }
       }
 
       @keyframes orbit {
-        from { transform: translate(0, 0) rotate(-7deg); }
-        to { transform: translate(-2rem, -1.5rem) rotate(9deg); }
+        from {
+          transform: translate(0, 0) rotate(-7deg);
+        }
+        to {
+          transform: translate(-2rem, -1.5rem) rotate(9deg);
+        }
       }
 
       @keyframes drift {
-        from { transform: translateY(-1rem); }
-        to { transform: translate(2rem, 1rem); }
+        from {
+          transform: translateY(-1rem);
+        }
+        to {
+          transform: translate(2rem, 1rem);
+        }
       }
 
       @keyframes dishFloat {
-        0%, 100% { transform: translateY(0) rotate(-4deg); }
-        50% { transform: translateY(-0.7rem) rotate(4deg); }
+        0%,
+        100% {
+          transform: translateY(0) rotate(-4deg);
+        }
+        50% {
+          transform: translateY(-0.7rem) rotate(4deg);
+        }
       }
 
       @keyframes pulse {
-        0%, 100% { opacity: 0.65; transform: scale(0.9); }
-        50% { opacity: 1; transform: scale(1.15); }
+        0%,
+        100% {
+          opacity: 0.65;
+          transform: scale(0.9);
+        }
+        50% {
+          opacity: 1;
+          transform: scale(1.15);
+        }
       }
 
       @media (prefers-reduced-motion: reduce) {
-        *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+        }
       }
 
       @media (max-width: 760px) {
-        .page { grid-template-columns: 1fr; }
-        .story { min-height: 42vh; padding: 2rem; }
-        .story h1 { font-size: clamp(3.2rem, 15vw, 5rem); }
-        .story p { margin-top: 1rem; }
-        .story small { margin-top: 3rem; }
-        .panel-wrap { padding: 1.25rem; }
+        .page {
+          grid-template-columns: 1fr;
+        }
+        .story {
+          min-height: 42vh;
+          padding: 2rem;
+        }
+        .story h1 {
+          font-size: clamp(3.2rem, 15vw, 5rem);
+        }
+        .story p {
+          margin-top: 1rem;
+        }
+        .story small {
+          margin-top: 3rem;
+        }
+        .panel-wrap {
+          padding: 1.25rem;
+        }
       }
     </style>
   </head>
@@ -459,7 +638,10 @@
         <div class="dish-mark" aria-hidden="true"></div>
         <div>
           <h1>Good food, delivered.</h1>
-          <p>Order warm plates online, follow every delivery, and keep tonight's kitchen moving.</p>
+          <p>
+            Order warm plates online, follow every delivery, and keep tonight's
+            kitchen moving.
+          </p>
         </div>
         <small>Tonight's service &nbsp; / &nbsp; Open until 11:00 pm</small>
       </section>
@@ -468,63 +650,173 @@
         <div class="panel">
           <p class="eyebrow">Online ordering</p>
           <h2>Welcome back.</h2>
-          <p id="intro" class="intro">Use your email or mobile number and password to access your Tomato account.</p>
+          <p id="intro" class="intro">
+            Use your email or mobile number and password to access your Tomato
+            account.
+          </p>
           <p id="service-status" class="service-status">Checking service</p>
 
-          <div class="mode-switch" role="tablist" aria-label="Authentication mode">
-            <button id="login-mode" class="active" type="button" role="tab" aria-selected="true">Sign in</button>
-            <button id="register-mode" type="button" role="tab" aria-selected="false">Create account</button>
+          <div
+            class="mode-switch"
+            role="tablist"
+            aria-label="Authentication mode"
+          >
+            <button
+              id="login-mode"
+              class="active"
+              type="button"
+              role="tab"
+              aria-selected="true"
+            >
+              Sign in
+            </button>
+            <button
+              id="register-mode"
+              type="button"
+              role="tab"
+              aria-selected="false"
+            >
+              Create account
+            </button>
           </div>
 
           <form id="auth-form">
             <div id="name-field" class="field hidden">
               <label for="name">Full name</label>
               <div class="name-control">
-                <input id="name" name="name" type="text" autocomplete="name" placeholder="Aman Sharma" />
-                <button id="role-trigger" class="role-trigger" type="button" aria-label="Choose account type" aria-expanded="false"></button>
+                <input
+                  id="name"
+                  name="name"
+                  type="text"
+                  autocomplete="name"
+                  placeholder="Aman Sharma"
+                />
+                <button
+                  id="role-trigger"
+                  class="role-trigger"
+                  type="button"
+                  aria-label="Choose account type"
+                  aria-expanded="false"
+                ></button>
                 <div id="role-menu" class="role-menu" role="menu">
-                  <button class="role-option" type="button" data-role="customer" data-label="Customer" role="menuitem">Customer<small>Personal ordering account</small></button>
-                  <button class="role-option" type="button" data-role="restaurant" data-label="Restaurant" role="menuitem">Restaurant<small>Restaurant management account</small></button>
-                  <button class="role-option" type="button" data-role="deliveryPartner" data-label="Delivery partner" role="menuitem">Delivery partner<small>Delivery operations account</small></button>
-                  <button class="role-option" type="button" data-role="admin" data-label="Admin" role="menuitem">Admin<small>Platform management account</small></button>
+                  <button
+                    class="role-option"
+                    type="button"
+                    data-role="customer"
+                    data-label="Customer"
+                    role="menuitem"
+                  >
+                    Customer<small>Personal ordering account</small>
+                  </button>
+                  <button
+                    class="role-option"
+                    type="button"
+                    data-role="restaurant"
+                    data-label="Restaurant"
+                    role="menuitem"
+                  >
+                    Restaurant<small>Restaurant management account</small>
+                  </button>
+                  <button
+                    class="role-option"
+                    type="button"
+                    data-role="deliveryPartner"
+                    data-label="Delivery partner"
+                    role="menuitem"
+                  >
+                    Delivery partner<small>Delivery operations account</small>
+                  </button>
+                  <button
+                    class="role-option"
+                    type="button"
+                    data-role="admin"
+                    data-label="Admin"
+                    role="menuitem"
+                  >
+                    Admin<small>Platform management account</small>
+                  </button>
                 </div>
               </div>
             </div>
             <div class="field">
               <label for="identifier">Email or mobile number</label>
-              <input id="identifier" name="identifier" type="text" autocomplete="username" inputmode="email" placeholder="you@example.com or +919900000001" required />
+              <input
+                id="identifier"
+                name="identifier"
+                type="text"
+                autocomplete="username"
+                inputmode="email"
+                placeholder="you@example.com or +919900000001"
+                required
+              />
             </div>
             <div class="field">
               <label for="password">Password</label>
-              <input id="password" name="password" type="password" autocomplete="current-password" minlength="8" placeholder="At least 8 characters" required />
+              <input
+                id="password"
+                name="password"
+                type="password"
+                autocomplete="current-password"
+                minlength="8"
+                placeholder="At least 8 characters"
+                required
+              />
             </div>
             <button id="submit-button" type="submit">Sign in</button>
           </form>
 
-          <button id="forgot-password" class="reset-link" type="button">Forgot password?</button>
+          <button id="forgot-password" class="reset-link" type="button">
+            Forgot password?
+          </button>
 
           <form id="reset-form" class="reset-form hidden">
             <h3>Reset your password</h3>
-            <p id="reset-intro">Enter your email or mobile number to start a password reset.</p>
+            <p id="reset-intro">
+              Enter your email or mobile number to start a password reset.
+            </p>
             <div id="reset-identifier-field" class="field">
               <label for="reset-identifier">Email or mobile number</label>
-              <input id="reset-identifier" type="text" autocomplete="username" required />
+              <input
+                id="reset-identifier"
+                type="text"
+                autocomplete="username"
+                required
+              />
             </div>
             <div id="reset-token-field" class="field hidden">
               <label for="reset-token">Reset token</label>
-              <input id="reset-token" type="text" autocomplete="one-time-code" />
-              <small class="reset-token">For this local development flow, the token is returned here automatically.</small>
+              <input
+                id="reset-token"
+                type="text"
+                autocomplete="one-time-code"
+              />
+              <small class="reset-token"
+                >For this local development flow, the token is returned here
+                automatically.</small
+              >
             </div>
             <div id="new-password-field" class="field hidden">
               <label for="new-password">New password</label>
-              <input id="new-password" type="password" minlength="8" autocomplete="new-password" />
+              <input
+                id="new-password"
+                type="password"
+                minlength="8"
+                autocomplete="new-password"
+              />
             </div>
             <div id="confirm-password-field" class="field hidden">
               <label for="confirm-password">Confirm new password</label>
-              <input id="confirm-password" type="password" minlength="8" autocomplete="new-password" />
+              <input
+                id="confirm-password"
+                type="password"
+                minlength="8"
+                autocomplete="new-password"
+              />
             </div>
             <button id="reset-submit" type="submit">Send reset token</button>
-            <button id="cancel-reset" class="reset-link" type="button">Back to sign in</button>
+            <button id="cancel-reset" class="reset-link" type="button">
+              Back to sign in
+            </button>
           </form>
 
           <div id="account" class="account" aria-live="polite">
@@ -535,7 +827,9 @@
             <p>Role: <strong id="account-role"></strong></p>
           </div>
 
-          <p id="message" class="message" role="status" aria-live="polite">Choose an action to begin.</p>
+          <p id="message" class="message" role="status" aria-live="polite">
+            Choose an action to begin.
+          </p>
         </div>
       </section>
     </main>
@@ -564,11 +858,15 @@
       const resetForm = document.getElementById('reset-form');
       const resetIntro = document.getElementById('reset-intro');
       const resetIdentifier = document.getElementById('reset-identifier');
-      const resetIdentifierField = document.getElementById('reset-identifier-field');
+      const resetIdentifierField = document.getElementById(
+        'reset-identifier-field',
+      );
       const resetTokenField = document.getElementById('reset-token-field');
       const resetToken = document.getElementById('reset-token');
       const newPasswordField = document.getElementById('new-password-field');
-      const confirmPasswordField = document.getElementById('confirm-password-field');
+      const confirmPasswordField = document.getElementById(
+        'confirm-password-field',
+      );
       const newPassword = document.getElementById('new-password');
       const confirmPassword = document.getElementById('confirm-password');
       const resetSubmit = document.getElementById('reset-submit');
@@ -594,9 +892,13 @@
           : 'Use your email or mobile number and password to access your Tomato account.';
         nameField.classList.toggle('hidden', !isRegistering);
         nameInput.required = isRegistering;
-        passwordInput.autocomplete = isRegistering ? 'new-password' : 'current-password';
+        passwordInput.autocomplete = isRegistering
+          ? 'new-password'
+          : 'current-password';
         submitButton.textContent = isRegistering ? 'Create account' : 'Sign in';
-        message.textContent = isRegistering ? 'Ready to create your delivery account.' : 'Ready to sign you in.';
+        message.textContent = isRegistering
+          ? 'Ready to create your delivery account.'
+          : 'Ready to sign you in.';
         message.className = 'message';
         account.classList.remove('visible');
         loginMode.classList.toggle('active', !isRegistering);
@@ -613,13 +915,15 @@
         roleTrigger.setAttribute('aria-expanded', String(isOpen));
       });
 
-      document.querySelectorAll('.role-option').forEach((option) => option.addEventListener('click', () => {
-        selectedRole = option.dataset.role;
-        roleMenu.classList.remove('visible');
-        roleTrigger.setAttribute('aria-expanded', 'false');
-        message.textContent = `${option.dataset.label} account selected.`;
-        message.className = 'message';
-      }));
+      document.querySelectorAll('.role-option').forEach((option) =>
+        option.addEventListener('click', () => {
+          selectedRole = option.dataset.role;
+          roleMenu.classList.remove('visible');
+          roleTrigger.setAttribute('aria-expanded', 'false');
+          message.textContent = `${option.dataset.label} account selected.`;
+          message.className = 'message';
+        }),
+      );
 
       document.addEventListener('click', (event) => {
         if (!event.target.closest('.name-control')) {
@@ -653,7 +957,8 @@
         newPassword.required = false;
         confirmPassword.required = false;
         resetSubmit.textContent = 'Send reset token';
-        resetIntro.textContent = 'Enter your email or mobile number to start a password reset.';
+        resetIntro.textContent =
+          'Enter your email or mobile number to start a password reset.';
         message.textContent = 'Ready to sign you in.';
         message.className = 'message';
       });
@@ -667,13 +972,19 @@
         try {
           if (resetTokenField.classList.contains('hidden')) {
             resetSubmit.textContent = 'Requesting...';
-            const response = await fetch(`${API_ROOT}/api/auth/password-reset/request`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ identifier: resetIdentifier.value })
-            });
+            const response = await fetch(
+              `${API_ROOT}/api/auth/password-reset/request`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ identifier: resetIdentifier.value }),
+              },
+            );
             const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(data.message || 'Unable to start password reset.');
+            if (!response.ok)
+              throw new Error(
+                data.message || 'Unable to start password reset.',
+              );
             resetToken.value = data.resetToken || '';
             resetIdentifierField.classList.add('hidden');
             resetTokenField.classList.remove('hidden');
@@ -694,24 +1005,34 @@
           }
 
           resetSubmit.textContent = 'Saving...';
-          const response = await fetch(`${API_ROOT}/api/auth/password-reset/confirm`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ resetToken: resetToken.value, password: newPassword.value })
-          });
+          const response = await fetch(
+            `${API_ROOT}/api/auth/password-reset/confirm`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                resetToken: resetToken.value,
+                password: newPassword.value,
+              }),
+            },
+          );
           const data = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(data.message || 'Unable to reset password.');
+          if (!response.ok)
+            throw new Error(data.message || 'Unable to reset password.');
           cancelReset.click();
-          message.textContent = 'Password reset successful. You can sign in now.';
+          message.textContent =
+            'Password reset successful. You can sign in now.';
           message.className = 'message success';
         } catch (error) {
-          message.textContent = error instanceof TypeError
-            ? 'The auth service is unavailable. Start it on port 5050.'
-            : error.message;
+          message.textContent =
+            error instanceof TypeError
+              ? 'The auth service is unavailable. Start it on port 5050.'
+              : error.message;
           message.className = 'message error';
         } finally {
           resetSubmit.disabled = false;
-          if (!resetTokenField.classList.contains('hidden')) resetSubmit.textContent = 'Set new password';
+          if (!resetTokenField.classList.contains('hidden'))
+            resetSubmit.textContent = 'Set new password';
         }
       });
 
@@ -721,18 +1042,22 @@
         message.className = 'message';
         account.classList.remove('visible');
         submitButton.disabled = true;
-        submitButton.textContent = mode === 'register' ? 'Creating...' : 'Checking...';
+        submitButton.textContent =
+          mode === 'register' ? 'Creating...' : 'Checking...';
 
         try {
-          const response = await fetch(`${API_ROOT}/api/auth/${mode}` , {
+          const isEmail = identifierInput.value.includes('@');
+          const response = await fetch(`${API_ROOT}/api/auth/${mode}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               name: nameInput.value,
-              identifier: identifierInput.value,
+              ...(isEmail
+                ? { email: identifierInput.value }
+                : { phone: identifierInput.value }),
               password: passwordInput.value,
-              role: mode === 'register' ? selectedRole : undefined
-            })
+              role: mode === 'register' ? selectedRole : undefined,
+            }),
           });
           const data = await response.json().catch(() => ({}));
 
@@ -743,24 +1068,33 @@
           localStorage.setItem('tomatoToken', data.token);
           localStorage.setItem('tomatoUser', JSON.stringify(data.user));
           document.getElementById('account-name').textContent = data.user.name;
-          document.getElementById('account-email').textContent = data.user.email || 'Not provided';
-          document.getElementById('account-phone').textContent = data.user.phone || 'Not provided';
-          document.getElementById('account-role').textContent = data.user.role || 'user';
-          accountHeading.textContent = mode === 'register' ? 'Your account is ready' : 'Welcome back';
+          document.getElementById('account-email').textContent =
+            data.user.email || 'Not provided';
+          document.getElementById('account-phone').textContent =
+            data.user.phone || 'Not provided';
+          document.getElementById('account-role').textContent =
+            data.user.role || 'user';
+          accountHeading.textContent =
+            mode === 'register' ? 'Your account is ready' : 'Welcome back';
           account.classList.add('visible');
-          message.textContent = mode === 'register' ? 'Registration successful.' : 'Login successful.';
+          message.textContent =
+            mode === 'register'
+              ? 'Registration successful.'
+              : 'Login successful.';
           message.className = 'message success';
           window.setTimeout(() => {
             window.location.href = 'dashboard/loginDashboard.html';
           }, 450);
         } catch (error) {
-          message.textContent = error instanceof TypeError
-            ? 'The auth service is unavailable. Start it on port 5050.'
-            : error.message;
+          message.textContent =
+            error instanceof TypeError
+              ? 'The auth service is unavailable. Start it on port 5050.'
+              : error.message;
           message.className = 'message error';
         } finally {
           submitButton.disabled = false;
-          submitButton.textContent = mode === 'register' ? 'Create account' : 'Sign in';
+          submitButton.textContent =
+            mode === 'register' ? 'Create account' : 'Sign in';
         }
       });
     </script>

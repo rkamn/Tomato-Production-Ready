@@ -1,3 +1,11 @@
+### Reach to project location and exacute below command
+
+eg. cd /Users/rakeshkumar/Documents/Projects/workspace/Web/Tomato-Production-Ready
+npm run build
+BUILD: npm run build
+START server : npm start
+CLOSE server : Ctrl + C
+
 # Tomato
 
 A Node.js/Express authentication service with a standalone browser UI and MongoDB Atlas persistence.

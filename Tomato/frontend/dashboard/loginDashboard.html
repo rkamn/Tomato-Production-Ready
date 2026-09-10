@@ -18,65 +18,386 @@
         --shadow: 0 20px 55px rgba(48, 40, 25, 0.12);
       }
 
-      * { box-sizing: border-box; }
-      body { margin: 0; min-height: 100vh; color: var(--ink); background: var(--paper); font-family: "Trebuchet MS", sans-serif; }
-      button, input { font: inherit; }
-      button { cursor: pointer; }
-      .app { min-height: 100vh; display: grid; grid-template-columns: 260px minmax(0, 1fr); }
-      .sidebar { display: flex; flex-direction: column; padding: 2rem 1.25rem; color: #f8f3e9; background: linear-gradient(160deg, #2e493a, #1e3027); }
-      .brand { padding: 0 1rem 2rem; font: 1.1rem Georgia, serif; letter-spacing: .18em; text-transform: uppercase; }
-      .profile-mini { display: flex; align-items: center; gap: .75rem; padding: 1rem; border-block: 1px solid rgba(255,255,255,.12); }
-      .avatar { display: grid; place-items: center; width: 3rem; height: 3rem; flex: 0 0 3rem; overflow: hidden; border-radius: 50%; color: #fff7e9; background: var(--tomato); font: 1.25rem Georgia, serif; }
-      .avatar img { width: 100%; height: 100%; object-fit: cover; }
-      .profile-mini strong { display: block; font-size: .88rem; }
-      .profile-mini small { display: block; margin-top: .25rem; color: rgba(248,243,233,.65); font-size: .72rem; }
-      nav { display: grid; gap: .35rem; margin-top: 2rem; }
-      .nav-item { display: flex; align-items: center; gap: .75rem; width: 100%; padding: .85rem 1rem; border: 0; border-radius: 2px; color: rgba(248,243,233,.72); background: transparent; text-align: left; }
-      .nav-item:hover, .nav-item.active { color: #fff; background: rgba(255,255,255,.12); }
-      .nav-icon { width: 1.2rem; text-align: center; color: #f0c36b; }
-      .sign-out { margin-top: auto; padding: .85rem 1rem; border: 1px solid rgba(255,255,255,.18); color: #f8f3e9; background: transparent; }
-      .main { min-width: 0; padding: clamp(1.5rem, 4vw, 3.8rem); }
-      .topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 2.5rem; }
-      .kicker { margin: 0 0 .6rem; color: var(--tomato-dark); font-size: .72rem; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
-      h1, h2, h3, p { margin-top: 0; }
-      h1 { margin-bottom: .6rem; font: clamp(2rem, 4vw, 3.4rem)/1 Georgia, serif; font-weight: 400; }
-      .welcome { max-width: 42rem; color: var(--muted); line-height: 1.6; }
-      .date { padding-top: .35rem; color: var(--muted); font-size: .78rem; white-space: nowrap; }
-      .overview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; }
-      .stat, .panel { border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
-      .stat { padding: 1.3rem; border-top: 3px solid var(--tomato); }
-      .stat-label { color: var(--muted); font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; }
-      .stat-value { margin: .55rem 0 .25rem; font: 2rem Georgia, serif; }
-      .stat-note { color: var(--green); font-size: .76rem; }
-      .content-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(260px, .8fr); gap: 1rem; margin-top: 1rem; }
-      .panel { padding: clamp(1.25rem, 3vw, 2rem); }
-      .panel h2 { margin-bottom: .35rem; font: 1.45rem Georgia, serif; font-weight: 400; }
-      .panel-intro { margin-bottom: 1.4rem; color: var(--muted); font-size: .86rem; line-height: 1.5; }
-      .activity { display: grid; gap: 0; }
-      .activity-row { display: grid; grid-template-columns: 2.3rem 1fr auto; align-items: center; gap: .7rem; padding: 1rem 0; border-top: 1px solid var(--line); }
-      .activity-mark { display: grid; place-items: center; width: 2rem; height: 2rem; color: var(--tomato-dark); background: #f6e3dc; }
-      .activity-row strong { display: block; font-size: .86rem; }
-      .activity-row small { display: block; margin-top: .25rem; color: var(--muted); font-size: .73rem; }
-      .activity-row time { color: var(--muted); font-size: .72rem; }
-      .profile-card { display: flex; align-items: center; gap: 1rem; padding-bottom: 1.4rem; border-bottom: 1px solid var(--line); }
-      .profile-card .avatar { width: 4.5rem; height: 4.5rem; flex-basis: 4.5rem; font-size: 1.75rem; }
-      .profile-card h3 { margin-bottom: .3rem; font: 1.35rem Georgia, serif; font-weight: 400; }
-      .profile-card p { margin: 0; color: var(--muted); font-size: .78rem; }
-      .details { display: grid; gap: .9rem; margin-top: 1.4rem; }
-      .detail { display: flex; justify-content: space-between; gap: 1rem; font-size: .8rem; }
-      .detail span:first-child { color: var(--muted); }
-      .settings { display: none; max-width: 48rem; }
-      .settings.visible { display: block; }
-      .settings-form { display: grid; gap: 1rem; max-width: 32rem; }
-      label { color: var(--muted); font-size: .73rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-      input { width: 100%; margin-top: .45rem; padding: .8rem; border: 1px solid var(--line); outline: none; color: var(--ink); background: #fffefa; }
-      input:focus { border-color: var(--tomato); box-shadow: 0 0 0 3px rgba(217,75,53,.14); }
-      .save { width: fit-content; padding: .8rem 1.2rem; border: 0; color: #fff; background: var(--tomato); }
-      .save:hover { background: var(--tomato-dark); }
-      .notice { min-height: 1.2rem; margin: 0; color: var(--green); font-size: .8rem; }
-      @media (max-width: 900px) { .overview { grid-template-columns: repeat(2, 1fr); } }
-      @media (max-width: 700px) { .app { display: block; } .sidebar { padding: 1rem; } .brand { padding-bottom: 1rem; } .profile-mini { padding-inline: 0; } nav { display: flex; overflow-x: auto; margin-top: 1rem; } .nav-item { width: auto; white-space: nowrap; } .sign-out { margin-top: 1rem; } .main { padding: 1.25rem; } .topbar { display: block; margin-bottom: 1.75rem; } .date { margin-top: 1rem; } .content-grid { grid-template-columns: 1fr; } }
-      @media (max-width: 440px) { .overview { grid-template-columns: 1fr 1fr; gap: .65rem; } .stat { padding: 1rem; } .stat-value { font-size: 1.5rem; } }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--ink);
+        background: var(--paper);
+        font-family: 'Trebuchet MS', sans-serif;
+      }
+      button,
+      input {
+        font: inherit;
+      }
+      button {
+        cursor: pointer;
+      }
+      .app {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: 260px minmax(0, 1fr);
+      }
+      .sidebar {
+        display: flex;
+        flex-direction: column;
+        padding: 2rem 1.25rem;
+        color: #f8f3e9;
+        background: linear-gradient(160deg, #2e493a, #1e3027);
+      }
+      .brand {
+        padding: 0 1rem 2rem;
+        font:
+          1.1rem Georgia,
+          serif;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+      .profile-mini {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 1rem;
+        border-block: 1px solid rgba(255, 255, 255, 0.12);
+      }
+      .avatar {
+        display: grid;
+        place-items: center;
+        width: 3rem;
+        height: 3rem;
+        flex: 0 0 3rem;
+        overflow: hidden;
+        border-radius: 50%;
+        color: #fff7e9;
+        background: var(--tomato);
+        font:
+          1.25rem Georgia,
+          serif;
+      }
+      .avatar img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .profile-mini strong {
+        display: block;
+        font-size: 0.88rem;
+      }
+      .profile-mini small {
+        display: block;
+        margin-top: 0.25rem;
+        color: rgba(248, 243, 233, 0.65);
+        font-size: 0.72rem;
+      }
+      nav {
+        display: grid;
+        gap: 0.35rem;
+        margin-top: 2rem;
+      }
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        width: 100%;
+        padding: 0.85rem 1rem;
+        border: 0;
+        border-radius: 2px;
+        color: rgba(248, 243, 233, 0.72);
+        background: transparent;
+        text-align: left;
+      }
+      .nav-item:hover,
+      .nav-item.active {
+        color: #fff;
+        background: rgba(255, 255, 255, 0.12);
+      }
+      .nav-icon {
+        width: 1.2rem;
+        text-align: center;
+        color: #f0c36b;
+      }
+      .sign-out {
+        margin-top: auto;
+        padding: 0.85rem 1rem;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        color: #f8f3e9;
+        background: transparent;
+      }
+      .main {
+        min-width: 0;
+        padding: clamp(1.5rem, 4vw, 3.8rem);
+      }
+      .topbar {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 2.5rem;
+      }
+      .kicker {
+        margin: 0 0 0.6rem;
+        color: var(--tomato-dark);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+      h1,
+      h2,
+      h3,
+      p {
+        margin-top: 0;
+      }
+      h1 {
+        margin-bottom: 0.6rem;
+        font:
+          clamp(2rem, 4vw, 3.4rem)/1 Georgia,
+          serif;
+        font-weight: 400;
+      }
+      .welcome {
+        max-width: 42rem;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+      .date {
+        padding-top: 0.35rem;
+        color: var(--muted);
+        font-size: 0.78rem;
+        white-space: nowrap;
+      }
+      .overview {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 1rem;
+      }
+      .stat,
+      .panel {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+      .stat {
+        padding: 1.3rem;
+        border-top: 3px solid var(--tomato);
+      }
+      .stat-label {
+        color: var(--muted);
+        font-size: 0.7rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+      .stat-value {
+        margin: 0.55rem 0 0.25rem;
+        font:
+          2rem Georgia,
+          serif;
+      }
+      .stat-note {
+        color: var(--green);
+        font-size: 0.76rem;
+      }
+      .content-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.8fr);
+        gap: 1rem;
+        margin-top: 1rem;
+      }
+      .panel {
+        padding: clamp(1.25rem, 3vw, 2rem);
+      }
+      .panel h2 {
+        margin-bottom: 0.35rem;
+        font:
+          1.45rem Georgia,
+          serif;
+        font-weight: 400;
+      }
+      .panel-intro {
+        margin-bottom: 1.4rem;
+        color: var(--muted);
+        font-size: 0.86rem;
+        line-height: 1.5;
+      }
+      .activity {
+        display: grid;
+        gap: 0;
+      }
+      .activity-row {
+        display: grid;
+        grid-template-columns: 2.3rem 1fr auto;
+        align-items: center;
+        gap: 0.7rem;
+        padding: 1rem 0;
+        border-top: 1px solid var(--line);
+      }
+      .activity-mark {
+        display: grid;
+        place-items: center;
+        width: 2rem;
+        height: 2rem;
+        color: var(--tomato-dark);
+        background: #f6e3dc;
+      }
+      .activity-row strong {
+        display: block;
+        font-size: 0.86rem;
+      }
+      .activity-row small {
+        display: block;
+        margin-top: 0.25rem;
+        color: var(--muted);
+        font-size: 0.73rem;
+      }
+      .activity-row time {
+        color: var(--muted);
+        font-size: 0.72rem;
+      }
+      .profile-card {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        padding-bottom: 1.4rem;
+        border-bottom: 1px solid var(--line);
+      }
+      .profile-card .avatar {
+        width: 4.5rem;
+        height: 4.5rem;
+        flex-basis: 4.5rem;
+        font-size: 1.75rem;
+      }
+      .profile-card h3 {
+        margin-bottom: 0.3rem;
+        font:
+          1.35rem Georgia,
+          serif;
+        font-weight: 400;
+      }
+      .profile-card p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+      .details {
+        display: grid;
+        gap: 0.9rem;
+        margin-top: 1.4rem;
+      }
+      .detail {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        font-size: 0.8rem;
+      }
+      .detail span:first-child {
+        color: var(--muted);
+      }
+      .settings {
+        display: none;
+        max-width: 48rem;
+      }
+      .settings.visible {
+        display: block;
+      }
+      .settings-form {
+        display: grid;
+        gap: 1rem;
+        max-width: 32rem;
+      }
+      label {
+        color: var(--muted);
+        font-size: 0.73rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      input {
+        width: 100%;
+        margin-top: 0.45rem;
+        padding: 0.8rem;
+        border: 1px solid var(--line);
+        outline: none;
+        color: var(--ink);
+        background: #fffefa;
+      }
+      input:focus {
+        border-color: var(--tomato);
+        box-shadow: 0 0 0 3px rgba(217, 75, 53, 0.14);
+      }
+      .save {
+        width: fit-content;
+        padding: 0.8rem 1.2rem;
+        border: 0;
+        color: #fff;
+        background: var(--tomato);
+      }
+      .save:hover {
+        background: var(--tomato-dark);
+      }
+      .notice {
+        min-height: 1.2rem;
+        margin: 0;
+        color: var(--green);
+        font-size: 0.8rem;
+      }
+      @media (max-width: 900px) {
+        .overview {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      @media (max-width: 700px) {
+        .app {
+          display: block;
+        }
+        .sidebar {
+          padding: 1rem;
+        }
+        .brand {
+          padding-bottom: 1rem;
+        }
+        .profile-mini {
+          padding-inline: 0;
+        }
+        nav {
+          display: flex;
+          overflow-x: auto;
+          margin-top: 1rem;
+        }
+        .nav-item {
+          width: auto;
+          white-space: nowrap;
+        }
+        .sign-out {
+          margin-top: 1rem;
+        }
+        .main {
+          padding: 1.25rem;
+        }
+        .topbar {
+          display: block;
+          margin-bottom: 1.75rem;
+        }
+        .date {
+          margin-top: 1rem;
+        }
+        .content-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      @media (max-width: 440px) {
+        .overview {
+          grid-template-columns: 1fr 1fr;
+          gap: 0.65rem;
+        }
+        .stat {
+          padding: 1rem;
+        }
+        .stat-value {
+          font-size: 1.5rem;
+        }
+      }
     </style>
   </head>
   <body>
@@ -85,12 +406,21 @@
         <div class="brand">Tomato / Kitchen</div>
         <div class="profile-mini">
           <div id="mini-avatar" class="avatar" aria-hidden="true"></div>
-          <div><strong id="mini-name"></strong><small id="mini-role"></small></div>
+          <div>
+            <strong id="mini-name"></strong><small id="mini-role"></small>
+          </div>
         </div>
         <nav aria-label="Dashboard navigation">
-          <button class="nav-item active" data-view="overview" type="button"><span class="nav-icon">+ </span>Overview</button>
-          <button class="nav-item" data-view="activity" type="button"><span class="nav-icon">~</span><span id="activity-label">Activity</span></button>
-          <button class="nav-item" data-view="settings" type="button"><span class="nav-icon">*</span>Settings</button>
+          <button class="nav-item active" data-view="overview" type="button">
+            <span class="nav-icon">+ </span>Overview
+          </button>
+          <button class="nav-item" data-view="activity" type="button">
+            <span class="nav-icon">~</span
+            ><span id="activity-label">Activity</span>
+          </button>
+          <button class="nav-item" data-view="settings" type="button">
+            <span class="nav-icon">*</span>Settings
+          </button>
         </nav>
         <button id="sign-out" class="sign-out" type="button">Sign out</button>
       </aside>
@@ -98,46 +428,165 @@
       <main class="main">
         <section id="overview-view">
           <div class="topbar">
-            <div><p id="role-kicker" class="kicker"></p><h1 id="welcome-heading"></h1><p id="welcome-copy" class="welcome"></p></div>
+            <div>
+              <p id="role-kicker" class="kicker"></p>
+              <h1 id="welcome-heading"></h1>
+              <p id="welcome-copy" class="welcome"></p>
+            </div>
             <time id="today" class="date"></time>
           </div>
           <div id="stats" class="overview"></div>
           <div class="content-grid">
-            <section class="panel"><h2 id="activity-heading"></h2><p id="activity-copy" class="panel-intro"></p><div id="activity" class="activity"></div></section>
-            <section class="panel"><h2>Profile snapshot</h2><p class="panel-intro">Your account details, ready when you need them.</p><div class="profile-card"><div id="profile-avatar" class="avatar" aria-hidden="true"></div><div><h3 id="profile-name"></h3><p id="profile-contact"></p></div></div><div class="details"><div class="detail"><span>Account role</span><strong id="profile-role"></strong></div><div class="detail"><span>Account ID</span><strong id="profile-id"></strong></div></div></section>
+            <section class="panel">
+              <h2 id="activity-heading"></h2>
+              <p id="activity-copy" class="panel-intro"></p>
+              <div id="activity" class="activity"></div>
+            </section>
+            <section class="panel">
+              <h2>Profile snapshot</h2>
+              <p class="panel-intro">
+                Your account details, ready when you need them.
+              </p>
+              <div class="profile-card">
+                <div
+                  id="profile-avatar"
+                  class="avatar"
+                  aria-hidden="true"
+                ></div>
+                <div>
+                  <h3 id="profile-name"></h3>
+                  <p id="profile-contact"></p>
+                </div>
+              </div>
+              <div class="details">
+                <div class="detail">
+                  <span>Account role</span><strong id="profile-role"></strong>
+                </div>
+                <div class="detail">
+                  <span>Account ID</span><strong id="profile-id"></strong>
+                </div>
+              </div>
+            </section>
           </div>
         </section>
 
-        <section id="settings-view" class="panel settings" aria-labelledby="settings-heading">
-          <p class="kicker">Account settings</p><h1 id="settings-heading">Make it yours.</h1><p class="panel-intro">Update the details shown across your Tomato dashboard.</p>
-          <form id="settings-form" class="settings-form"><label>Full name<input id="settings-name" name="name" required /></label><label>Profile image URL<input id="settings-image" name="image" type="url" placeholder="https://example.com/your-photo.jpg" /></label><button class="save" type="submit">Save profile</button><p id="settings-notice" class="notice" role="status"></p></form>
+        <section
+          id="settings-view"
+          class="panel settings"
+          aria-labelledby="settings-heading"
+        >
+          <p class="kicker">Account settings</p>
+          <h1 id="settings-heading">Make it yours.</h1>
+          <p class="panel-intro">
+            Update the details shown across your Tomato dashboard.
+          </p>
+          <form id="settings-form" class="settings-form">
+            <label
+              >Full name<input id="settings-name" name="name" required /></label
+            ><label
+              >Profile image URL<input
+                id="settings-image"
+                name="image"
+                type="url"
+                placeholder="https://example.com/your-photo.jpg" /></label
+            ><button class="save" type="submit">Save profile</button>
+            <p id="settings-notice" class="notice" role="status"></p>
+          </form>
         </section>
       </main>
     </div>
 
     <script>
-      const user = JSON.parse(localStorage.getItem('tomatoUser') || 'null') || {};
+      const user =
+        JSON.parse(localStorage.getItem('tomatoUser') || 'null') || {};
       if (!user) {
         window.location.href = '../index.html';
       }
 
       const roleViews = {
         customer: {
-          label: 'Customer dashboard', copy: 'Your orders, saved addresses, and delivery updates in one calm place.', activity: 'Recent orders', activityCopy: 'A quick look at what is moving through your kitchen.', stats: [['Open orders', '2', 'Both on track'], ['Saved addresses', '3', 'Ready for checkout'], ['Tomato points', '240', '18 earned this week'], ['Next delivery', '28 min', 'On its way']], events: [['#', 'Order #TM-1048', 'Arriving soon', '12 min ago'], ['+', 'Order #TM-1042', 'Delivered', 'Yesterday'], ['*', 'Address updated', 'Home address saved', '3 days ago']]
+          label: 'Customer dashboard',
+          copy: 'Your orders, saved addresses, and delivery updates in one calm place.',
+          activity: 'Recent orders',
+          activityCopy: 'A quick look at what is moving through your kitchen.',
+          stats: [
+            ['Open orders', '2', 'Both on track'],
+            ['Saved addresses', '3', 'Ready for checkout'],
+            ['Tomato points', '240', '18 earned this week'],
+            ['Next delivery', '28 min', 'On its way'],
+          ],
+          events: [
+            ['#', 'Order #TM-1048', 'Arriving soon', '12 min ago'],
+            ['+', 'Order #TM-1042', 'Delivered', 'Yesterday'],
+            ['*', 'Address updated', 'Home address saved', '3 days ago'],
+          ],
         },
         restaurant: {
-          label: 'Restaurant dashboard', copy: 'Keep service flowing with a clear view of your menu and incoming orders.', activity: 'Service pulse', activityCopy: 'The signals that matter during a busy shift.', stats: [['New orders', '18', '+12% today'], ['Preparing', '7', 'Kitchen is moving'], ['Menu items', '42', '3 need review'], ['Today\'s sales', '₹1,284', '+8% this week']], events: [['+', 'Order #TM-1051', 'New order received', '2 min ago'], ['#', 'Menu update', 'Paneer bowl marked available', '34 min ago'], ['*', 'Daily sales', 'You passed yesterday\'s total', '1 hr ago']]
+          label: 'Restaurant dashboard',
+          copy: 'Keep service flowing with a clear view of your menu and incoming orders.',
+          activity: 'Service pulse',
+          activityCopy: 'The signals that matter during a busy shift.',
+          stats: [
+            ['New orders', '18', '+12% today'],
+            ['Preparing', '7', 'Kitchen is moving'],
+            ['Menu items', '42', '3 need review'],
+            ["Today's sales", '₹1,284', '+8% this week'],
+          ],
+          events: [
+            ['+', 'Order #TM-1051', 'New order received', '2 min ago'],
+            ['#', 'Menu update', 'Paneer bowl marked available', '34 min ago'],
+            ['*', 'Daily sales', "You passed yesterday's total", '1 hr ago'],
+          ],
         },
         deliveryPartner: {
-          label: 'Delivery partner dashboard', copy: 'See your route, active deliveries, and today\'s progress at a glance.', activity: 'Delivery route', activityCopy: 'Your live shift, summarized for the next stop.', stats: [['Active deliveries', '3', '2 nearby'], ['Completed today', '14', '+3 vs yesterday'], ['Online time', '5h 20m', 'Shift in progress'], ['Today\'s earnings', '₹86.40', 'Paid tomorrow']], events: [['#', 'Order #TM-1048', 'Pickup confirmed', '6 min ago'], ['+', 'Order #TM-1041', 'Delivered successfully', '28 min ago'], ['*', 'Shift started', 'You are online', '5 hr ago']]
+          label: 'Delivery partner dashboard',
+          copy: "See your route, active deliveries, and today's progress at a glance.",
+          activity: 'Delivery route',
+          activityCopy: 'Your live shift, summarized for the next stop.',
+          stats: [
+            ['Active deliveries', '3', '2 nearby'],
+            ['Completed today', '14', '+3 vs yesterday'],
+            ['Online time', '5h 20m', 'Shift in progress'],
+            ["Today's earnings", '₹86.40', 'Paid tomorrow'],
+          ],
+          events: [
+            ['#', 'Order #TM-1048', 'Pickup confirmed', '6 min ago'],
+            ['+', 'Order #TM-1041', 'Delivered successfully', '28 min ago'],
+            ['*', 'Shift started', 'You are online', '5 hr ago'],
+          ],
         },
         admin: {
-          label: 'Admin dashboard', copy: 'A concise operational view of users, restaurants, and the delivery network.', activity: 'Platform activity', activityCopy: 'The latest changes across Tomato operations.', stats: [['Active users', '1,248', '+6.4% this month'], ['Restaurants', '86', '4 pending review'], ['Delivery partners', '214', '92 online now'], ['Orders today', '3,891', '+11% vs Monday']], events: [['+', 'Restaurant review', 'Saffron House submitted', '8 min ago'], ['#', 'Partner approved', 'Delivery profile verified', '42 min ago'], ['*', 'System report', 'Daily health check complete', '1 hr ago']]
-        }
+          label: 'Admin dashboard',
+          copy: 'A concise operational view of users, restaurants, and the delivery network.',
+          activity: 'Platform activity',
+          activityCopy: 'The latest changes across Tomato operations.',
+          stats: [
+            ['Active users', '1,248', '+6.4% this month'],
+            ['Restaurants', '86', '4 pending review'],
+            ['Delivery partners', '214', '92 online now'],
+            ['Orders today', '3,891', '+11% vs Monday'],
+          ],
+          events: [
+            ['+', 'Restaurant review', 'Saffron House submitted', '8 min ago'],
+            [
+              '#',
+              'Partner approved',
+              'Delivery profile verified',
+              '42 min ago',
+            ],
+            ['*', 'System report', 'Daily health check complete', '1 hr ago'],
+          ],
+        },
       };
       const role = roleViews[user.role] || roleViews.customer;
-      const displayRole = user.role === 'deliveryPartner' ? 'Delivery partner' : user.role;
-      const initials = (user.name || 'T').split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase();
+      const displayRole =
+        user.role === 'deliveryPartner' ? 'Delivery partner' : user.role;
+      const initials = (user.name || 'T')
+        .split(' ')
+        .map((part) => part[0])
+        .slice(0, 2)
+        .join('')
+        .toUpperCase();
 
       function renderAvatar(element) {
         element.textContent = initials;
@@ -145,41 +594,98 @@
           const image = new Image();
           image.alt = '';
           image.src = user.image;
-          image.onload = () => { element.textContent = ''; element.appendChild(image); };
+          image.onload = () => {
+            element.textContent = '';
+            element.appendChild(image);
+          };
         }
       }
 
-      function setText(id, value) { document.getElementById(id).textContent = value; }
+      function setText(id, value) {
+        document.getElementById(id).textContent = value;
+      }
       function renderDashboard() {
-        setText('mini-name', user.name || 'Tomato user'); setText('mini-role', displayRole); setText('role-kicker', role.label);
-        setText('welcome-heading', `Good to see you, ${(user.name || 'there').split(' ')[0]}.`); setText('welcome-copy', role.copy);
-        setText('activity-label', role.activity); setText('activity-heading', role.activity); setText('activity-copy', role.activityCopy);
-        setText('profile-name', user.name || 'Tomato user'); setText('profile-contact', user.email || user.phone || 'Contact details not provided'); setText('profile-role', displayRole); setText('profile-id', user.id ? `...${String(user.id).slice(-8)}` : 'Not available');
-        document.getElementById('stats').innerHTML = role.stats.map(([label, value, note]) => `<article class="stat"><span class="stat-label">${label}</span><div class="stat-value">${value}</div><span class="stat-note">${note}</span></article>`).join('');
-        document.getElementById('activity').innerHTML = role.events.map(([mark, title, detail, time]) => `<div class="activity-row"><span class="activity-mark">${mark}</span><div><strong>${title}</strong><small>${detail}</small></div><time>${time}</time></div>`).join('');
-        ['mini-avatar', 'profile-avatar'].forEach((id) => renderAvatar(document.getElementById(id)));
-        document.getElementById('settings-name').value = user.name || ''; document.getElementById('settings-image').value = user.image || '';
-        setText('today', new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'short', day: 'numeric' }).format(new Date()));
+        setText('mini-name', user.name || 'Tomato user');
+        setText('mini-role', displayRole);
+        setText('role-kicker', role.label);
+        setText(
+          'welcome-heading',
+          `Good to see you, ${(user.name || 'there').split(' ')[0]}.`,
+        );
+        setText('welcome-copy', role.copy);
+        setText('activity-label', role.activity);
+        setText('activity-heading', role.activity);
+        setText('activity-copy', role.activityCopy);
+        setText('profile-name', user.name || 'Tomato user');
+        setText(
+          'profile-contact',
+          user.email || user.phone || 'Contact details not provided',
+        );
+        setText('profile-role', displayRole);
+        setText(
+          'profile-id',
+          user.id ? `...${String(user.id).slice(-8)}` : 'Not available',
+        );
+        document.getElementById('stats').innerHTML = role.stats
+          .map(
+            ([label, value, note]) =>
+              `<article class="stat"><span class="stat-label">${label}</span><div class="stat-value">${value}</div><span class="stat-note">${note}</span></article>`,
+          )
+          .join('');
+        document.getElementById('activity').innerHTML = role.events
+          .map(
+            ([mark, title, detail, time]) =>
+              `<div class="activity-row"><span class="activity-mark">${mark}</span><div><strong>${title}</strong><small>${detail}</small></div><time>${time}</time></div>`,
+          )
+          .join('');
+        ['mini-avatar', 'profile-avatar'].forEach((id) =>
+          renderAvatar(document.getElementById(id)),
+        );
+        document.getElementById('settings-name').value = user.name || '';
+        document.getElementById('settings-image').value = user.image || '';
+        setText(
+          'today',
+          new Intl.DateTimeFormat(undefined, {
+            weekday: 'long',
+            month: 'short',
+            day: 'numeric',
+          }).format(new Date()),
+        );
       }
 
-      document.querySelectorAll('.nav-item').forEach((button) => button.addEventListener('click', () => {
-        document.querySelectorAll('.nav-item').forEach((item) => item.classList.toggle('active', item === button));
-        const isSettings = button.dataset.view === 'settings';
-        document.getElementById('overview-view').style.display = isSettings ? 'none' : 'block';
-        document.getElementById('settings-view').classList.toggle('visible', isSettings);
-      }));
-      document.getElementById('settings-form').addEventListener('submit', (event) => {
-        event.preventDefault();
-        user.name = document.getElementById('settings-name').value.trim() || user.name;
-        user.image = document.getElementById('settings-image').value.trim();
-        localStorage.setItem('tomatoUser', JSON.stringify(user));
-        renderDashboard();
-        setText('settings-notice', 'Profile saved.');
-      });
+      document.querySelectorAll('.nav-item').forEach((button) =>
+        button.addEventListener('click', () => {
+          document
+            .querySelectorAll('.nav-item')
+            .forEach((item) =>
+              item.classList.toggle('active', item === button),
+            );
+          const isSettings = button.dataset.view === 'settings';
+          document.getElementById('overview-view').style.display = isSettings
+            ? 'none'
+            : 'block';
+          document
+            .getElementById('settings-view')
+            .classList.toggle('visible', isSettings);
+        }),
+      );
+      document
+        .getElementById('settings-form')
+        .addEventListener('submit', (event) => {
+          event.preventDefault();
+          user.name =
+            document.getElementById('settings-name').value.trim() || user.name;
+          user.image = document.getElementById('settings-image').value.trim();
+          localStorage.setItem('tomatoUser', JSON.stringify(user));
+          renderDashboard();
+          setText('settings-notice', 'Profile saved.');
+        });
       document.getElementById('sign-out').addEventListener('click', () => {
         localStorage.removeItem('tomatoToken');
         localStorage.removeItem('tomatoUser');
-        window.alert('Thanks for Visiting Tomato Online\nVISIT AGAIN, WE ARE WAITING...');
+        window.alert(
+          'Thanks for Visiting Tomato Online\nVISIT AGAIN, WE ARE WAITING...',
+        );
         window.location.href = '../index.html';
       });
       renderDashboard();

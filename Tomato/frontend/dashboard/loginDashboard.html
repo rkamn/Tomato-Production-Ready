@@ -340,7 +340,9 @@
       }
       .menu-card-title {
         margin: 0;
-        font: 1.1rem Georgia, serif;
+        font:
+          1.1rem Georgia,
+          serif;
       }
       .menu-card-price {
         font-weight: 700;
@@ -532,7 +534,9 @@
         font-size: 1rem;
         line-height: 1;
         box-shadow: 0 8px 18px rgba(156, 76, 46, 0.08);
-        transition: transform 0.18s ease, box-shadow 0.18s ease;
+        transition:
+          transform 0.18s ease,
+          box-shadow 0.18s ease;
       }
       .edit-toggle:hover {
         background: #f8eee8;
@@ -601,7 +605,10 @@
         font-weight: 700;
         box-shadow: 0 16px 30px rgba(217, 75, 53, 0.2);
         overflow: hidden;
-        transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+        transition:
+          transform 0.18s ease,
+          box-shadow 0.18s ease,
+          filter 0.18s ease;
       }
       .save::before {
         content: '';
@@ -695,7 +702,9 @@
       }
       .modal-card h3 {
         margin: 0 0 0.65rem;
-        font: 1.5rem Georgia, serif;
+        font:
+          1.5rem Georgia,
+          serif;
         font-weight: 400;
         color: var(--tomato-dark);
       }
@@ -713,6 +722,78 @@
           opacity: 1;
           transform: translateY(0);
         }
+      }
+      .address-manager {
+        margin-top: 1.5rem;
+        border-top: 1px solid var(--line);
+        padding-top: 1.5rem;
+      }
+      .address-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1rem;
+      }
+      .address-list {
+        display: grid;
+        gap: 0.9rem;
+        margin-top: 1rem;
+      }
+      .address-item {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 0.9rem 1rem;
+        background: #fff;
+      }
+      .address-item-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.75rem;
+        margin-bottom: 0.5rem;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.25rem 0.6rem;
+        border-radius: 999px;
+        background: rgba(196, 61, 43, 0.1);
+        color: var(--tomato-dark);
+        font-size: 0.72rem;
+        font-weight: 700;
+      }
+      .address-item p {
+        margin: 0.15rem 0;
+        color: var(--muted);
+        line-height: 1.55;
+      }
+      .address-item-actions {
+        margin-top: 0.8rem;
+        display: flex;
+        gap: 0.6rem;
+      }
+      .address-item-actions button,
+      .address-submit {
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--ink);
+        padding: 0.5rem 0.8rem;
+        font-weight: 700;
+      }
+      .address-submit {
+        background: var(--tomato);
+        color: white;
+        border: 0;
+      }
+      .address-item-actions button:hover,
+      .address-submit:hover {
+        opacity: 0.96;
+      }
+      .address-empty {
+        padding: 1rem;
+        border: 1px dashed var(--line);
+        border-radius: 14px;
+        color: var(--muted);
       }
       .modal-actions {
         display: flex;
@@ -819,13 +900,32 @@
           </button>
 
           <div class="nav-group">
-            <button class="nav-item" data-view="settings" data-settings-section="profile" type="button">
+            <button
+              class="nav-item"
+              data-view="settings"
+              data-settings-section="profile"
+              type="button"
+            >
               <span class="nav-icon">*</span>Settings
               <span class="nav-chevron">▾</span>
             </button>
             <div class="nav-subnav" id="settings-subnav">
-              <button class="nav-subitem active" data-view="settings" data-settings-section="profile" type="button">Profile</button>
-              <button class="nav-subitem" data-view="settings" data-settings-section="account" type="button">Account</button>
+              <button
+                class="nav-subitem active"
+                data-view="settings"
+                data-settings-section="profile"
+                type="button"
+              >
+                Profile
+              </button>
+              <button
+                class="nav-subitem"
+                data-view="settings"
+                data-settings-section="account"
+                type="button"
+              >
+                Account
+              </button>
             </div>
           </div>
         </nav>
@@ -857,7 +957,7 @@
               <div id="notification-list" class="activity"></div>
             </section>
           </div>
-          <div class="content-grid"> 
+          <div class="content-grid">
             <section class="panel">
               <h2>Profile snapshot</h2>
               <p class="panel-intro">
@@ -890,7 +990,11 @@
                 <p class="kicker">Menu management</p>
                 <h2>Food items</h2>
               </div>
-              <button id="add-food-item-toggle" class="add-item-btn" type="button">
+              <button
+                id="add-food-item-toggle"
+                class="add-item-btn"
+                type="button"
+              >
                 Add food item
               </button>
             </div>
@@ -940,7 +1044,11 @@
                 <span>Total</span>
                 <span id="cart-total">₹0.00</span>
               </div>
-              <button id="place-order-btn" class="place-order-btn" type="button">
+              <button
+                id="place-order-btn"
+                class="place-order-btn"
+                type="button"
+              >
                 Place order
               </button>
             </div>
@@ -953,13 +1061,21 @@
           aria-labelledby="settings-heading"
         >
           <p class="kicker">Account settings</p>
-          <h1 id="settings-heading" style="display:inline-block; animation: fadeSlide 0.45s ease;">Make it yours.</h1>
+          <h1
+            id="settings-heading"
+            style="display: inline-block; animation: fadeSlide 0.45s ease"
+          >
+            Make it yours.
+          </h1>
           <p class="panel-intro">
             Update your contact details and profile photo with quick edits.
           </p>
 
           <form id="settings-form" class="settings-form">
-            <div class="settings-section active" data-settings-section="profile">
+            <div
+              class="settings-section active"
+              data-settings-section="profile"
+            >
               <div class="editable-field">
                 <div class="field-header">
                   <label for="settings-name">Full name</label>
@@ -990,7 +1106,12 @@
                   </button>
                 </div>
                 <div class="field-row">
-                  <input id="settings-email" name="email" type="email" readonly />
+                  <input
+                    id="settings-email"
+                    name="email"
+                    type="email"
+                    readonly
+                  />
                 </div>
               </div>
 
@@ -1007,12 +1128,7 @@
                   </button>
                 </div>
                 <div class="field-row">
-                  <input
-                    id="settings-phone"
-                    name="phone"
-                    type="tel"
-                    readonly
-                  />
+                  <input id="settings-phone" name="phone" type="tel" readonly />
                 </div>
               </div>
 
@@ -1029,8 +1145,18 @@
                   </button>
                 </div>
                 <div class="field-row">
-                  <input id="settings-photo" name="photo" type="file" accept="image/*" readonly />
-                  <div id="settings-photo-preview" class="photo-preview" aria-live="polite"></div>
+                  <input
+                    id="settings-photo"
+                    name="photo"
+                    type="file"
+                    accept="image/*"
+                    readonly
+                  />
+                  <div
+                    id="settings-photo-preview"
+                    class="photo-preview"
+                    aria-live="polite"
+                  ></div>
                 </div>
               </div>
             </div>
@@ -1055,6 +1181,30 @@
               </div>
             </div>
 
+            <div class="address-manager" id="customer-address-manager">
+              <div class="field-header">
+                <label>Delivery address</label>
+              </div>
+              <div class="address-grid" id="customer-address-form-grid">
+                <input type="hidden" id="address-id" />
+                <input id="address-label" type="text" placeholder="Label (Home / Work)" />
+                <input id="address-phone" type="tel" placeholder="Contact number" />
+                <input id="address-line1" type="text" placeholder="Street / house no" />
+                <input id="address-line2" type="text" placeholder="Landmark / apartment" />
+                <input id="address-city" type="text" placeholder="City" />
+                <input id="address-state" type="text" placeholder="State" />
+                <input id="address-postal-code" type="text" placeholder="Postal code" />
+              </div>
+              <div class="field-row" style="margin-top: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 1rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: var(--muted);">
+                  <input id="address-default" type="checkbox" />
+                  Set as default
+                </label>
+                <button class="address-submit" id="address-save-btn" type="button">Save address</button>
+              </div>
+              <div class="address-list" id="saved-address-list"></div>
+            </div>
+
             <button class="save" type="submit">Save profile</button>
             <p id="settings-notice" class="notice" role="status"></p>
           </form>
@@ -1062,27 +1212,45 @@
       </main>
     </div>
 
-    <div id="save-success-modal" class="modal-overlay" aria-live="polite" aria-modal="true" role="dialog">
+    <div
+      id="save-success-modal"
+      class="modal-overlay"
+      aria-live="polite"
+      aria-modal="true"
+      role="dialog"
+    >
       <div class="modal-card">
         <h3>Profile updated</h3>
-        <p>Your Tomato account details are saved and your dashboard is ready to use again.</p>
+        <p>
+          Your Tomato account details are saved and your dashboard is ready to
+          use again.
+        </p>
         <div class="modal-actions">
-          <button id="modal-back" class="modal-primary" type="button">Back to dashboard</button>
+          <button id="modal-back" class="modal-primary" type="button">
+            Back to dashboard
+          </button>
         </div>
       </div>
     </div>
 
     <script>
       const API_ROOT = 'http://localhost:5050';
-      const storedUser = JSON.parse(localStorage.getItem('tomatoUser') || 'null');
-      const user = storedUser && typeof storedUser === 'object' ? storedUser : null;
+      const storedUser = JSON.parse(
+        localStorage.getItem('tomatoUser') || 'null',
+      );
+      const user =
+        storedUser && typeof storedUser === 'object' ? storedUser : null;
 
       const normalizeRole = (role) => {
         const value = String(role || 'customer').trim();
         if (!value) return 'customer';
 
         const lowered = value.toLowerCase();
-        if (['deliverypartner', 'delivery_partner', 'delivery partner'].includes(lowered)) {
+        if (
+          ['deliverypartner', 'delivery_partner', 'delivery partner'].includes(
+            lowered,
+          )
+        ) {
           return 'deliveryPartner';
         }
         if (['restaurent', 'restaurant'].includes(lowered)) {
@@ -1164,7 +1332,12 @@
           ],
           events: [
             ['+', 'Restaurant review', 'Saffron House submitted', '8 min ago'],
-            ['#', 'Partner approved', 'Delivery profile verified', '42 min ago'],
+            [
+              '#',
+              'Partner approved',
+              'Delivery profile verified',
+              '42 min ago',
+            ],
             ['*', 'System report', 'Daily health check complete', '1 hr ago'],
           ],
         },
@@ -1172,7 +1345,9 @@
 
       const role = roleViews[normalizedRole] || roleViews.customer;
       const displayRole =
-        normalizedRole === 'deliveryPartner' ? 'Delivery partner' : normalizedRole.charAt(0).toUpperCase() + normalizedRole.slice(1);
+        normalizedRole === 'deliveryPartner'
+          ? 'Delivery partner'
+          : normalizedRole.charAt(0).toUpperCase() + normalizedRole.slice(1);
       const initials = (user?.name || 'T')
         .split(' ')
         .map((part) => part[0])
@@ -1189,7 +1364,9 @@
 
       function getRestaurantMenu() {
         try {
-          const saved = JSON.parse(localStorage.getItem('tomatoRestaurantMenu') || 'null');
+          const saved = JSON.parse(
+            localStorage.getItem('tomatoRestaurantMenu') || 'null',
+          );
           if (Array.isArray(saved) && saved.length) {
             return saved;
           }
@@ -1197,7 +1374,10 @@
           console.warn('Unable to parse restaurant menu', error);
         }
 
-        localStorage.setItem('tomatoRestaurantMenu', JSON.stringify(defaultRestaurantMenu));
+        localStorage.setItem(
+          'tomatoRestaurantMenu',
+          JSON.stringify(defaultRestaurantMenu),
+        );
         return defaultRestaurantMenu;
       }
 
@@ -1207,7 +1387,10 @@
         if (!menuList || !menuManager) return;
 
         const items = getRestaurantMenu();
-        menuManager.classList.toggle('visible', normalizedRole === 'restaurant');
+        menuManager.classList.toggle(
+          'visible',
+          normalizedRole === 'restaurant',
+        );
         menuList.innerHTML = items.length
           ? items
               .map(
@@ -1325,7 +1508,8 @@
           admin: '/api/admin/notifications',
         };
 
-        const endpoint = roleEndpoints[normalizedRole] || roleEndpoints.customer;
+        const endpoint =
+          roleEndpoints[normalizedRole] || roleEndpoints.customer;
         const list = document.getElementById('notification-list');
         if (!list) return;
 
@@ -1334,18 +1518,23 @@
             headers: { Authorization: `Bearer ${token}` },
           });
           const data = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(data.message || 'Unable to load notifications');
+          if (!response.ok)
+            throw new Error(data.message || 'Unable to load notifications');
 
-          const notifications = Array.isArray(data.notifications) ? data.notifications : [];
+          const notifications = Array.isArray(data.notifications)
+            ? data.notifications
+            : [];
 
           if (!notifications.length) {
-            list.innerHTML = '<div class="activity-row"><span class="activity-mark">!</span><div><strong>No notifications</strong><small>You are all caught up.</small></div><time>Now</time></div>';
+            list.innerHTML =
+              '<div class="activity-row"><span class="activity-mark">!</span><div><strong>No notifications</strong><small>You are all caught up.</small></div><time>Now</time></div>';
             return;
           }
 
           list.innerHTML = notifications
             .slice(0, 5)
-            .map((notification) => `
+            .map(
+              (notification) => `
               <div class="activity-row">
                 <span class="activity-mark">${notification.type === 'order' ? '#' : notification.type === 'menu' ? '+' : '!'}</span>
                 <div>
@@ -1354,11 +1543,82 @@
                 </div>
                 <time>${new Date(notification.createdAt || Date.now()).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</time>
               </div>
-            `)
+            `,
+            )
             .join('');
         } catch (error) {
-          list.innerHTML = '<div class="activity-row"><span class="activity-mark">!</span><div><strong>Notifications unavailable</strong><small>Please refresh or log in again.</small></div><time>Now</time></div>';
+          list.innerHTML =
+            '<div class="activity-row"><span class="activity-mark">!</span><div><strong>Notifications unavailable</strong><small>Please refresh or log in again.</small></div><time>Now</time></div>';
         }
+      }
+
+      async function fetchCustomerAddresses() {
+        const token = localStorage.getItem('tomatoToken');
+        if (!token || normalizedRole !== 'customer') return;
+
+        const list = document.getElementById('saved-address-list');
+        if (!list) return;
+
+        try {
+          const response = await fetch(`${API_ROOT}/api/customer/addresses`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.message || 'Unable to load addresses');
+
+          const addresses = Array.isArray(data.addresses) ? data.addresses : [];
+          if (!addresses.length) {
+            list.innerHTML = '<div class="address-empty">No saved addresses yet.</div>';
+            return;
+          }
+
+          list.innerHTML = addresses
+            .map(
+              (address) => `
+                <div class="address-item">
+                  <div class="address-item-header">
+                    <strong>${address.label || 'Home'}</strong>
+                    ${address.isDefault ? '<span class="badge">Default</span>' : ''}
+                  </div>
+                  <p>${address.line1 || ''}${address.line2 ? `, ${address.line2}` : ''}</p>
+                  <p>${address.city || ''}${address.state ? `, ${address.state}` : ''}${address.postalCode ? ` - ${address.postalCode}` : ''}</p>
+                  <p>${address.phone ? `Contact: ${address.phone}` : 'Contact not added'}</p>
+                  <div class="address-item-actions">
+                    <button type="button" data-address-action="edit" data-address-id="${address._id}" data-address-label="${escapeHtml(address.label || 'Home')}" data-address-phone="${escapeHtml(address.phone || '')}" data-address-line1="${escapeHtml(address.line1 || '')}" data-address-line2="${escapeHtml(address.line2 || '')}" data-address-city="${escapeHtml(address.city || '')}" data-address-state="${escapeHtml(address.state || '')}" data-address-postal-code="${escapeHtml(address.postalCode || '')}" data-address-default="${Boolean(address.isDefault)}">Edit</button>
+                  </div>
+                </div>
+              `,
+            )
+            .join('');
+
+          document.querySelectorAll('[data-address-action="edit"]').forEach((button) => {
+            button.addEventListener('click', () => {
+              const addressId = button.getAttribute('data-address-id') || '';
+              document.getElementById('address-id').value = addressId;
+              document.getElementById('address-label').value = button.getAttribute('data-address-label') || '';
+              document.getElementById('address-phone').value = button.getAttribute('data-address-phone') || '';
+              document.getElementById('address-line1').value = button.getAttribute('data-address-line1') || '';
+              document.getElementById('address-line2').value = button.getAttribute('data-address-line2') || '';
+              document.getElementById('address-city').value = button.getAttribute('data-address-city') || '';
+              document.getElementById('address-state').value = button.getAttribute('data-address-state') || '';
+              document.getElementById('address-postal-code').value = button.getAttribute('data-address-postal-code') || '';
+              document.getElementById('address-default').checked = button.getAttribute('data-address-default') === 'true';
+              document.getElementById('address-save-btn').textContent = 'Update address';
+            });
+          });
+        } catch (error) {
+          console.error('Customer address load failed', error);
+          list.innerHTML = '<div class="address-empty">Unable to load addresses right now.</div>';
+        }
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/\"/g, '&quot;')
+          .replace(/'/g, '&#039;');
       }
 
       async function fetchCustomerMenu() {
@@ -1370,14 +1630,16 @@
             headers: { Authorization: `Bearer ${token}` },
           });
           const data = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(data.message || 'Unable to load menu');
+          if (!response.ok)
+            throw new Error(data.message || 'Unable to load menu');
 
           const menu = Array.isArray(data.menu) ? data.menu : [];
           const grid = document.getElementById('customer-menu-grid');
           if (!grid) return;
 
           if (!menu.length) {
-            grid.innerHTML = '<div class="menu-card"><p>No food items available right now.</p></div>';
+            grid.innerHTML =
+              '<div class="menu-card"><p>No food items available right now.</p></div>';
             return;
           }
 
@@ -1402,13 +1664,20 @@
           document.querySelectorAll('.add-to-cart-btn').forEach((button) => {
             button.addEventListener('click', () => {
               const itemName = button.getAttribute('data-item-name');
-              const itemPrice = Number(button.getAttribute('data-item-price') || 0);
+              const itemPrice = Number(
+                button.getAttribute('data-item-price') || 0,
+              );
               const itemId = button.getAttribute('data-item-id');
               const existing = cart.find((entry) => entry.itemId === itemId);
               if (existing) {
                 existing.quantity += 1;
               } else {
-                cart.push({ itemId, name: itemName, price: itemPrice, quantity: 1 });
+                cart.push({
+                  itemId,
+                  name: itemName,
+                  price: itemPrice,
+                  quantity: 1,
+                });
               }
               renderCart();
             });
@@ -1417,7 +1686,8 @@
           console.error('Customer menu load failed', error);
           const grid = document.getElementById('customer-menu-grid');
           if (grid) {
-            grid.innerHTML = '<div class="menu-card"><p>Unable to load menu right now.</p></div>';
+            grid.innerHTML =
+              '<div class="menu-card"><p>Unable to load menu right now.</p></div>';
           }
         }
       }
@@ -1428,12 +1698,16 @@
         if (!cartItems || !cartTotal) return;
 
         if (!cart.length) {
-          cartItems.innerHTML = '<div class="menu-item-meta">Your cart is empty.</div>';
+          cartItems.innerHTML =
+            '<div class="menu-item-meta">Your cart is empty.</div>';
           cartTotal.textContent = '₹0.00';
           return;
         }
 
-        const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+        const total = cart.reduce(
+          (sum, item) => sum + item.price * item.quantity,
+          0,
+        );
         cartItems.innerHTML = cart
           .map(
             (item) => `
@@ -1456,7 +1730,8 @@
 
         if (!cart.length) {
           const notice = document.getElementById('settings-notice');
-          if (notice) notice.textContent = 'Add at least one food item to the cart.';
+          if (notice)
+            notice.textContent = 'Add at least one food item to the cart.';
           return;
         }
 
@@ -1477,17 +1752,21 @@
             }),
           });
           const data = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(data.message || 'Unable to place order');
+          if (!response.ok)
+            throw new Error(data.message || 'Unable to place order');
 
           cart.length = 0;
           renderCart();
           const notice = document.getElementById('settings-notice');
-          if (notice) notice.textContent = 'Order placed successfully and saved in MongoDB.';
+          if (notice)
+            notice.textContent =
+              'Order placed successfully and saved in MongoDB.';
           showSaveSuccessPopup();
         } catch (error) {
           const notice = document.getElementById('settings-notice');
           if (notice) {
-            notice.textContent = error instanceof Error ? error.message : 'Unable to place order.';
+            notice.textContent =
+              error instanceof Error ? error.message : 'Unable to place order.';
           }
         }
       }
@@ -1496,16 +1775,25 @@
         setText('mini-name', user?.name || 'Tomato user');
         setText('mini-role', displayRole);
         setText('role-kicker', role.label);
-        setText('welcome-heading', `Good to see you, ${(user?.name || 'there').split(' ')[0]}.`);
+        setText(
+          'welcome-heading',
+          `Good to see you, ${(user?.name || 'there').split(' ')[0]}.`,
+        );
         setText('welcome-copy', role.copy);
         setText('activity-label', role.activity);
         setText('activity-heading', role.activity);
         setText('activity-copy', role.activityCopy);
         setText('profile-name', user?.name || 'Tomato user');
-        setText('profile-contact', user?.email || user?.phone || 'Contact details not provided');
+        setText(
+          'profile-contact',
+          user?.email || user?.phone || 'Contact details not provided',
+        );
         setText('profile-role', displayRole);
         const userIdValue = user?.id || user?._id || user?.userId;
-        setText('profile-id', userIdValue ? `...${String(userIdValue).slice(-8)}` : 'Not available');
+        setText(
+          'profile-id',
+          userIdValue ? `...${String(userIdValue).slice(-8)}` : 'Not available',
+        );
 
         const statsContainer = document.getElementById('stats');
         if (statsContainer) {
@@ -1531,11 +1819,20 @@
 
         const customerPanel = document.getElementById('customer-menu-panel');
         if (customerPanel) {
-          customerPanel.classList.toggle('visible', normalizedRole === 'customer');
+          customerPanel.classList.toggle(
+            'visible',
+            normalizedRole === 'customer',
+          );
+        }
+
+        const customerAddressManager = document.getElementById('customer-address-manager');
+        if (customerAddressManager) {
+          customerAddressManager.style.display = normalizedRole === 'customer' ? 'block' : 'none';
         }
 
         if (normalizedRole === 'customer') {
           fetchCustomerMenu();
+          fetchCustomerAddresses();
         }
 
         fetchRoleNotifications();
@@ -1618,7 +1915,9 @@
         });
       }
 
-      const restaurantMenuForm = document.getElementById('restaurant-menu-form');
+      const restaurantMenuForm = document.getElementById(
+        'restaurant-menu-form',
+      );
       if (restaurantMenuForm) {
         restaurantMenuForm.addEventListener('submit', async (event) => {
           event.preventDefault();
@@ -1649,7 +1948,8 @@
               body: JSON.stringify({ name, quantity, price }),
             });
             const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(data.message || 'Unable to save menu item');
+            if (!response.ok)
+              throw new Error(data.message || 'Unable to save menu item');
 
             const items = getRestaurantMenu();
             items.unshift({
@@ -1665,7 +1965,10 @@
           } catch (error) {
             const notice = document.getElementById('settings-notice');
             if (notice) {
-              notice.textContent = error instanceof Error ? error.message : 'Unable to save menu item.';
+              notice.textContent =
+                error instanceof Error
+                  ? error.message
+                  : 'Unable to save menu item.';
             }
           }
         });
@@ -1683,13 +1986,16 @@
         const kicker = document.querySelector('#settings-view .kicker');
         if (!kicker) return;
 
-        kicker.textContent = sectionName === 'account' ? 'Account settings' : 'Profile settings';
+        kicker.textContent =
+          sectionName === 'account' ? 'Account settings' : 'Profile settings';
       }
 
       function closeSettingsPanel() {
         if (settingsSubnav) settingsSubnav.classList.remove('visible');
 
-        const settingsNavButton = document.querySelector('.nav-item[data-view="settings"]');
+        const settingsNavButton = document.querySelector(
+          '.nav-item[data-view="settings"]',
+        );
         if (settingsNavButton) settingsNavButton.classList.remove('active');
 
         const settingsView = document.getElementById('settings-view');
@@ -1705,16 +2011,26 @@
         if (overviewView) overviewView.style.display = 'none';
         if (settingsView) {
           settingsView.classList.add('visible');
-          settingsView.querySelectorAll('.settings-section').forEach((section) => {
-            section.classList.toggle('active', section.dataset.settingsSection === sectionName);
-          });
+          settingsView
+            .querySelectorAll('.settings-section')
+            .forEach((section) => {
+              section.classList.toggle(
+                'active',
+                section.dataset.settingsSection === sectionName,
+              );
+            });
         }
 
         document.querySelectorAll('.nav-subitem').forEach((item) => {
-          item.classList.toggle('active', item.dataset.settingsSection === sectionName);
+          item.classList.toggle(
+            'active',
+            item.dataset.settingsSection === sectionName,
+          );
         });
 
-        const settingsNavButton = document.querySelector('.nav-item[data-view="settings"]');
+        const settingsNavButton = document.querySelector(
+          '.nav-item[data-view="settings"]',
+        );
         if (settingsNavButton) {
           settingsNavButton.classList.add('active');
           settingsNavButton.dataset.settingsSection = sectionName;
@@ -1735,7 +2051,9 @@
           const settingsSection = button.dataset.settingsSection || 'profile';
 
           if (isSettings) {
-            const shouldOpen = !(settingsSubnav && settingsSubnav.classList.contains('visible'));
+            const shouldOpen = !(
+              settingsSubnav && settingsSubnav.classList.contains('visible')
+            );
             if (shouldOpen) {
               openSettingsSection(settingsSection);
             } else {
@@ -1767,11 +2085,15 @@
           }
 
           const saveButton = settingsForm.querySelector('.save');
-          const name = document.getElementById('settings-name')?.value.trim() || '';
-          const email = document.getElementById('settings-email')?.value.trim() || '';
-          const phone = document.getElementById('settings-phone')?.value.trim() || '';
+          const name =
+            document.getElementById('settings-name')?.value.trim() || '';
+          const email =
+            document.getElementById('settings-email')?.value.trim() || '';
+          const phone =
+            document.getElementById('settings-phone')?.value.trim() || '';
           const photoInput = document.getElementById('settings-photo');
-          const photoFile = photoInput && photoInput.files ? photoInput.files[0] : null;
+          const photoFile =
+            photoInput && photoInput.files ? photoInput.files[0] : null;
 
           if (saveButton) {
             saveButton.classList.add('is-saving');
@@ -1814,12 +2136,83 @@
           } catch (error) {
             const notice = document.getElementById('settings-notice');
             if (notice) {
-              notice.textContent = error instanceof Error ? error.message : 'Unable to save profile.';
+              notice.textContent =
+                error instanceof Error
+                  ? error.message
+                  : 'Unable to save profile.';
             }
           } finally {
             if (saveButton) {
               saveButton.classList.remove('is-saving');
               saveButton.textContent = 'Save profile';
+            }
+          }
+        });
+      }
+
+      const addressSaveButton = document.getElementById('address-save-btn');
+      if (addressSaveButton) {
+        addressSaveButton.addEventListener('click', async () => {
+          const token = localStorage.getItem('tomatoToken');
+          if (!token) {
+            window.location.href = '../index.html';
+            return;
+          }
+
+          const payload = {
+            label: document.getElementById('address-label')?.value.trim() || 'Home',
+            phone: document.getElementById('address-phone')?.value.trim() || '',
+            line1: document.getElementById('address-line1')?.value.trim() || '',
+            line2: document.getElementById('address-line2')?.value.trim() || '',
+            city: document.getElementById('address-city')?.value.trim() || '',
+            state: document.getElementById('address-state')?.value.trim() || '',
+            postalCode: document.getElementById('address-postal-code')?.value.trim() || '',
+            isDefault: document.getElementById('address-default')?.checked || false,
+          };
+
+          if (!payload.line1 || !payload.city) {
+            const notice = document.getElementById('settings-notice');
+            if (notice) notice.textContent = 'Street address and city are required.';
+            return;
+          }
+
+          const addressId = document.getElementById('address-id')?.value || '';
+          const method = addressId ? 'PUT' : 'POST';
+          const url = addressId
+            ? `${API_ROOT}/api/customer/addresses/${addressId}`
+            : `${API_ROOT}/api/customer/addresses`;
+
+          try {
+            const response = await fetch(url, {
+              method,
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify(payload),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.message || 'Unable to save address.');
+
+            document.getElementById('address-id').value = '';
+            document.getElementById('address-label').value = '';
+            document.getElementById('address-phone').value = '';
+            document.getElementById('address-line1').value = '';
+            document.getElementById('address-line2').value = '';
+            document.getElementById('address-city').value = '';
+            document.getElementById('address-state').value = '';
+            document.getElementById('address-postal-code').value = '';
+            document.getElementById('address-default').checked = false;
+            addressSaveButton.textContent = 'Save address';
+
+            const notice = document.getElementById('settings-notice');
+            if (notice) notice.textContent = 'Address saved to MongoDB.';
+            fetchCustomerAddresses();
+          } catch (error) {
+            const notice = document.getElementById('settings-notice');
+            if (notice) {
+              notice.textContent =
+                error instanceof Error ? error.message : 'Unable to save address.';
             }
           }
         });
@@ -1832,7 +2225,8 @@
         });
       }
 
-      const settingsPhotoInputForDisable = document.getElementById('settings-photo');
+      const settingsPhotoInputForDisable =
+        document.getElementById('settings-photo');
       if (settingsPhotoInputForDisable) {
         settingsPhotoInputForDisable.disabled = true;
       }
@@ -1843,7 +2237,9 @@
         signOutButton.addEventListener('click', () => {
           localStorage.removeItem('tomatoToken');
           localStorage.removeItem('tomatoUser');
-          window.alert('Thanks for Visiting Tomato Online\nVISIT AGAIN, WE ARE WAITING...');
+          window.alert(
+            'Thanks for Visiting Tomato Online\nVISIT AGAIN, WE ARE WAITING...',
+          );
           window.location.href = '../index.html';
         });
       }

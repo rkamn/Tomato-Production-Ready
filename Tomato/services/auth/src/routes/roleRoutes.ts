@@ -1,4 +1,5 @@
 import express, { Request, Response } from 'express';
+import Address from '../model/Address.js';
 import FoodItem from '../model/FoodItem.js';
 import Notification from '../model/Notification.js';
 import Order from '../model/Order.js';
@@ -82,6 +83,108 @@ const createRoleRouter = (role: 'customer' | 'restaurant' | 'deliveryPartner' | 
 	}
 
 	if (role === 'customer') {
+		router.get('/addresses', async (req: Request, res: Response) => {
+			try {
+				const user = (req as AuthenticatedRequest).user;
+				if (!user?.userId) {
+					return res.status(401).json({ message: 'Authentication required' });
+				}
+				const addresses = await Address.find({ userId: user.userId }).sort({ isDefault: -1, createdAt: -1 });
+				return res.json({ addresses });
+			} catch (error) {
+				console.error('Customer address fetch failed:', error);
+				return res.status(500).json({ message: 'Unable to fetch addresses' });
+			}
+		});
+
+		router.post('/addresses', async (req: Request, res: Response) => {
+			try {
+				const user = (req as AuthenticatedRequest).user;
+				if (!user?.userId) {
+					return res.status(401).json({ message: 'Authentication required' });
+				}
+
+				const payload = req.body ?? {};
+				const label = typeof payload.label === 'string' ? payload.label.trim() : 'Home';
+				const line1 = typeof payload.line1 === 'string' ? payload.line1.trim() : '';
+				const city = typeof payload.city === 'string' ? payload.city.trim() : '';
+				const phone = typeof payload.phone === 'string' ? payload.phone.trim() : '';
+				const state = typeof payload.state === 'string' ? payload.state.trim() : '';
+				const postalCode = typeof payload.postalCode === 'string' ? payload.postalCode.trim() : '';
+				const line2 = typeof payload.line2 === 'string' ? payload.line2.trim() : '';
+				const isDefault = Boolean(payload.isDefault);
+				const newAddress = {
+					userId: user.userId,
+					label: label || 'Home',
+					line1,
+					city,
+					state,
+					postalCode,
+					line2,
+					phone: phone || undefined,
+					isDefault,
+				};
+
+				if (!newAddress.line1 || !newAddress.city) {
+					return res.status(400).json({ message: 'Address line and city are required' });
+				}
+
+				if (isDefault) {
+					await Address.updateMany({ userId: user.userId }, { $set: { isDefault: false } });
+				}
+
+				const address = await Address.create(newAddress);
+				return res.status(201).json({ message: 'Address saved', address });
+			} catch (error) {
+				console.error('Customer address save failed:', error);
+				return res.status(500).json({ message: 'Unable to save address' });
+			}
+		});
+
+		router.put('/addresses/:addressId', async (req: Request, res: Response) => {
+			try {
+				const user = (req as AuthenticatedRequest).user;
+				if (!user?.userId) {
+					return res.status(401).json({ message: 'Authentication required' });
+				}
+				const addressId = req.params.addressId;
+				if (!addressId) {
+					return res.status(400).json({ message: 'Address ID is required' });
+				}
+
+				const payload = req.body ?? {};
+				const update: Record<string, unknown> = {};
+				for (const [key, value] of Object.entries(payload)) {
+					if (value !== undefined && value !== null && value !== '') {
+						update[key] = value;
+					}
+				}
+
+				if (Object.keys(update).length === 0) {
+					return res.status(400).json({ message: 'No address changes provided' });
+				}
+
+				if (update.isDefault === true) {
+					await Address.updateMany({ userId: user.userId }, { $set: { isDefault: false } });
+				}
+
+				const address = await Address.findOneAndUpdate(
+					{ _id: addressId, userId: user.userId },
+					{ $set: update },
+					{ new: true, runValidators: true },
+				);
+
+				if (!address) {
+					return res.status(404).json({ message: 'Address not found' });
+				}
+
+				return res.json({ message: 'Address updated', address });
+			} catch (error) {
+				console.error('Customer address update failed:', error);
+				return res.status(500).json({ message: 'Unable to update address' });
+			}
+		});
+
 		router.get('/notifications', async (req: Request, res: Response) => {
 			try {
 				const user = (req as AuthenticatedRequest).user;

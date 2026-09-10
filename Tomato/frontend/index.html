@@ -191,9 +191,10 @@
         position: relative;
         width: min(100%, 31rem);
         padding: clamp(1.8rem, 5vw, 3.2rem);
-        background: var(--panel);
+        background: rgba(255, 253, 248, 0.96);
         border: 1px solid rgba(222, 215, 202, 0.9);
-        box-shadow: var(--shadow);
+        box-shadow: 0 26px 70px rgba(44, 31, 19, 0.12);
+        backdrop-filter: blur(8px);
         animation: rise 500ms ease both;
       }
 
@@ -204,7 +205,7 @@
         left: 0;
         width: 4.5rem;
         height: 4px;
-        background: var(--tomato);
+        background: linear-gradient(90deg, var(--tomato), #f09c7d);
       }
 
       .eyebrow {
@@ -458,36 +459,57 @@
       }
 
       button {
+        position: relative;
         width: 100%;
         min-height: 3.2rem;
         border: 0;
         border-radius: 0;
         cursor: pointer;
         color: #fffaf2;
-        background: var(--ink);
+        background: linear-gradient(135deg, var(--ink), #3b3129);
         font:
           700 0.8rem 'Trebuchet MS',
           sans-serif;
         letter-spacing: 0.1em;
         text-transform: uppercase;
-        box-shadow: 0 8px 18px rgba(30, 29, 26, 0.1);
+        box-shadow: 0 12px 24px rgba(29, 25, 22, 0.12);
         transition:
-          background 160ms ease,
-          transform 160ms ease,
-          box-shadow 160ms ease;
+          background 180ms ease,
+          transform 180ms ease,
+          box-shadow 180ms ease,
+          filter 180ms ease;
+        overflow: hidden;
+      }
+
+      button::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(
+          120deg,
+          transparent 15%,
+          rgba(255, 255, 255, 0.25) 45%,
+          transparent 75%
+        );
+        transform: translateX(-120%);
+        transition: transform 500ms ease;
       }
 
       button:hover {
-        background: var(--tomato-dark);
-        box-shadow: 0 12px 24px rgba(169, 56, 42, 0.2);
+        background: linear-gradient(135deg, var(--tomato-dark), var(--tomato));
+        box-shadow: 0 16px 28px rgba(169, 56, 42, 0.22);
         transform: translateY(-2px);
+      }
+      button:hover::before {
+        transform: translateX(120%);
       }
       button:active {
         transform: translateY(1px);
       }
       button:disabled {
         cursor: wait;
-        opacity: 0.6;
+        opacity: 0.68;
+        transform: none;
       }
 
       .message {
@@ -627,6 +649,30 @@
         }
         .panel-wrap {
           padding: 1.25rem;
+        }
+        .panel {
+          padding: 1.35rem 1.1rem 1.5rem;
+        }
+      }
+
+      @media (max-width: 420px) {
+        .mode-switch {
+          gap: 0.5rem;
+        }
+        .mode-switch button {
+          padding-inline: 0.4rem;
+          font-size: 0.65rem;
+          letter-spacing: 0.08em;
+        }
+        .panel h2 {
+          font-size: 2.3rem;
+        }
+        input {
+          min-height: 2.9rem;
+          padding: 0.72rem 0.8rem;
+        }
+        .brand {
+          letter-spacing: 0.12em;
         }
       }
     </style>

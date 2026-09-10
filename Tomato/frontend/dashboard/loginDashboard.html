@@ -96,6 +96,10 @@
         gap: 0.35rem;
         margin-top: 2rem;
       }
+      .nav-group {
+        display: grid;
+        gap: 0.25rem;
+      }
       .nav-item {
         display: flex;
         align-items: center;
@@ -117,6 +121,32 @@
         width: 1.2rem;
         text-align: center;
         color: #f0c36b;
+      }
+      .nav-chevron {
+        margin-left: auto;
+        font-size: 0.8rem;
+        color: rgba(248, 243, 233, 0.8);
+      }
+      .nav-subnav {
+        display: none;
+        gap: 0.2rem;
+        margin: 0 0 0.2rem 1.2rem;
+        padding: 0.2rem 0;
+      }
+      .nav-subnav.visible {
+        display: grid;
+      }
+      .nav-subitem {
+        padding: 0.7rem 0.85rem;
+        border: 0;
+        color: rgba(248, 243, 233, 0.72);
+        background: rgba(255, 255, 255, 0.04);
+        text-align: left;
+      }
+      .nav-subitem.active,
+      .nav-subitem:hover {
+        color: #fff;
+        background: rgba(255, 255, 255, 0.12);
       }
       .sign-out {
         margin-top: auto;
@@ -198,6 +228,168 @@
       .stat-note {
         color: var(--green);
         font-size: 0.76rem;
+      }
+      .restaurant-menu-panel {
+        display: none;
+        margin-top: 1rem;
+        padding: 1.25rem;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+      .restaurant-menu-panel.visible {
+        display: block;
+      }
+      .menu-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 1rem;
+      }
+      .menu-header h2 {
+        margin: 0;
+        font:
+          1.4rem Georgia,
+          serif;
+        font-weight: 400;
+      }
+      .add-item-btn {
+        min-width: 160px;
+        padding: 0.72rem 1rem;
+        border: 0;
+        border-radius: 999px;
+        color: #fff;
+        background: linear-gradient(135deg, var(--tomato), var(--tomato-dark));
+      }
+      .restaurant-menu-form {
+        display: none;
+        margin-bottom: 1.2rem;
+        padding: 1rem;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.34);
+      }
+      .restaurant-menu-form.visible {
+        display: block;
+      }
+      .menu-fields {
+        display: grid;
+        grid-template-columns: minmax(0, 1.5fr) 110px 120px;
+        gap: 0.75rem;
+        margin-bottom: 0.8rem;
+      }
+      .restaurant-menu-form input {
+        margin-top: 0;
+      }
+      .menu-save {
+        width: fit-content;
+        min-width: 130px;
+        padding: 0.72rem 1rem;
+        border-radius: 999px;
+      }
+      .restaurant-menu-list {
+        display: grid;
+        gap: 0.75rem;
+      }
+      .menu-item-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1.5fr) 110px 120px;
+        gap: 0.75rem;
+        align-items: center;
+        padding: 0.9rem 1rem;
+        border: 1px solid var(--line);
+        background: #fffefb;
+      }
+      .menu-item-name {
+        font-weight: 700;
+      }
+      .menu-item-meta {
+        color: var(--muted);
+        font-size: 0.75rem;
+      }
+      .menu-item-price {
+        text-align: right;
+        font-weight: 700;
+        color: var(--green);
+      }
+      .customer-menu-panel {
+        display: none;
+        margin-top: 1rem;
+      }
+      .customer-menu-panel.visible {
+        display: block;
+      }
+      .customer-menu-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1rem;
+      }
+      .menu-card {
+        display: grid;
+        gap: 0.8rem;
+        padding: 1rem;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+      .menu-card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+      }
+      .menu-card-title {
+        margin: 0;
+        font: 1.1rem Georgia, serif;
+      }
+      .menu-card-price {
+        font-weight: 700;
+        color: var(--green);
+      }
+      .menu-card-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+      }
+      .add-to-cart-btn {
+        width: fit-content;
+        min-width: 120px;
+        padding: 0.7rem 1rem;
+        border-radius: 999px;
+      }
+      .cart-summary {
+        margin-top: 1rem;
+        padding: 1rem;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+      .cart-item {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.6rem 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .cart-item:last-child {
+        border-bottom: 0;
+      }
+      .cart-total {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-top: 0.8rem;
+        padding-top: 0.8rem;
+        border-top: 1px solid var(--line);
+        font-weight: 700;
+      }
+      .place-order-btn {
+        width: fit-content;
+        min-width: 170px;
+        margin-top: 1rem;
+        padding: 0.8rem 1.2rem;
+        border-radius: 999px;
       }
       .content-grid {
         display: grid;
@@ -301,10 +493,60 @@
       .settings.visible {
         display: block;
       }
+      .settings-section {
+        display: none;
+        gap: 1rem;
+        max-width: 38rem;
+      }
+      .settings-section.active {
+        display: grid;
+      }
       .settings-form {
         display: grid;
         gap: 1rem;
-        max-width: 32rem;
+        max-width: 38rem;
+      }
+      .editable-field {
+        display: grid;
+        gap: 0.45rem;
+      }
+      .field-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+      }
+      .field-header label {
+        margin: 0;
+      }
+      .edit-toggle {
+        display: inline-grid;
+        place-items: center;
+        width: 2.2rem;
+        height: 2.2rem;
+        padding: 0;
+        border: 1px solid rgba(217, 75, 53, 0.28);
+        border-radius: 50%;
+        color: var(--tomato-dark);
+        background: linear-gradient(180deg, #fffefa, #f8efe9);
+        font-size: 1rem;
+        line-height: 1;
+        box-shadow: 0 8px 18px rgba(156, 76, 46, 0.08);
+        transition: transform 0.18s ease, box-shadow 0.18s ease;
+      }
+      .edit-toggle:hover {
+        background: #f8eee8;
+        transform: translateY(-1px);
+        box-shadow: 0 10px 18px rgba(156, 76, 46, 0.12);
+      }
+      .field-row {
+        display: flex;
+        align-items: center;
+        gap: 0.65rem;
+      }
+      .field-row input {
+        width: 100%;
+        margin-top: 0;
       }
       label {
         color: var(--muted);
@@ -326,21 +568,178 @@
         border-color: var(--tomato);
         box-shadow: 0 0 0 3px rgba(217, 75, 53, 0.14);
       }
+      input[readonly] {
+        background: #f8f5f0;
+        color: var(--muted);
+      }
+      .photo-preview {
+        display: none;
+        width: 4.5rem;
+        height: 4.5rem;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        background: #f8f5f0;
+      }
+      .photo-preview.visible {
+        display: block;
+      }
+      .photo-preview img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
       .save {
+        position: relative;
         width: fit-content;
+        min-width: 170px;
         padding: 0.8rem 1.2rem;
         border: 0;
         color: #fff;
-        background: var(--tomato);
+        background: linear-gradient(135deg, var(--tomato), var(--tomato-dark));
+        border-radius: 999px;
+        letter-spacing: 0.03em;
+        font-weight: 700;
+        box-shadow: 0 16px 30px rgba(217, 75, 53, 0.2);
+        overflow: hidden;
+        transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+      }
+      .save::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(
+          120deg,
+          transparent 18%,
+          rgba(255, 255, 255, 0.28) 48%,
+          transparent 78%
+        );
+        transform: translateX(-120%);
+        transition: transform 500ms ease;
       }
       .save:hover {
-        background: var(--tomato-dark);
+        background: linear-gradient(135deg, var(--tomato-dark), var(--tomato));
+        transform: translateY(-2px);
+        box-shadow: 0 18px 30px rgba(169, 56, 42, 0.24);
+      }
+      .save:hover::before {
+        transform: translateX(120%);
+      }
+      .save:active {
+        transform: translateY(1px);
+      }
+      .save.is-saving {
+        opacity: 0.8;
+        pointer-events: none;
+        animation: buttonPulse 0.8s ease-in-out infinite alternate;
+      }
+      @keyframes buttonPulse {
+        from {
+          transform: scale(1);
+          box-shadow: 0 16px 30px rgba(217, 75, 53, 0.2);
+        }
+        to {
+          transform: scale(1.02);
+          box-shadow: 0 18px 32px rgba(217, 75, 53, 0.26);
+        }
       }
       .notice {
         min-height: 1.2rem;
         margin: 0;
         color: var(--green);
         font-size: 0.8rem;
+      }
+      #settings-view {
+        border-radius: 20px;
+      }
+      .settings-form {
+        padding-top: 0.5rem;
+      }
+      .editable-field {
+        padding: 1rem 1rem 0.95rem;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.32);
+      }
+      .field-row input {
+        border-radius: 10px;
+      }
+      .modal-overlay {
+        position: fixed;
+        inset: 0;
+        display: none;
+        place-items: center;
+        background: rgba(28, 32, 25, 0.45);
+        z-index: 20;
+      }
+      .modal-overlay.visible {
+        display: grid;
+      }
+      .modal-card {
+        width: min(420px, calc(100vw - 2rem));
+        padding: 1.5rem 1.4rem;
+        border: 1px solid var(--line);
+        background: linear-gradient(180deg, #fffefa, #f9f3ec);
+        box-shadow: var(--shadow);
+        border-radius: 18px;
+        animation: modalIn 0.2s ease;
+      }
+      @keyframes modalIn {
+        from {
+          opacity: 0;
+          transform: translateY(12px) scale(0.98);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+        }
+      }
+      .modal-card h3 {
+        margin: 0 0 0.65rem;
+        font: 1.5rem Georgia, serif;
+        font-weight: 400;
+        color: var(--tomato-dark);
+      }
+      .modal-card p {
+        margin: 0 0 1.2rem;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+      @keyframes fadeSlide {
+        from {
+          opacity: 0;
+          transform: translateY(-8px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.7rem;
+      }
+      .modal-primary,
+      .modal-cancel {
+        padding: 0.7rem 1.1rem;
+        border-radius: 999px;
+        font-weight: 700;
+      }
+      .modal-primary {
+        border: 0;
+        color: #fff;
+        background: var(--tomato);
+      }
+      .modal-primary:hover {
+        background: var(--tomato-dark);
+      }
+      .modal-cancel {
+        border: 1px solid var(--line);
+        color: var(--ink);
+        background: #fff;
+      }
+      .modal-cancel:hover {
+        background: #f7f3ec;
       }
       @media (max-width: 900px) {
         .overview {
@@ -418,9 +817,17 @@
             <span class="nav-icon">~</span
             ><span id="activity-label">Activity</span>
           </button>
-          <button class="nav-item" data-view="settings" type="button">
-            <span class="nav-icon">*</span>Settings
-          </button>
+
+          <div class="nav-group">
+            <button class="nav-item" data-view="settings" data-settings-section="profile" type="button">
+              <span class="nav-icon">*</span>Settings
+              <span class="nav-chevron">▾</span>
+            </button>
+            <div class="nav-subnav" id="settings-subnav">
+              <button class="nav-subitem active" data-view="settings" data-settings-section="profile" type="button">Profile</button>
+              <button class="nav-subitem" data-view="settings" data-settings-section="account" type="button">Account</button>
+            </div>
+          </div>
         </nav>
         <button id="sign-out" class="sign-out" type="button">Sign out</button>
       </aside>
@@ -442,6 +849,15 @@
               <p id="activity-copy" class="panel-intro"></p>
               <div id="activity" class="activity"></div>
             </section>
+            <section class="panel">
+              <h2>Notifications</h2>
+              <p class="panel-intro">
+                Service alerts for your account and recent activity.
+              </p>
+              <div id="notification-list" class="activity"></div>
+            </section>
+          </div>
+          <div class="content-grid"> 
             <section class="panel">
               <h2>Profile snapshot</h2>
               <p class="panel-intro">
@@ -468,6 +884,67 @@
               </div>
             </section>
           </div>
+          <section id="restaurant-menu-manager" class="restaurant-menu-panel">
+            <div class="menu-header">
+              <div>
+                <p class="kicker">Menu management</p>
+                <h2>Food items</h2>
+              </div>
+              <button id="add-food-item-toggle" class="add-item-btn" type="button">
+                Add food item
+              </button>
+            </div>
+
+            <form id="restaurant-menu-form" class="restaurant-menu-form">
+              <div class="menu-fields">
+                <input
+                  id="menu-item-name"
+                  type="text"
+                  placeholder="Food item"
+                  required
+                />
+                <input
+                  id="menu-item-quantity"
+                  type="number"
+                  min="1"
+                  placeholder="Qty"
+                  required
+                />
+                <input
+                  id="menu-item-price"
+                  type="number"
+                  min="1"
+                  step="0.01"
+                  placeholder="Price"
+                  required
+                />
+              </div>
+              <button class="save menu-save" type="submit">Save item</button>
+            </form>
+
+            <div id="restaurant-menu-list" class="restaurant-menu-list"></div>
+          </section>
+
+          <section id="customer-menu-panel" class="customer-menu-panel">
+            <div class="menu-header">
+              <div>
+                <p class="kicker">Order online</p>
+                <h2>Foods available</h2>
+              </div>
+            </div>
+            <div id="customer-menu-grid" class="customer-menu-grid"></div>
+            <div class="cart-summary">
+              <h3>Cart</h3>
+              <div id="cart-items"></div>
+              <div class="cart-total">
+                <span>Total</span>
+                <span id="cart-total">₹0.00</span>
+              </div>
+              <button id="place-order-btn" class="place-order-btn" type="button">
+                Place order
+              </button>
+            </div>
+          </section>
         </section>
 
         <section
@@ -476,33 +953,152 @@
           aria-labelledby="settings-heading"
         >
           <p class="kicker">Account settings</p>
-          <h1 id="settings-heading">Make it yours.</h1>
+          <h1 id="settings-heading" style="display:inline-block; animation: fadeSlide 0.45s ease;">Make it yours.</h1>
           <p class="panel-intro">
-            Update the details shown across your Tomato dashboard.
+            Update your contact details and profile photo with quick edits.
           </p>
+
           <form id="settings-form" class="settings-form">
-            <label
-              >Full name<input id="settings-name" name="name" required /></label
-            ><label
-              >Profile image URL<input
-                id="settings-image"
-                name="image"
-                type="url"
-                placeholder="https://example.com/your-photo.jpg" /></label
-            ><button class="save" type="submit">Save profile</button>
+            <div class="settings-section active" data-settings-section="profile">
+              <div class="editable-field">
+                <div class="field-header">
+                  <label for="settings-name">Full name</label>
+                  <button
+                    class="edit-toggle"
+                    type="button"
+                    data-target="settings-name"
+                    aria-label="Edit full name"
+                  >
+                    ✎
+                  </button>
+                </div>
+                <div class="field-row">
+                  <input id="settings-name" name="name" required readonly />
+                </div>
+              </div>
+
+              <div class="editable-field">
+                <div class="field-header">
+                  <label for="settings-email">Email</label>
+                  <button
+                    class="edit-toggle"
+                    type="button"
+                    data-target="settings-email"
+                    aria-label="Edit email"
+                  >
+                    ✎
+                  </button>
+                </div>
+                <div class="field-row">
+                  <input id="settings-email" name="email" type="email" readonly />
+                </div>
+              </div>
+
+              <div class="editable-field">
+                <div class="field-header">
+                  <label for="settings-phone">Mobile number</label>
+                  <button
+                    class="edit-toggle"
+                    type="button"
+                    data-target="settings-phone"
+                    aria-label="Edit mobile number"
+                  >
+                    ✎
+                  </button>
+                </div>
+                <div class="field-row">
+                  <input
+                    id="settings-phone"
+                    name="phone"
+                    type="tel"
+                    readonly
+                  />
+                </div>
+              </div>
+
+              <div class="editable-field">
+                <div class="field-header">
+                  <label for="settings-photo">Profile photo</label>
+                  <button
+                    class="edit-toggle"
+                    type="button"
+                    data-target="settings-photo"
+                    aria-label="Upload profile photo"
+                  >
+                    ✎
+                  </button>
+                </div>
+                <div class="field-row">
+                  <input id="settings-photo" name="photo" type="file" accept="image/*" readonly />
+                  <div id="settings-photo-preview" class="photo-preview" aria-live="polite"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-section" data-settings-section="account">
+              <div class="editable-field">
+                <div class="field-header">
+                  <label>Account role</label>
+                </div>
+                <div class="field-row">
+                  <input value="" id="settings-role-readonly" readonly />
+                </div>
+              </div>
+
+              <div class="editable-field">
+                <div class="field-header">
+                  <label>Account ID</label>
+                </div>
+                <div class="field-row">
+                  <input value="" id="settings-account-id" readonly />
+                </div>
+              </div>
+            </div>
+
+            <button class="save" type="submit">Save profile</button>
             <p id="settings-notice" class="notice" role="status"></p>
           </form>
         </section>
       </main>
     </div>
 
+    <div id="save-success-modal" class="modal-overlay" aria-live="polite" aria-modal="true" role="dialog">
+      <div class="modal-card">
+        <h3>Profile updated</h3>
+        <p>Your Tomato account details are saved and your dashboard is ready to use again.</p>
+        <div class="modal-actions">
+          <button id="modal-back" class="modal-primary" type="button">Back to dashboard</button>
+        </div>
+      </div>
+    </div>
+
     <script>
-      const user =
-        JSON.parse(localStorage.getItem('tomatoUser') || 'null') || {};
-      if (!user) {
+      const API_ROOT = 'http://localhost:5050';
+      const storedUser = JSON.parse(localStorage.getItem('tomatoUser') || 'null');
+      const user = storedUser && typeof storedUser === 'object' ? storedUser : null;
+
+      const normalizeRole = (role) => {
+        const value = String(role || 'customer').trim();
+        if (!value) return 'customer';
+
+        const lowered = value.toLowerCase();
+        if (['deliverypartner', 'delivery_partner', 'delivery partner'].includes(lowered)) {
+          return 'deliveryPartner';
+        }
+        if (['restaurent', 'restaurant'].includes(lowered)) {
+          return 'restaurant';
+        }
+        if (['customer', 'admin'].includes(lowered)) {
+          return lowered;
+        }
+        return lowered;
+      };
+
+      if (!user || !user.role) {
         window.location.href = '../index.html';
       }
 
+      const normalizedRole = normalizeRole(user?.role);
       const roleViews = {
         customer: {
           label: 'Customer dashboard',
@@ -568,29 +1164,72 @@
           ],
           events: [
             ['+', 'Restaurant review', 'Saffron House submitted', '8 min ago'],
-            [
-              '#',
-              'Partner approved',
-              'Delivery profile verified',
-              '42 min ago',
-            ],
+            ['#', 'Partner approved', 'Delivery profile verified', '42 min ago'],
             ['*', 'System report', 'Daily health check complete', '1 hr ago'],
           ],
         },
       };
-      const role = roleViews[user.role] || roleViews.customer;
+
+      const role = roleViews[normalizedRole] || roleViews.customer;
       const displayRole =
-        user.role === 'deliveryPartner' ? 'Delivery partner' : user.role;
-      const initials = (user.name || 'T')
+        normalizedRole === 'deliveryPartner' ? 'Delivery partner' : normalizedRole.charAt(0).toUpperCase() + normalizedRole.slice(1);
+      const initials = (user?.name || 'T')
         .split(' ')
         .map((part) => part[0])
         .slice(0, 2)
         .join('')
         .toUpperCase();
 
+      const defaultRestaurantMenu = [
+        { id: 1, name: 'Paneer Bowl', quantity: 12, price: 249 },
+        { id: 2, name: 'Classic Burger', quantity: 8, price: 199 },
+        { id: 3, name: 'Tomato Pasta', quantity: 5, price: 289 },
+      ];
+      const cart = [];
+
+      function getRestaurantMenu() {
+        try {
+          const saved = JSON.parse(localStorage.getItem('tomatoRestaurantMenu') || 'null');
+          if (Array.isArray(saved) && saved.length) {
+            return saved;
+          }
+        } catch (error) {
+          console.warn('Unable to parse restaurant menu', error);
+        }
+
+        localStorage.setItem('tomatoRestaurantMenu', JSON.stringify(defaultRestaurantMenu));
+        return defaultRestaurantMenu;
+      }
+
+      function renderRestaurantMenu() {
+        const menuList = document.getElementById('restaurant-menu-list');
+        const menuManager = document.getElementById('restaurant-menu-manager');
+        if (!menuList || !menuManager) return;
+
+        const items = getRestaurantMenu();
+        menuManager.classList.toggle('visible', normalizedRole === 'restaurant');
+        menuList.innerHTML = items.length
+          ? items
+              .map(
+                (item) => `
+                  <div class="menu-item-row">
+                    <div>
+                      <div class="menu-item-name">${item.name}</div>
+                      <div class="menu-item-meta">Qty: ${item.quantity}</div>
+                    </div>
+                    <div class="menu-item-meta">In stock</div>
+                    <div class="menu-item-price">₹${Number(item.price).toFixed(2)}</div>
+                  </div>
+                `,
+              )
+              .join('')
+          : '<div class="menu-item-row"><div class="menu-item-meta">No food items added yet.</div><div></div><div class="menu-item-price">₹0.00</div></div>';
+      }
+
       function renderAvatar(element) {
+        if (!element) return;
         element.textContent = initials;
-        if (user.image) {
+        if (user && user.image) {
           const image = new Image();
           image.alt = '';
           image.src = user.image;
@@ -602,47 +1241,325 @@
       }
 
       function setText(id, value) {
-        document.getElementById(id).textContent = value;
+        const element = document.getElementById(id);
+        if (!element) return;
+        element.textContent = value;
       }
+
+      function renderPhotoPreview(target, src) {
+        const preview = document.getElementById(target);
+        if (!preview) return;
+        preview.innerHTML = '';
+        if (!src) {
+          preview.classList.remove('visible');
+          return;
+        }
+        const image = new Image();
+        image.src = src;
+        image.alt = 'Profile preview';
+        image.onload = () => {
+          preview.innerHTML = '';
+          preview.appendChild(image);
+          preview.classList.add('visible');
+        };
+        preview.classList.add('visible');
+      }
+
+      function setFieldsEditable(isEditable) {
+        const editableFields = [
+          document.getElementById('settings-name'),
+          document.getElementById('settings-email'),
+          document.getElementById('settings-phone'),
+          document.getElementById('settings-photo'),
+        ];
+
+        editableFields.forEach((field) => {
+          if (!field) return;
+          if (field.type === 'file') {
+            field.disabled = !isEditable;
+            return;
+          }
+          field.readOnly = !isEditable;
+        });
+
+        document.querySelectorAll('.edit-toggle').forEach((button) => {
+          const field = document.getElementById(button.dataset.target);
+          if (!field) return;
+          button.textContent = isEditable ? '✓' : '✎';
+        });
+      }
+
+      function showSaveSuccessPopup() {
+        const modal = document.getElementById('save-success-modal');
+        if (!modal) return;
+        modal.classList.add('visible');
+      }
+
+      function closeSaveSuccessPopup() {
+        const modal = document.getElementById('save-success-modal');
+        if (!modal) return;
+        modal.classList.remove('visible');
+        document.querySelectorAll('.nav-item').forEach((item) => {
+          item.classList.toggle('active', item.dataset.view === 'overview');
+        });
+        const overviewView = document.getElementById('overview-view');
+        const settingsView = document.getElementById('settings-view');
+        if (overviewView) overviewView.style.display = 'block';
+        if (settingsView) settingsView.classList.remove('visible');
+      }
+
+      function goBackToDashboard() {
+        closeSaveSuccessPopup();
+        const notice = document.getElementById('settings-notice');
+        if (notice) notice.textContent = '';
+      }
+
+      async function fetchRoleNotifications() {
+        const token = localStorage.getItem('tomatoToken');
+        if (!token) return;
+
+        const roleEndpoints = {
+          customer: '/api/customer/notifications',
+          restaurant: '/api/restaurant/notifications',
+          deliveryPartner: '/api/rider/notifications',
+          admin: '/api/admin/notifications',
+        };
+
+        const endpoint = roleEndpoints[normalizedRole] || roleEndpoints.customer;
+        const list = document.getElementById('notification-list');
+        if (!list) return;
+
+        try {
+          const response = await fetch(`${API_ROOT}${endpoint}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.message || 'Unable to load notifications');
+
+          const notifications = Array.isArray(data.notifications) ? data.notifications : [];
+
+          if (!notifications.length) {
+            list.innerHTML = '<div class="activity-row"><span class="activity-mark">!</span><div><strong>No notifications</strong><small>You are all caught up.</small></div><time>Now</time></div>';
+            return;
+          }
+
+          list.innerHTML = notifications
+            .slice(0, 5)
+            .map((notification) => `
+              <div class="activity-row">
+                <span class="activity-mark">${notification.type === 'order' ? '#' : notification.type === 'menu' ? '+' : '!'}</span>
+                <div>
+                  <strong>${notification.title || 'Tomato update'}</strong>
+                  <small>${notification.message || 'Service update'}</small>
+                </div>
+                <time>${new Date(notification.createdAt || Date.now()).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</time>
+              </div>
+            `)
+            .join('');
+        } catch (error) {
+          list.innerHTML = '<div class="activity-row"><span class="activity-mark">!</span><div><strong>Notifications unavailable</strong><small>Please refresh or log in again.</small></div><time>Now</time></div>';
+        }
+      }
+
+      async function fetchCustomerMenu() {
+        const token = localStorage.getItem('tomatoToken');
+        if (!token || normalizedRole !== 'customer') return;
+
+        try {
+          const response = await fetch(`${API_ROOT}/api/customer/menu`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.message || 'Unable to load menu');
+
+          const menu = Array.isArray(data.menu) ? data.menu : [];
+          const grid = document.getElementById('customer-menu-grid');
+          if (!grid) return;
+
+          if (!menu.length) {
+            grid.innerHTML = '<div class="menu-card"><p>No food items available right now.</p></div>';
+            return;
+          }
+
+          grid.innerHTML = menu
+            .map(
+              (item) => `
+                <article class="menu-card">
+                  <div class="menu-card-head">
+                    <h3 class="menu-card-title">${item.name}</h3>
+                    <span class="menu-card-price">₹${Number(item.price || 0).toFixed(2)}</span>
+                  </div>
+                  <div class="menu-item-meta">Available: ${item.quantity}</div>
+                  <div class="menu-card-actions">
+                    <span class="menu-item-meta">Fresh & ready</span>
+                    <button class="add-to-cart-btn" type="button" data-item-id="${item._id || item.id}" data-item-name="${item.name}" data-item-price="${Number(item.price || 0)}">Add to cart</button>
+                  </div>
+                </article>
+              `,
+            )
+            .join('');
+
+          document.querySelectorAll('.add-to-cart-btn').forEach((button) => {
+            button.addEventListener('click', () => {
+              const itemName = button.getAttribute('data-item-name');
+              const itemPrice = Number(button.getAttribute('data-item-price') || 0);
+              const itemId = button.getAttribute('data-item-id');
+              const existing = cart.find((entry) => entry.itemId === itemId);
+              if (existing) {
+                existing.quantity += 1;
+              } else {
+                cart.push({ itemId, name: itemName, price: itemPrice, quantity: 1 });
+              }
+              renderCart();
+            });
+          });
+        } catch (error) {
+          console.error('Customer menu load failed', error);
+          const grid = document.getElementById('customer-menu-grid');
+          if (grid) {
+            grid.innerHTML = '<div class="menu-card"><p>Unable to load menu right now.</p></div>';
+          }
+        }
+      }
+
+      function renderCart() {
+        const cartItems = document.getElementById('cart-items');
+        const cartTotal = document.getElementById('cart-total');
+        if (!cartItems || !cartTotal) return;
+
+        if (!cart.length) {
+          cartItems.innerHTML = '<div class="menu-item-meta">Your cart is empty.</div>';
+          cartTotal.textContent = '₹0.00';
+          return;
+        }
+
+        const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+        cartItems.innerHTML = cart
+          .map(
+            (item) => `
+              <div class="cart-item">
+                <span>${item.name} x${item.quantity}</span>
+                <strong>₹${(item.price * item.quantity).toFixed(2)}</strong>
+              </div>
+            `,
+          )
+          .join('');
+        cartTotal.textContent = `₹${total.toFixed(2)}`;
+      }
+
+      async function placeOrder() {
+        const token = localStorage.getItem('tomatoToken');
+        if (!token || normalizedRole !== 'customer') {
+          window.location.href = '../index.html';
+          return;
+        }
+
+        if (!cart.length) {
+          const notice = document.getElementById('settings-notice');
+          if (notice) notice.textContent = 'Add at least one food item to the cart.';
+          return;
+        }
+
+        try {
+          const response = await fetch(`${API_ROOT}/api/customer/orders`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              items: cart.map((item) => ({
+                foodItemId: item.itemId,
+                name: item.name,
+                quantity: item.quantity,
+                price: item.price,
+              })),
+            }),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.message || 'Unable to place order');
+
+          cart.length = 0;
+          renderCart();
+          const notice = document.getElementById('settings-notice');
+          if (notice) notice.textContent = 'Order placed successfully and saved in MongoDB.';
+          showSaveSuccessPopup();
+        } catch (error) {
+          const notice = document.getElementById('settings-notice');
+          if (notice) {
+            notice.textContent = error instanceof Error ? error.message : 'Unable to place order.';
+          }
+        }
+      }
+
       function renderDashboard() {
-        setText('mini-name', user.name || 'Tomato user');
+        setText('mini-name', user?.name || 'Tomato user');
         setText('mini-role', displayRole);
         setText('role-kicker', role.label);
-        setText(
-          'welcome-heading',
-          `Good to see you, ${(user.name || 'there').split(' ')[0]}.`,
-        );
+        setText('welcome-heading', `Good to see you, ${(user?.name || 'there').split(' ')[0]}.`);
         setText('welcome-copy', role.copy);
         setText('activity-label', role.activity);
         setText('activity-heading', role.activity);
         setText('activity-copy', role.activityCopy);
-        setText('profile-name', user.name || 'Tomato user');
-        setText(
-          'profile-contact',
-          user.email || user.phone || 'Contact details not provided',
-        );
+        setText('profile-name', user?.name || 'Tomato user');
+        setText('profile-contact', user?.email || user?.phone || 'Contact details not provided');
         setText('profile-role', displayRole);
-        setText(
-          'profile-id',
-          user.id ? `...${String(user.id).slice(-8)}` : 'Not available',
-        );
-        document.getElementById('stats').innerHTML = role.stats
-          .map(
-            ([label, value, note]) =>
-              `<article class="stat"><span class="stat-label">${label}</span><div class="stat-value">${value}</div><span class="stat-note">${note}</span></article>`,
-          )
-          .join('');
-        document.getElementById('activity').innerHTML = role.events
-          .map(
-            ([mark, title, detail, time]) =>
-              `<div class="activity-row"><span class="activity-mark">${mark}</span><div><strong>${title}</strong><small>${detail}</small></div><time>${time}</time></div>`,
-          )
-          .join('');
-        ['mini-avatar', 'profile-avatar'].forEach((id) =>
-          renderAvatar(document.getElementById(id)),
-        );
-        document.getElementById('settings-name').value = user.name || '';
-        document.getElementById('settings-image').value = user.image || '';
+        const userIdValue = user?.id || user?._id || user?.userId;
+        setText('profile-id', userIdValue ? `...${String(userIdValue).slice(-8)}` : 'Not available');
+
+        const statsContainer = document.getElementById('stats');
+        if (statsContainer) {
+          statsContainer.innerHTML = role.stats
+            .map(
+              ([label, value, note]) =>
+                `<article class="stat"><span class="stat-label">${label}</span><div class="stat-value">${value}</div><span class="stat-note">${note}</span></article>`,
+            )
+            .join('');
+        }
+
+        const activityContainer = document.getElementById('activity');
+        if (activityContainer) {
+          activityContainer.innerHTML = role.events
+            .map(
+              ([mark, title, detail, time]) =>
+                `<div class="activity-row"><span class="activity-mark">${mark}</span><div><strong>${title}</strong><small>${detail}</small></div><time>${time}</time></div>`,
+            )
+            .join('');
+        }
+
+        renderRestaurantMenu();
+
+        const customerPanel = document.getElementById('customer-menu-panel');
+        if (customerPanel) {
+          customerPanel.classList.toggle('visible', normalizedRole === 'customer');
+        }
+
+        if (normalizedRole === 'customer') {
+          fetchCustomerMenu();
+        }
+
+        fetchRoleNotifications();
+
+        ['mini-avatar', 'profile-avatar'].forEach((id) => {
+          const element = document.getElementById(id);
+          if (element) renderAvatar(element);
+        });
+
+        const nameField = document.getElementById('settings-name');
+        const emailField = document.getElementById('settings-email');
+        const phoneField = document.getElementById('settings-phone');
+        const roleReadOnly = document.getElementById('settings-role-readonly');
+        const accountId = document.getElementById('settings-account-id');
+        if (nameField) nameField.value = user?.name || '';
+        if (emailField) emailField.value = user?.email || '';
+        if (phoneField) phoneField.value = user?.phone || '';
+        if (roleReadOnly) roleReadOnly.value = displayRole;
+        if (accountId) {
+          const userIdValue = user?.id || user?._id || user?.userId;
+          accountId.value = userIdValue ? String(userIdValue) : 'Not available';
+        }
+
+        renderPhotoPreview('settings-photo-preview', user?.image || '');
         setText(
           'today',
           new Intl.DateTimeFormat(undefined, {
@@ -653,41 +1570,284 @@
         );
       }
 
-      document.querySelectorAll('.nav-item').forEach((button) =>
+      document.querySelectorAll('.edit-toggle').forEach((button) => {
         button.addEventListener('click', () => {
-          document
-            .querySelectorAll('.nav-item')
-            .forEach((item) =>
-              item.classList.toggle('active', item === button),
-            );
-          const isSettings = button.dataset.view === 'settings';
-          document.getElementById('overview-view').style.display = isSettings
-            ? 'none'
-            : 'block';
-          document
-            .getElementById('settings-view')
-            .classList.toggle('visible', isSettings);
-        }),
-      );
-      document
-        .getElementById('settings-form')
-        .addEventListener('submit', (event) => {
-          event.preventDefault();
-          user.name =
-            document.getElementById('settings-name').value.trim() || user.name;
-          user.image = document.getElementById('settings-image').value.trim();
-          localStorage.setItem('tomatoUser', JSON.stringify(user));
-          renderDashboard();
-          setText('settings-notice', 'Profile saved.');
+          const field = document.getElementById(button.dataset.target);
+          if (!field) return;
+          if (field.type === 'file') {
+            field.disabled = false;
+            field.click();
+            return;
+          }
+          const nextReadOnly = !field.readOnly;
+          field.readOnly = nextReadOnly;
+          if (!nextReadOnly) {
+            field.focus();
+            field.select?.();
+          }
+          button.textContent = nextReadOnly ? '✓' : '✎';
         });
-      document.getElementById('sign-out').addEventListener('click', () => {
-        localStorage.removeItem('tomatoToken');
-        localStorage.removeItem('tomatoUser');
-        window.alert(
-          'Thanks for Visiting Tomato Online\nVISIT AGAIN, WE ARE WAITING...',
-        );
-        window.location.href = '../index.html';
       });
+
+      const settingsPhotoInput = document.getElementById('settings-photo');
+      if (settingsPhotoInput) {
+        settingsPhotoInput.addEventListener('change', (event) => {
+          const file = event.target.files && event.target.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = () => {
+            if (user) {
+              user.image = String(reader.result || '');
+              renderPhotoPreview('settings-photo-preview', user.image);
+            }
+          };
+          reader.readAsDataURL(file);
+        });
+      }
+
+      const addFoodItemToggle = document.getElementById('add-food-item-toggle');
+      if (addFoodItemToggle) {
+        addFoodItemToggle.addEventListener('click', () => {
+          const form = document.getElementById('restaurant-menu-form');
+          if (!form) return;
+          const isVisible = form.classList.toggle('visible');
+          const nameInput = document.getElementById('menu-item-name');
+          if (isVisible && nameInput) {
+            nameInput.focus();
+          }
+        });
+      }
+
+      const restaurantMenuForm = document.getElementById('restaurant-menu-form');
+      if (restaurantMenuForm) {
+        restaurantMenuForm.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const nameInput = document.getElementById('menu-item-name');
+          const quantityInput = document.getElementById('menu-item-quantity');
+          const priceInput = document.getElementById('menu-item-price');
+          if (!nameInput || !quantityInput || !priceInput) return;
+
+          const name = nameInput.value.trim();
+          const quantity = Number(quantityInput.value);
+          const price = Number(priceInput.value);
+
+          if (!name || !quantity || !price) return;
+
+          const token = localStorage.getItem('tomatoToken');
+          if (!token) {
+            window.location.href = '../index.html';
+            return;
+          }
+
+          try {
+            const response = await fetch(`${API_ROOT}/api/restaurant/menu`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ name, quantity, price }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.message || 'Unable to save menu item');
+
+            const items = getRestaurantMenu();
+            items.unshift({
+              id: data.item?._id || Date.now(),
+              name,
+              quantity,
+              price,
+            });
+            localStorage.setItem('tomatoRestaurantMenu', JSON.stringify(items));
+            renderRestaurantMenu();
+            event.currentTarget.reset();
+            event.currentTarget.classList.remove('visible');
+          } catch (error) {
+            const notice = document.getElementById('settings-notice');
+            if (notice) {
+              notice.textContent = error instanceof Error ? error.message : 'Unable to save menu item.';
+            }
+          }
+        });
+      }
+
+      const placeOrderButton = document.getElementById('place-order-btn');
+      if (placeOrderButton) {
+        placeOrderButton.addEventListener('click', () => {
+          placeOrder();
+        });
+      }
+
+      const settingsSubnav = document.getElementById('settings-subnav');
+      function updateSettingsKicker(sectionName = 'profile') {
+        const kicker = document.querySelector('#settings-view .kicker');
+        if (!kicker) return;
+
+        kicker.textContent = sectionName === 'account' ? 'Account settings' : 'Profile settings';
+      }
+
+      function closeSettingsPanel() {
+        if (settingsSubnav) settingsSubnav.classList.remove('visible');
+
+        const settingsNavButton = document.querySelector('.nav-item[data-view="settings"]');
+        if (settingsNavButton) settingsNavButton.classList.remove('active');
+
+        const settingsView = document.getElementById('settings-view');
+        if (settingsView) settingsView.classList.remove('visible');
+
+        const overviewView = document.getElementById('overview-view');
+        if (overviewView) overviewView.style.display = 'block';
+      }
+
+      function openSettingsSection(sectionName = 'profile') {
+        const overviewView = document.getElementById('overview-view');
+        const settingsView = document.getElementById('settings-view');
+        if (overviewView) overviewView.style.display = 'none';
+        if (settingsView) {
+          settingsView.classList.add('visible');
+          settingsView.querySelectorAll('.settings-section').forEach((section) => {
+            section.classList.toggle('active', section.dataset.settingsSection === sectionName);
+          });
+        }
+
+        document.querySelectorAll('.nav-subitem').forEach((item) => {
+          item.classList.toggle('active', item.dataset.settingsSection === sectionName);
+        });
+
+        const settingsNavButton = document.querySelector('.nav-item[data-view="settings"]');
+        if (settingsNavButton) {
+          settingsNavButton.classList.add('active');
+          settingsNavButton.dataset.settingsSection = sectionName;
+        }
+
+        if (settingsSubnav) settingsSubnav.classList.add('visible');
+
+        updateSettingsKicker(sectionName);
+      }
+
+      document.querySelectorAll('.nav-item').forEach((button) => {
+        button.addEventListener('click', () => {
+          document.querySelectorAll('.nav-item').forEach((item) => {
+            item.classList.toggle('active', item === button);
+          });
+
+          const isSettings = button.dataset.view === 'settings';
+          const settingsSection = button.dataset.settingsSection || 'profile';
+
+          if (isSettings) {
+            const shouldOpen = !(settingsSubnav && settingsSubnav.classList.contains('visible'));
+            if (shouldOpen) {
+              openSettingsSection(settingsSection);
+            } else {
+              closeSettingsPanel();
+            }
+            return;
+          }
+
+          closeSettingsPanel();
+        });
+      });
+
+      document.querySelectorAll('.nav-subitem').forEach((button) => {
+        button.addEventListener('click', (event) => {
+          event.stopPropagation();
+          const section = button.dataset.settingsSection || 'profile';
+          openSettingsSection(section);
+        });
+      });
+
+      const settingsForm = document.getElementById('settings-form');
+      if (settingsForm) {
+        settingsForm.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const token = localStorage.getItem('tomatoToken');
+          if (!token) {
+            window.location.href = '../index.html';
+            return;
+          }
+
+          const saveButton = settingsForm.querySelector('.save');
+          const name = document.getElementById('settings-name')?.value.trim() || '';
+          const email = document.getElementById('settings-email')?.value.trim() || '';
+          const phone = document.getElementById('settings-phone')?.value.trim() || '';
+          const photoInput = document.getElementById('settings-photo');
+          const photoFile = photoInput && photoInput.files ? photoInput.files[0] : null;
+
+          if (saveButton) {
+            saveButton.classList.add('is-saving');
+            saveButton.textContent = 'Saving...';
+          }
+
+          const formData = new FormData();
+          if (name) formData.append('name', name);
+          if (email) formData.append('email', email);
+          if (phone) formData.append('phone', phone);
+          if (photoFile) formData.append('photo', photoFile);
+
+          try {
+            const response = await fetch(`${API_ROOT}/api/auth/profile`, {
+              method: 'PUT',
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+              body: formData,
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              throw new Error(data.message || 'Unable to save profile.');
+            }
+
+            if (user) {
+              Object.assign(user, data.user || {});
+              if (data.user && data.user.image) {
+                user.image = data.user.image;
+              }
+              localStorage.setItem('tomatoUser', JSON.stringify(user));
+            }
+
+            renderDashboard();
+            setFieldsEditable(false);
+            if (photoInput) photoInput.value = '';
+            const notice = document.getElementById('settings-notice');
+            if (notice) notice.textContent = 'Profile saved to MongoDB.';
+            showSaveSuccessPopup();
+          } catch (error) {
+            const notice = document.getElementById('settings-notice');
+            if (notice) {
+              notice.textContent = error instanceof Error ? error.message : 'Unable to save profile.';
+            }
+          } finally {
+            if (saveButton) {
+              saveButton.classList.remove('is-saving');
+              saveButton.textContent = 'Save profile';
+            }
+          }
+        });
+      }
+
+      const modalBackButton = document.getElementById('modal-back');
+      if (modalBackButton) {
+        modalBackButton.addEventListener('click', () => {
+          goBackToDashboard();
+        });
+      }
+
+      const settingsPhotoInputForDisable = document.getElementById('settings-photo');
+      if (settingsPhotoInputForDisable) {
+        settingsPhotoInputForDisable.disabled = true;
+      }
+      setFieldsEditable(false);
+
+      const signOutButton = document.getElementById('sign-out');
+      if (signOutButton) {
+        signOutButton.addEventListener('click', () => {
+          localStorage.removeItem('tomatoToken');
+          localStorage.removeItem('tomatoUser');
+          window.alert('Thanks for Visiting Tomato Online\nVISIT AGAIN, WE ARE WAITING...');
+          window.location.href = '../index.html';
+        });
+      }
+
       renderDashboard();
     </script>
   </body>

@@ -23,6 +23,7 @@ const verifyPassword = async (password: string, storedHash: string) => {
 	return storedKey.length === derivedKey.length && timingSafeEqual(storedKey, derivedKey);
 };
 
+const normalizeEmail = (value: string) => value.trim().toLowerCase();
 const normalizePhone = (value: string) => value.replace(/[\s()-]/g, '');
 const isPhone = (value: string) => /^\+?[1-9]\d{9,14}$/.test(value);
 const hashResetToken = (token: string) => createHash('sha256').update(token).digest('hex');
@@ -36,6 +37,17 @@ const getIdentifier = (body: Request['body']) => {
 				: '';
 	const normalized = value.includes('@') ? value.toLowerCase() : normalizePhone(value);
 	return { value: normalized, field: normalized.includes('@') ? 'email' : 'phone' as const };
+};
+
+const getRegistrationPayload = (body: Request['body']) => {
+	const email = typeof body?.email === 'string' ? normalizeEmail(body.email) : '';
+	const phone = typeof body?.phone === 'string' ? normalizePhone(body.phone) : '';
+	const payload: { email?: string; phone?: string } = {};
+
+	if (email) payload.email = email;
+	if (phone) payload.phone = phone;
+
+	return payload;
 };
 
 const createToken = (user: { _id: { toString: () => string }; email?: string; phone?: string; role: string }) => {
@@ -62,12 +74,14 @@ const userResponse = (user: { _id: unknown; name: string; email?: string; phone?
 
 export const registerUser = async (req: Request, res: Response) => {
 	const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
-	const identifier = getIdentifier(req.body);
+	const registrationData = getRegistrationPayload(req.body);
 	const password = typeof req.body?.password === 'string' ? req.body.password : '';
 	const requestedRole = typeof req.body?.role === 'string' ? req.body.role : 'customer';
 	const role = USER_ROLES.includes(requestedRole as UserRole) ? requestedRole as UserRole : null;
+	const email = registrationData.email || '';
+	const phone = registrationData.phone || '';
 
-	if (!name || !identifier.value || !password || !role) {
+	if (!name || (!email && !phone) || !password || !role) {
 		return res.status(400).json({ message: 'Name, email or mobile number, and password are required' });
 	}
 
@@ -75,18 +89,25 @@ export const registerUser = async (req: Request, res: Response) => {
 		return res.status(400).json({ message: 'Password must be at least 8 characters' });
 	}
 
-	if (identifier.field === 'phone' && !isPhone(identifier.value)) {
+	if (phone && !isPhone(phone)) {
 		return res.status(400).json({ message: 'Enter a valid mobile number' });
 	}
 
 	try {
-		if (await User.exists({ [identifier.field]: identifier.value })) {
+		const existingUser = await User.findOne({
+			$or: [
+				...(email ? [{ email }] : []),
+				...(phone ? [{ phone }] : []),
+			],
+		});
+
+		if (existingUser) {
 			return res.status(409).json({ message: 'An account with that email or mobile number already exists' });
 		}
 
 		const user = await User.create({
 			name,
-			[identifier.field]: identifier.value,
+			...registrationData,
 			passwordHash: await hashPassword(password),
 			role,
 		});

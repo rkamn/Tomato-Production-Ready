@@ -90,6 +90,15 @@ The configured Atlas host is `cluster0.emamqrx.mongodb.net`, the database user i
 Do not commit `.env`, database passwords, or JWT secrets. In MongoDB Atlas, create a database user and add your development machine's public IP address under **Network Access**.
 
 ## Run
+### Atlas connection troubleshooting
+
+If startup reports `Could not connect to any servers in your MongoDB Atlas cluster`, open **Atlas > Security > Network Access > IP Access List** and add the machine's current public IPv4 address as a `/32` entry. You can check it with:
+
+```bash
+curl -4 https://api.ipify.org
+```
+
+For this development machine, the address observed during the last validation was `103.197.75.229`, so the entry should be `103.197.75.229/32`. Public IP addresses can change; rerun the command before adding or updating the Atlas entry. The service now retries the connection and refuses to start until MongoDB is reachable.
 
 Start the API:
 

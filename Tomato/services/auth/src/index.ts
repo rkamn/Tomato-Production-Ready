@@ -53,9 +53,18 @@ app.use('/api/rider', riderRoutes);
 app.use('/api/admin', adminRoutes);
 app.use((_req, res) => res.status(404).json({ message: 'Route not found.' }));
 
-app.listen(PORT, () => {
-  console.log(`Auth service running on port ${PORT}`);
-  connectDB();
-});
+const startServer = async () => {
+  try {
+    await connectDB();
+    app.listen(PORT, () => {
+      console.log(`Auth service running on port ${PORT}`);
+    });
+  } catch (error) {
+    console.error('Auth service startup aborted:', error);
+    process.exitCode = 1;
+  }
+};
+
+startServer();
 
 export { PUBLIC_BASE_URL, upload };

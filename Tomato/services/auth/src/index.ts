@@ -7,14 +7,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import connectDB from './config/db.js';
-import authRoute from './routes/auth.js';
-import notificationRoutes from './routes/notificationRoutes.js';
 import {
+  authRoute,
+  notificationRoutes,
   adminRoutes,
   customerRoutes,
   restaurantRoutes,
   riderRoutes,
-} from './routes/roleRoutes.js';
+} from './routes/index.js';
 
 dotenv.config({ path: fileURLToPath(new URL('../.env', import.meta.url)) });
 

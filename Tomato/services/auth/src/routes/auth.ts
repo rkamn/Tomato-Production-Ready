@@ -1,7 +1,13 @@
 import express, { Express } from 'express';
 import multer from 'multer';
 
-import { loginUser, registerUser, requestPasswordReset, resetPassword, updateProfile } from '../controllers/auth.js';
+import {
+  loginUser,
+  registerUser,
+  requestPasswordReset,
+  resetPassword,
+  updateProfile,
+} from '../controllers/auth.js';
 import { authenticate } from '../middleware/authenticate.js';
 
 const createAuthRouter = (upload: multer.Multer) => {
@@ -17,5 +23,3 @@ const createAuthRouter = (upload: multer.Multer) => {
 };
 
 export default createAuthRouter;
-
-//----

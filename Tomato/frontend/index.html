@@ -808,6 +808,38 @@
                 required
               />
             </div>
+
+            <!-- Restaurant Location & DIGIPIN Registration Fields -->
+            <div id="restaurant-reg-fields" class="field hidden" style="border-top:1px dashed var(--line); padding-top:0.85rem; margin-top:0.85rem;">
+              <label for="restaurant-address">Restaurant Address (Pickup Point)</label>
+              <input id="restaurant-address" name="restaurantAddress" type="text" placeholder="12 MG Road / Indiranagar, Bengaluru" />
+
+              <div style="margin-top:0.8rem;">
+                <label for="restaurant-digipin">Restaurant Location / DIGIPIN <span style="color:var(--tomato);">*Required</span></label>
+                <div style="display:flex; gap:0.4rem; margin-top:0.25rem;">
+                  <input id="restaurant-digipin" name="digipin" type="text" placeholder="e.g. DGP-560038-A1" style="flex:1;" />
+                  <button type="button" id="btn-detect-rest-gps" style="width:auto; padding:0 0.75rem; font-size:0.75rem; min-height:2.6rem;" onclick="detectRestaurantGPS()">📍 GPS Pin</button>
+                </div>
+                <small style="color:var(--muted); font-size:0.75rem; display:block; margin-top:0.3rem;">
+                  Used for order pickup by delivery riders. Each restaurant will receive a unique <strong>&lt;name&gt;/restaurantId</strong>.
+                </small>
+                <input type="hidden" id="restaurant-lat" name="lat" />
+                <input type="hidden" id="restaurant-lng" name="lng" />
+                <div id="rest-gps-status" style="font-size:0.75rem; color:var(--sage); margin-top:0.25rem;"></div>
+              </div>
+            </div>
+
+            <!-- Rider Registration Fields -->
+            <div id="rider-reg-fields" class="field hidden" style="border-top:1px dashed var(--line); padding-top:0.85rem; margin-top:0.85rem;">
+              <label for="rider-vehicle">Delivery Vehicle</label>
+              <input id="rider-vehicle" name="deliveryVehicle" type="text" placeholder="Motorcycle, Scooter, EV Bike" />
+              <div style="margin-top:0.4rem; font-size:0.75rem; color:var(--muted); line-height:1.4;">
+                <strong style="color:var(--tomato);">🔴 Live Location Policy:</strong> Riders must keep live location active while on shift. You will be assigned a unique <strong>&lt;name&gt;/riderId</strong> tracked by customers, restaurants, and admins.
+              </div>
+              <input type="hidden" id="rider-lat" name="lat" />
+              <input type="hidden" id="rider-lng" name="lng" />
+            </div>
+
             <button id="submit-button" type="submit">Sign in</button>
           </form>
 
@@ -881,7 +913,9 @@
     </main>
 
     <script>
-      const API_ROOT = 'http://localhost:5050';
+      const API_ROOT = window.location.hostname
+        ? `${window.location.protocol}//${window.location.hostname}:5050`
+        : 'http://localhost:5050';
       let mode = 'login';
       const form = document.getElementById('auth-form');
       const nameField = document.getElementById('name-field');
@@ -929,6 +963,12 @@
           serviceStatus.classList.add('offline');
         });
 
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('auth') === 'expired') {
+        message.textContent = 'Your session has expired. Please sign in again to continue.';
+        message.className = 'message error';
+      }
+
       function setMode(nextMode) {
         mode = nextMode;
         const isRegistering = mode === 'register';
@@ -951,6 +991,48 @@
         registerMode.classList.toggle('active', isRegistering);
         loginMode.setAttribute('aria-selected', String(!isRegistering));
         registerMode.setAttribute('aria-selected', String(isRegistering));
+
+        const restRegFields = document.getElementById('restaurant-reg-fields');
+        const riderRegFields = document.getElementById('rider-reg-fields');
+        if (restRegFields) restRegFields.classList.toggle('hidden', !(isRegistering && selectedRole === 'restaurant'));
+        if (riderRegFields) riderRegFields.classList.toggle('hidden', !(isRegistering && selectedRole === 'deliveryPartner'));
+      }
+
+      function detectRestaurantGPS() {
+        const status = document.getElementById('rest-gps-status');
+        const latInput = document.getElementById('restaurant-lat');
+        const lngInput = document.getElementById('restaurant-lng');
+        const digipinInput = document.getElementById('restaurant-digipin');
+
+        if (!('geolocation' in navigator)) {
+          if (status) status.textContent = 'Geolocation not supported. Pinned to Bengaluru center.';
+          latInput.value = '12.9716';
+          lngInput.value = '77.5946';
+          if (!digipinInput.value.trim()) digipinInput.value = 'DGP-1297-7759';
+          return;
+        }
+
+        if (status) status.textContent = 'Detecting current GPS coordinates...';
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const lat = Number(pos.coords.latitude.toFixed(5));
+            const lng = Number(pos.coords.longitude.toFixed(5));
+            latInput.value = lat;
+            lngInput.value = lng;
+            const autoDigipin = `DGP-${Math.round(lat * 100)}-${Math.round(lng * 100)}`;
+            if (!digipinInput.value.trim()) {
+              digipinInput.value = autoDigipin;
+            }
+            if (status) status.textContent = `📍 Captured: ${lat}, ${lng} (DIGIPIN: ${digipinInput.value})`;
+          },
+          () => {
+            latInput.value = '12.9716';
+            lngInput.value = '77.5946';
+            if (!digipinInput.value.trim()) digipinInput.value = 'DGP-1297-7759';
+            if (status) status.textContent = '📍 Pinned to default Bengaluru: 12.9716, 77.5946';
+          },
+          { timeout: 6000 }
+        );
       }
 
       loginMode.addEventListener('click', () => setMode('login'));
@@ -968,6 +1050,12 @@
           roleTrigger.setAttribute('aria-expanded', 'false');
           message.textContent = `${option.dataset.label} account selected.`;
           message.className = 'message';
+
+          const isRegistering = mode === 'register';
+          const restRegFields = document.getElementById('restaurant-reg-fields');
+          const riderRegFields = document.getElementById('rider-reg-fields');
+          if (restRegFields) restRegFields.classList.toggle('hidden', !(isRegistering && selectedRole === 'restaurant'));
+          if (riderRegFields) riderRegFields.classList.toggle('hidden', !(isRegistering && selectedRole === 'deliveryPartner'));
         }),
       );
 
@@ -1092,18 +1180,43 @@
           mode === 'register' ? 'Creating...' : 'Checking...';
 
         try {
-          const isEmail = identifierInput.value.includes('@');
+          const rawId = identifierInput.value.trim();
+          const isEmail = rawId.includes('@');
+          const payload = {
+            name: nameInput.value.trim(),
+            identifier: rawId,
+            ...(isEmail
+              ? { email: rawId }
+              : { phone: rawId }),
+            password: passwordInput.value,
+            role: mode === 'register' ? selectedRole : undefined,
+          };
+
+          if (mode === 'register') {
+            if (selectedRole === 'restaurant') {
+              payload.restaurantAddress = document.getElementById('restaurant-address')?.value?.trim() || '';
+              payload.digipin = document.getElementById('restaurant-digipin')?.value?.trim() || '';
+              const latVal = document.getElementById('restaurant-lat')?.value;
+              const lngVal = document.getElementById('restaurant-lng')?.value;
+              if (latVal && lngVal && !isNaN(Number(latVal))) {
+                payload.lat = Number(latVal);
+                payload.lng = Number(lngVal);
+              } else if (!payload.digipin) {
+                payload.lat = 12.9716;
+                payload.lng = 77.5946;
+                payload.digipin = 'DGP-1297-7759';
+              }
+            } else if (selectedRole === 'deliveryPartner') {
+              payload.deliveryVehicle = document.getElementById('rider-vehicle')?.value?.trim() || 'motorcycle';
+              payload.lat = 12.9721;
+              payload.lng = 77.5952;
+            }
+          }
+
           const response = await fetch(`${API_ROOT}/api/auth/${mode}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name: nameInput.value,
-              ...(isEmail
-                ? { email: identifierInput.value }
-                : { phone: identifierInput.value }),
-              password: passwordInput.value,
-              role: mode === 'register' ? selectedRole : undefined,
-            }),
+            body: JSON.stringify(payload),
           });
           const data = await response.json().catch(() => ({}));
 
@@ -1113,7 +1226,7 @@
 
           localStorage.setItem('tomatoToken', data.token);
           localStorage.setItem('tomatoUser', JSON.stringify(data.user));
-          document.getElementById('account-name').textContent = data.user.name;
+          document.getElementById('account-name').textContent = data.user.displayName || data.user.name;
           document.getElementById('account-email').textContent =
             data.user.email || 'Not provided';
           document.getElementById('account-phone').textContent =

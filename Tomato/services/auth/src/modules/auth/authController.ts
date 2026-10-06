@@ -142,6 +142,8 @@ export const userResponse = (user: {
 	role: string;
 	isApproved?: boolean;
 	isBlocked?: boolean;
+	walletBalance?: number;
+	creditPoint?: number;
 	restaurantId?: string;
 	riderId?: string;
 	customerId?: string;
@@ -183,6 +185,12 @@ export const userResponse = (user: {
 		role: user.role,
 		isApproved: user.isApproved ?? true,
 		isBlocked: user.isBlocked ?? false,
+		...(user.role === 'admin'
+			? {}
+			: {
+				walletBalance: user.walletBalance ?? 0,
+				creditPoint: user.creditPoint ?? 0,
+			}),
 		restaurantId: user.restaurantId || '',
 		riderId: user.riderId || '',
 		customerId,

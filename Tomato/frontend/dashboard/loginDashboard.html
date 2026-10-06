@@ -23,6 +23,28 @@
             <strong id="mini-name">Loading...</strong>
             <div style="display:flex; align-items:center; gap:0.45rem; margin-top:0.3rem; flex-wrap:wrap;">
               <small id="mini-role">Role</small>
+              <span id="profile-wallet-actions" style="display:inline-flex; align-items:center; gap:0.25rem; flex:0 0 auto; white-space:nowrap;">
+                <span id="profile-wallet-chip" style="display:none; align-items:center; gap:0.35rem; flex:0 0 auto; white-space:nowrap; background:#fef3c7; border:1px solid #facc15; color:#92400e; border-radius:8px; padding:0.22rem 0.55rem; font-size:0.74rem; font-weight:700; line-height:1.2;">
+                  <span aria-hidden="true">💳</span>
+                  <span id="profile-wallet-label" style="text-transform:uppercase; letter-spacing:0.04em; font-size:0.68rem;">Wallet</span>
+                  <span id="profile-wallet-text">0.00/0</span>
+                </span>
+                <button
+                  id="admin-credit-transfer-open"
+                  type="button"
+                  class="btn btn-outline btn-sm"
+                  style="display:none; align-items:center; justify-content:center; flex:0 0 auto; padding:0.25rem; color:#92400e;"
+                  title="Transfer credit points to a user"
+                  aria-label="Transfer credit points to a user"
+                  onclick="openAdminCreditTransferModal()"
+                >
+                  <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 3h7v7"></path>
+                    <path d="M10 14 21 3"></path>
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                  </svg>
+                </button>
+              </span>
               <div id="duty-toggle-wrapper" style="display:none; align-items:center;">
                 <button
                   id="duty-toggle-btn"
@@ -641,7 +663,7 @@
                 />
                 <button class="btn btn-primary btn-sm" onclick="fetchAdminSubAdmins()">🔍 Search</button>
                 <button class="btn btn-outline btn-sm" id="admin-subadmins-clear-btn" style="display:none;" onclick="clearAdminSubAdminsSearch()">✕ Clear</button>
-                <button class="btn btn-primary btn-sm" onclick="openCreateSubAdminModal()" style="background:var(--green); border-color:var(--green);">➕ Create Sub-Admin</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="openCreateSubAdminModal()" style="background:var(--green); border-color:var(--green);">➕ Create Sub-Admin</button>
               </div>
             </div>
 
@@ -655,6 +677,60 @@
           </div>
         </section>
       </main>
+    </div>
+
+    <!-- =====================================================================
+         ADMIN: TRANSFER CREDIT POINTS
+         ===================================================================== -->
+    <div id="admin-credit-transfer-modal" class="modal-overlay">
+      <div class="modal-box" style="max-width:980px; max-height:92vh; overflow-y:auto;">
+        <div class="modal-header">
+          <div>
+            <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:#92400e; font-weight:700;">💳 Admin Wallet</span>
+            <h2 style="font-size:1.3rem; margin-top:0.2rem;">Transfer Credit Points</h2>
+          </div>
+          <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('admin-credit-transfer-modal')">&times;</button>
+        </div>
+        <form id="admin-credit-transfer-form" onsubmit="submitAdminCreditTransfer(event)">
+          <div class="form-group">
+            <label for="admin-credit-recipient-id">Recipient ID</label>
+            <input
+              id="admin-credit-recipient-id"
+              type="text"
+              maxlength="128"
+              placeholder="Customer ID, Rider ID, Restaurant ID, or MongoDB ID"
+              autocomplete="off"
+              required
+            />
+            <small style="display:block; margin-top:0.35rem; color:var(--muted);">Use the customerId, riderId, restaurantId, or the account's MongoDB ID.</small>
+          </div>
+          <div class="form-group">
+            <label for="admin-credit-points">Credit Points to Transfer</label>
+            <input id="admin-credit-points" type="number" min="1" step="1" placeholder="Enter whole points" required />
+          </div>
+          <div class="form-group">
+            <label for="admin-credit-purpose">Transfer Purpose</label>
+            <input id="admin-credit-purpose" type="text" maxlength="500" placeholder="Reason for this credit transfer" required />
+          </div>
+          <div class="form-group">
+            <label for="admin-credit-order-number">Order Number (optional)</label>
+            <input id="admin-credit-order-number" type="text" maxlength="100" placeholder="e.g. TOM-2026-0001" />
+          </div>
+          <p style="font-size:0.82rem; color:#92400e; background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:0.65rem 0.75rem;">
+            Points will be deducted from your admin wallet and added to the recipient's wallet.
+          </p>
+          <div style="display:flex; justify-content:flex-end; gap:0.7rem; margin-top:1rem;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('admin-credit-transfer-modal')">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="admin-credit-transfer-submit">Transfer Points</button>
+          </div>
+        </form>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:0.75rem; margin-top:1.5rem; padding-top:1rem; border-top:1px solid var(--line);">
+          <h3 style="font-size:1rem; margin:0;">Current Transfer</h3>
+        </div>
+        <div id="admin-wallet-credit-track" style="margin-top:0.75rem;">
+          <p style="color:var(--muted); font-size:0.85rem;">Completed transfers appear here, newest first.</p>
+        </div>
+      </div>
     </div>
 
     <!-- =====================================================================
@@ -1075,7 +1151,7 @@
 
           <div style="display:flex; justify-content:flex-end; gap:0.8rem;">
             <button type="button" class="btn btn-secondary" onclick="closeModal('admin-create-subadmin-modal')">Cancel</button>
-            <button type="submit" class="btn btn-primary" id="btn-create-subadmin-submit">Create Sub-Admin</button>
+            <button type="submit" class="btn btn-primary" id="btn-create-subadmin-submit" onclick="submitCreateSubAdmin(event)">Create Sub-Admin</button>
           </div>
         </form>
       </div>
@@ -1294,12 +1370,24 @@
 
       function closeModal(id) {
         const el = document.getElementById(id);
-        if (el) el.classList.remove('visible');
+        if (el) {
+          el.classList.remove('visible');
+          el.style.display = 'none';
+        }
+        if (id === 'admin-credit-transfer-modal') {
+          const transferContainer = document.getElementById('admin-wallet-credit-track');
+          if (transferContainer) {
+            transferContainer.innerHTML = '<p style="color:var(--muted); font-size:0.85rem;">Completed transfers appear here, newest first.</p>';
+          }
+        }
       }
 
       function openModal(id) {
         const el = document.getElementById(id);
-        if (el) el.classList.add('visible');
+        if (el) {
+          el.classList.add('visible');
+          el.style.display = 'grid';
+        }
       }
 
       // =========================================================================
@@ -2010,6 +2098,27 @@
         }
       }
 
+      async function refreshProfileWallet() {
+        try {
+          const wallet = await apiFetch('/api/auth/wallet');
+          user.walletBalance = Number(wallet.walletBalance ?? 0);
+          user.creditPoint = Number(wallet.creditPoint ?? 0);
+          localStorage.setItem('tomatoUser', JSON.stringify(user));
+
+          const walletText = document.getElementById('profile-wallet-text');
+          if (walletText) {
+            walletText.textContent = `${user.walletBalance.toFixed(2)}/${user.creditPoint.toFixed(0)}`;
+          }
+        } catch (error) {
+          console.error('Wallet refresh failed:', error);
+          showToastNotification({
+            title: 'Wallet Refresh Failed',
+            message: error.message || 'Unable to fetch current wallet balance.',
+            type: 'danger',
+          });
+        }
+      }
+
       // Initialize Dashboard
       function initDashboard() {
         let partnerDisplay = user.displayName || user.name || 'Tomato User';
@@ -2021,6 +2130,18 @@
         document.getElementById('mini-name').textContent = partnerDisplay;
         const displayRole = role === 'deliveryPartner' ? 'Delivery Partner' : role === 'subadmin' ? (user.adminRoleTitle || 'Sub-Admin') : role.charAt(0).toUpperCase() + role.slice(1);
         document.getElementById('mini-role').textContent = displayRole;
+
+        const walletChip = document.getElementById('profile-wallet-chip');
+        const walletText = document.getElementById('profile-wallet-text');
+        const walletLabel = document.getElementById('profile-wallet-label');
+        if (walletChip) walletChip.style.display = 'inline-flex';
+        if (walletText) walletText.textContent = `${Number(user.walletBalance ?? 0).toFixed(2)}/${Number(user.creditPoint ?? 0).toFixed(0)}`;
+        if (walletLabel) walletLabel.textContent = role === 'admin' || role === 'subadmin' ? 'W' : 'Wallet';
+        const creditTransferButton = document.getElementById('admin-credit-transfer-open');
+        if (creditTransferButton) {
+          creditTransferButton.style.display = role === 'admin' ? 'inline-flex' : 'none';
+        }
+        refreshProfileWallet();
 
         const initials = (user.name || 'T').split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase();
         const miniAvatar = document.getElementById('mini-avatar');
@@ -2126,8 +2247,47 @@
         });
       }
 
+      // Cache tracker for view data to eliminate flocking / layout shifting
+      const viewLastFetched = {};
+
+      function renderTableSkeleton(label = 'records') {
+        return `
+          <div class="skeleton-table-wrapper" style="min-height:380px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; padding-bottom:0.75rem; border-bottom:1px solid var(--line);">
+              <div class="skeleton-shimmer" style="height:18px; width:180px;"></div>
+              <div class="skeleton-shimmer" style="height:18px; width:110px;"></div>
+            </div>
+            <div class="skeleton-shimmer" style="height:40px; width:100%; margin-bottom:0.6rem;"></div>
+            <div class="skeleton-shimmer" style="height:48px; width:100%; margin-bottom:0.6rem;"></div>
+            <div class="skeleton-shimmer" style="height:48px; width:100%; margin-bottom:0.6rem;"></div>
+            <div class="skeleton-shimmer" style="height:48px; width:100%; margin-bottom:0.6rem;"></div>
+            <div class="skeleton-shimmer" style="height:48px; width:100%; margin-bottom:0.6rem;"></div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:1rem; padding-top:0.75rem; border-top:1px solid var(--line);">
+              <div class="skeleton-shimmer" style="height:20px; width:140px;"></div>
+              <div class="skeleton-shimmer" style="height:28px; width:160px;"></div>
+            </div>
+          </div>
+        `;
+      }
+
+      function renderAnalyticsSkeleton() {
+        return `
+          <div style="min-height:480px;">
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:1rem; margin-bottom:1.5rem;">
+              <div class="skeleton-shimmer" style="height:105px; border-radius:10px;"></div>
+              <div class="skeleton-shimmer" style="height:105px; border-radius:10px;"></div>
+              <div class="skeleton-shimmer" style="height:105px; border-radius:10px;"></div>
+              <div class="skeleton-shimmer" style="height:105px; border-radius:10px;"></div>
+            </div>
+            <div class="skeleton-shimmer" style="height:280px; border-radius:10px; margin-bottom:1.5rem;"></div>
+            <div class="skeleton-shimmer" style="height:220px; border-radius:10px;"></div>
+          </div>
+        `;
+      }
+
       // Switch View
       function switchView(viewId) {
+        if (activeView === viewId) return;
         activeView = viewId;
 
         // Nav active state
@@ -2884,7 +3044,13 @@
       async function fetchCustomerOrders() {
         const container = document.getElementById('customer-orders-list');
         if (!container) return;
-        container.innerHTML = '<p style="color:var(--muted);">Loading orders...</p>';
+        const hasExisting = container.children.length > 0 && !container.querySelector('.skeleton-shimmer');
+        if (!hasExisting) {
+          container.innerHTML = renderTableSkeleton('orders');
+        } else {
+          container.style.opacity = '0.75';
+          container.style.transition = 'opacity 0.15s ease';
+        }
 
         try {
           const data = await apiFetch('/api/customer/orders');
@@ -2949,7 +3115,13 @@
             `;
           }).join('');
         } catch (e) {
-          container.innerHTML = `<p style="color:var(--tomato-dark);">Failed to load orders: ${e.message}</p>`;
+          if (!hasExisting) {
+            container.innerHTML = `<p style="color:var(--tomato-dark); padding:1rem 0;">Failed to load orders: ${e.message}</p>`;
+          } else {
+            console.error('Fetch customer orders error:', e);
+          }
+        } finally {
+          container.style.opacity = '1';
         }
       }
 
@@ -2977,7 +3149,13 @@
       async function fetchCustomerAddresses() {
         const grid = document.getElementById('addresses-list-grid');
         if (!grid) return;
-        grid.innerHTML = '<p style="color:var(--muted);">Loading addresses...</p>';
+        const hasExisting = grid.children.length > 0 && !grid.querySelector('.skeleton-shimmer');
+        if (!hasExisting) {
+          grid.innerHTML = '<p style="color:var(--muted); padding:1rem 0;">Loading addresses...</p>';
+        } else {
+          grid.style.opacity = '0.75';
+          grid.style.transition = 'opacity 0.15s ease';
+        }
 
         try {
           const data = await apiFetch('/api/customer/addresses');
@@ -3009,7 +3187,13 @@
             </div>
           `).join('');
         } catch (e) {
-          grid.innerHTML = `<p style="color:var(--tomato-dark);">Failed to load addresses: ${e.message}</p>`;
+          if (!hasExisting) {
+            grid.innerHTML = `<p style="color:var(--tomato-dark); padding:1rem 0;">Failed to load addresses: ${e.message}</p>`;
+          } else {
+            console.error('Fetch customer addresses error:', e);
+          }
+        } finally {
+          grid.style.opacity = '1';
         }
       }
 
@@ -3096,7 +3280,13 @@
       async function fetchRestaurantOrders() {
         const container = document.getElementById('restaurant-orders-table');
         if (!container) return;
-        container.innerHTML = '<p style="color:var(--muted);">Loading incoming orders...</p>';
+        const hasExisting = container.children.length > 0 && !container.querySelector('.skeleton-shimmer');
+        if (!hasExisting) {
+          container.innerHTML = renderTableSkeleton('orders');
+        } else {
+          container.style.opacity = '0.75';
+          container.style.transition = 'opacity 0.15s ease';
+        }
 
         try {
           const data = await apiFetch('/api/restaurant/orders');
@@ -3161,7 +3351,13 @@
             </div>
           `;
         } catch (e) {
-          container.innerHTML = `<p style="color:var(--tomato-dark);">${e.message}</p>`;
+          if (!hasExisting) {
+            container.innerHTML = `<p style="color:var(--tomato-dark); padding:1rem 0;">${e.message}</p>`;
+          } else {
+            console.error('Fetch restaurant orders error:', e);
+          }
+        } finally {
+          container.style.opacity = '1';
         }
       }
 
@@ -3275,7 +3471,13 @@
       async function fetchRestaurantMenu() {
         const container = document.getElementById('restaurant-menu-table');
         if (!container) return;
-        container.innerHTML = '<p style="color:var(--muted);">Loading menu items...</p>';
+        const hasExisting = container.children.length > 0 && !container.querySelector('.skeleton-shimmer');
+        if (!hasExisting) {
+          container.innerHTML = renderTableSkeleton('dishes');
+        } else {
+          container.style.opacity = '0.75';
+          container.style.transition = 'opacity 0.15s ease';
+        }
 
         try {
           const data = await apiFetch('/api/restaurant/menu');
@@ -3325,7 +3527,13 @@
             </div>
           `;
         } catch (e) {
-          container.innerHTML = `<p style="color:var(--tomato-dark);">${e.message}</p>`;
+          if (!hasExisting) {
+            container.innerHTML = `<p style="color:var(--tomato-dark); padding:1rem 0;">${e.message}</p>`;
+          } else {
+            console.error('Fetch restaurant menu error:', e);
+          }
+        } finally {
+          container.style.opacity = '1';
         }
       }
 
@@ -3397,7 +3605,13 @@
       async function fetchAvailableRiderOrders() {
         const container = document.getElementById('rider-available-list');
         if (!container) return;
-        container.innerHTML = '<p style="color:var(--muted);">Loading available orders for pickup...</p>';
+        const hasExisting = container.children.length > 0 && !container.querySelector('.skeleton-shimmer');
+        if (!hasExisting) {
+          container.innerHTML = renderTableSkeleton('orders');
+        } else {
+          container.style.opacity = '0.75';
+          container.style.transition = 'opacity 0.15s ease';
+        }
 
         try {
           const data = await apiFetch('/api/rider/orders/available');
@@ -3452,7 +3666,13 @@
             `;
           }).join('');
         } catch (e) {
-          container.innerHTML = `<p style="color:var(--tomato-dark);">${e.message}</p>`;
+          if (!hasExisting) {
+            container.innerHTML = `<p style="color:var(--tomato-dark); padding:1rem 0;">${e.message}</p>`;
+          } else {
+            console.error('Fetch available rider orders error:', e);
+          }
+        } finally {
+          container.style.opacity = '1';
         }
       }
 
@@ -3469,7 +3689,13 @@
       async function fetchActiveRiderOrders() {
         const container = document.getElementById('rider-active-list');
         if (!container) return;
-        container.innerHTML = '<p style="color:var(--muted);">Loading current active deliveries...</p>';
+        const hasExisting = container.children.length > 0 && !container.querySelector('.skeleton-shimmer');
+        if (!hasExisting) {
+          container.innerHTML = renderTableSkeleton('deliveries');
+        } else {
+          container.style.opacity = '0.75';
+          container.style.transition = 'opacity 0.15s ease';
+        }
 
         try {
           const data = await apiFetch('/api/rider/orders/active');
@@ -3534,7 +3760,13 @@
             `;
           }).join('');
         } catch (e) {
-          container.innerHTML = `<p style="color:var(--tomato-dark);">${e.message}</p>`;
+          if (!hasExisting) {
+            container.innerHTML = `<p style="color:var(--tomato-dark); padding:1rem 0;">${e.message}</p>`;
+          } else {
+            console.error('Fetch active rider orders error:', e);
+          }
+        } finally {
+          container.style.opacity = '1';
         }
       }
 
@@ -3552,7 +3784,13 @@
       async function fetchRiderHistory() {
         const container = document.getElementById('rider-history-list');
         if (!container) return;
-        container.innerHTML = '<p style="color:var(--muted);">Loading delivery history...</p>';
+        const hasExisting = container.children.length > 0 && !container.querySelector('.skeleton-shimmer');
+        if (!hasExisting) {
+          container.innerHTML = renderTableSkeleton('trips');
+        } else {
+          container.style.opacity = '0.75';
+          container.style.transition = 'opacity 0.15s ease';
+        }
 
         try {
           const data = await apiFetch('/api/rider/orders/history');
@@ -3601,7 +3839,13 @@
             </div>
           `;
         } catch (e) {
-          container.innerHTML = `<p style="color:var(--tomato-dark);">${e.message}</p>`;
+          if (!hasExisting) {
+            container.innerHTML = `<p style="color:var(--tomato-dark); padding:1rem 0;">${e.message}</p>`;
+          } else {
+            console.error('Fetch rider history error:', e);
+          }
+        } finally {
+          container.style.opacity = '1';
         }
       }
 
@@ -3724,7 +3968,7 @@
         `;
       }
 
-      async function fetchAdminOrders(page, date) {
+      async function fetchAdminOrders(page, date, force = false) {
         if (page !== undefined && page !== null) {
           currentAdminOrdersPage = page;
           currentAdminOrdersDate = '';
@@ -3735,11 +3979,25 @@
 
         const container = document.getElementById('admin-orders-table');
         if (!container) return;
-        container.innerHTML = '<p style="color:var(--muted); padding:1rem 0;">Loading platform orders...</p>';
 
         const status = document.getElementById('admin-order-status-filter')?.value || 'all';
         const search = document.getElementById('admin-orders-search')?.value.trim() || '';
         const archived = document.getElementById('admin-order-archive-filter')?.value || 'active';
+
+        const cacheKey = `orders_${currentAdminOrdersPage || 1}_${currentAdminOrdersDate || ''}_${status}_${search}_${archived}`;
+        const hasExisting = container.children.length > 0 && !container.querySelector('.skeleton-shimmer');
+        const now = Date.now();
+
+        if (!force && hasExisting && viewLastFetched[cacheKey] && (now - viewLastFetched[cacheKey] < 15000)) {
+          return;
+        }
+
+        if (!hasExisting) {
+          container.innerHTML = renderTableSkeleton('platform orders');
+        } else {
+          container.style.opacity = '0.75';
+          container.style.transition = 'opacity 0.15s ease';
+        }
 
         const params = new URLSearchParams();
         if (status && status !== 'all') params.set('status', status);
@@ -3754,8 +4012,8 @@
 
         try {
           const data = await apiFetch(`/api/admin/orders?${params.toString()}`);
+          viewLastFetched[cacheKey] = now;
           const orders = data.orders || [];
-          const pagination = data.pagination;
           currentAdminOrdersList = orders;
 
           if (pagination) {
@@ -3844,7 +4102,13 @@
             ${renderAdminOrdersBottomPaginationHTML(pagination)}
           `;
         } catch (e) {
-          container.innerHTML = `<p style="color:var(--tomato-dark);">${e.message}</p>`;
+          if (!hasExisting) {
+            container.innerHTML = `<p style="color:var(--tomato-dark); padding:1rem 0;">${e.message}</p>`;
+          } else {
+            console.error('Fetch admin orders error:', e);
+          }
+        } finally {
+          container.style.opacity = '1';
         }
       }
 
@@ -4062,10 +4326,10 @@
         if (!p) return;
         const next = Math.max(1, Math.min(targetPage, p.totalPages));
         adminUsersPagination[role].currentPage = next;
-        fetchAdminUsers(role, adminSearchQueries[role] || '', next);
+        fetchAdminUsers(role, adminSearchQueries[role] || '', next, true);
       }
 
-      async function fetchAdminUsers(role, searchQuery = '', page = 1) {
+      async function fetchAdminUsers(role, searchQuery = '', page = 1, force = false) {
         const prefix = getAdminRoleDomPrefix(role);
         const container = document.getElementById(`${prefix}-table`);
         const statusEl = document.getElementById(`${prefix}-search-status`);
@@ -4073,7 +4337,20 @@
 
         if (!container) return;
         const roleLabel = role === 'deliveryPartner' ? 'delivery partners' : role + 's';
-        container.innerHTML = `<p style="color:var(--muted); padding:1rem 0;">Loading ${roleLabel}...</p>`;
+        const cacheKey = `users_${role}_${searchQuery}_${page}`;
+        const hasExisting = container.children.length > 0 && !container.querySelector('.skeleton-shimmer');
+        const now = Date.now();
+
+        if (!force && hasExisting && viewLastFetched[cacheKey] && (now - viewLastFetched[cacheKey] < 15000)) {
+          return;
+        }
+
+        if (!hasExisting) {
+          container.innerHTML = renderTableSkeleton(roleLabel);
+        } else {
+          container.style.opacity = '0.75';
+          container.style.transition = 'opacity 0.15s ease';
+        }
 
         try {
           const params = new URLSearchParams();
@@ -4083,6 +4360,7 @@
           params.set('limit', '10');
 
           const data = await apiFetch(`/api/admin/users?${params.toString()}`);
+          viewLastFetched[cacheKey] = now;
           const users = data.users || [];
           const pagination = data.pagination || {
             currentPage: page || 1,
@@ -4113,26 +4391,32 @@
 
           container.innerHTML = renderPartnerManagementTable(users, role, searchQuery, pagination);
         } catch (e) {
-          container.innerHTML = `<p style="color:var(--tomato-dark);">${e.message}</p>`;
+          if (!hasExisting) {
+            container.innerHTML = `<p style="color:var(--tomato-dark); padding:1rem 0;">${e.message}</p>`;
+          } else {
+            console.error('Fetch admin users error:', e);
+          }
+        } finally {
+          container.style.opacity = '1';
         }
       }
 
-      function fetchAdminRestaurants(page) {
+      function fetchAdminRestaurants(page, force = false) {
         const query = document.getElementById('admin-restaurants-search')?.value?.trim() || '';
         const targetPage = page || adminUsersPagination.restaurant.currentPage || 1;
-        return fetchAdminUsers('restaurant', query, targetPage);
+        return fetchAdminUsers('restaurant', query, targetPage, force);
       }
 
-      function fetchAdminRiders(page) {
+      function fetchAdminRiders(page, force = false) {
         const query = document.getElementById('admin-riders-search')?.value?.trim() || '';
         const targetPage = page || adminUsersPagination.deliveryPartner.currentPage || 1;
-        return fetchAdminUsers('deliveryPartner', query, targetPage);
+        return fetchAdminUsers('deliveryPartner', query, targetPage, force);
       }
 
-      function fetchAdminCustomers(page) {
+      function fetchAdminCustomers(page, force = false) {
         const query = document.getElementById('admin-customers-search')?.value?.trim() || '';
         const targetPage = page || adminUsersPagination.customer.currentPage || 1;
-        return fetchAdminUsers('customer', query, targetPage);
+        return fetchAdminUsers('customer', query, targetPage, force);
       }
 
       function searchAdminUsers(role) {
@@ -4140,7 +4424,7 @@
         const input = document.getElementById(`${prefix}-search`);
         const query = input?.value?.trim() || '';
         if (adminUsersPagination[role]) adminUsersPagination[role].currentPage = 1;
-        fetchAdminUsers(role, query, 1);
+        fetchAdminUsers(role, query, 1, true);
       }
 
       function clearAdminSearch(role) {
@@ -4148,7 +4432,7 @@
         const input = document.getElementById(`${prefix}-search`);
         if (input) input.value = '';
         if (adminUsersPagination[role]) adminUsersPagination[role].currentPage = 1;
-        fetchAdminUsers(role, '', 1);
+        fetchAdminUsers(role, '', 1, true);
       }
 
       function handleAdminSearchInput(role) {
@@ -4164,7 +4448,7 @@
         clearTimeout(adminSearchDebounceTimer);
         adminSearchDebounceTimer = setTimeout(() => {
           if (adminUsersPagination[role]) adminUsersPagination[role].currentPage = 1;
-          fetchAdminUsers(role, query, 1);
+          fetchAdminUsers(role, query, 1, true);
         }, 350);
       }
 
@@ -4290,7 +4574,10 @@
 
                   return `
                     <tr>
-                      <td>${nameCellHtml}</td>
+                      <td>
+                        ${nameCellHtml}
+                        <div style="margin-top:4px; font-size:0.75rem; color:#92400e; font-weight:600;">💳 Credit Points: ${Number(u.creditPoint ?? 0)}</div>
+                      </td>
                       <td>
                         ${u.phone ? `<div>📞 <strong>${escapeHtml(u.phone)}</strong></div>` : '<div style="color:var(--muted); font-size:0.8rem;">No mobile</div>'}
                         ${u.email ? `<div style="margin-top:2px;">✉️ <a href="mailto:${escapeHtml(u.email)}" style="color:var(--ink);">${escapeHtml(u.email)}</a></div>` : '<div style="color:var(--muted); font-size:0.8rem;">No email</div>'}
@@ -4309,6 +4596,9 @@
                       </td>
                       <td>
                         <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+                          ${role === 'admin' ? `
+                            <button type="button" class="btn btn-outline btn-sm" style="background:#fef3c7; border-color:#facc15; color:#92400e; font-weight:600;" onclick="openAdminCreditTransferModal('${escapeHtml(targetRole === 'customer' ? u.customerId || String(u.id || u._id) : targetRole === 'deliveryPartner' ? u.riderId || String(u.id || u._id) : u.restaurantId || String(u.id || u._id))}')">💳 Add Credits</button>
+                          ` : ''}
                           ${targetRole === 'deliveryPartner' ? `
                             <button class="btn btn-outline btn-sm" style="background:#f0fdf4; border-color:#86efac; color:#15803d; font-weight:600;" onclick="openAdminFleetTrackerModal()">📍 Live Radar</button>
                           ` : ''}
@@ -4364,10 +4654,138 @@
         }
       }
 
+      function openAdminCreditTransferModal(recipientId = '') {
+        if (role !== 'admin') return;
+        const recipientInput = document.getElementById('admin-credit-recipient-id');
+        const pointsInput = document.getElementById('admin-credit-points');
+        const purposeInput = document.getElementById('admin-credit-purpose');
+        const orderNumberInput = document.getElementById('admin-credit-order-number');
+        if (recipientInput) recipientInput.value = recipientId;
+        if (pointsInput) pointsInput.value = '';
+        if (purposeInput) purposeInput.value = '';
+        if (orderNumberInput) orderNumberInput.value = '';
+        openModal('admin-credit-transfer-modal');
+        if (recipientId) pointsInput?.focus();
+        else recipientInput?.focus();
+      }
+
+      function showCurrentAdminWalletTransfer({ recipient, creditPoints, purpose, orderNumber, adminCreditPoint }) {
+        const container = document.getElementById('admin-wallet-credit-track');
+        if (!container) return;
+
+        if (!container.querySelector('#current-wallet-transfers')) {
+          container.innerHTML = `
+            <div class="table-wrapper" style="max-height:360px; overflow:auto;">
+              <table style="min-width:900px;">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Recipient</th>
+                    <th>Purpose / Order</th>
+                    <th>Credit Transferred</th>
+                    <th>Admin Balance After (₹ / Points)</th>
+                    <th>Recipient Credit After</th>
+                  </tr>
+                </thead>
+                <tbody id="current-wallet-transfers"></tbody>
+              </table>
+            </div>
+          `;
+        }
+
+        const timestamp = new Date().toLocaleString();
+        const formatBalance = (value) =>
+          Number(value ?? 0).toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          });
+        const formatPoints = (value) =>
+          Number(value ?? 0).toLocaleString();
+        const tbody = container.querySelector('#current-wallet-transfers');
+        if (!tbody) return;
+
+        tbody.insertAdjacentHTML('afterbegin', `
+          <tr>
+            <td>${escapeHtml(timestamp)}</td>
+            <td><strong>${escapeHtml(recipient.name || 'Recipient')}</strong><br><small>${escapeHtml(recipient.role || '')} · ${escapeHtml(recipient.id || '')}</small></td>
+            <td>${escapeHtml(purpose || '—')}${orderNumber ? `<br><small>Order: ${escapeHtml(orderNumber)}</small>` : ''}</td>
+            <td>${escapeHtml(formatPoints(creditPoints))} points</td>
+            <td>₹${escapeHtml(formatBalance(user.walletBalance))} / ${escapeHtml(formatPoints(adminCreditPoint))}</td>
+            <td>${escapeHtml(formatPoints(recipient.creditPoint))} points</td>
+          </tr>
+        `);
+      }
+
+      async function submitAdminCreditTransfer(event) {
+        event.preventDefault();
+        if (role !== 'admin') {
+          alert('Only an administrator can transfer credit points.');
+          return;
+        }
+
+        const recipientId = document.getElementById('admin-credit-recipient-id')?.value?.trim() || '';
+        const pointsInput = document.getElementById('admin-credit-points');
+        const purpose = document.getElementById('admin-credit-purpose')?.value?.trim() || '';
+        const orderNumber = document.getElementById('admin-credit-order-number')?.value?.trim() || '';
+        const creditPoints = Number(pointsInput?.value);
+        if (!recipientId) {
+          alert('Enter a recipient account ID.');
+          return;
+        }
+        if (!Number.isSafeInteger(creditPoints) || creditPoints <= 0) {
+          alert('Enter a positive whole number of credit points.');
+          return;
+        }
+        if (!purpose) {
+          alert('Enter the purpose for this credit-point transfer.');
+          return;
+        }
+        if (!confirm(`Transfer ${creditPoints} credit point(s) from your admin wallet to ${recipientId}?`)) return;
+
+        const submitButton = document.getElementById('admin-credit-transfer-submit');
+        if (submitButton) submitButton.disabled = true;
+        try {
+          const result = await apiFetch(
+            `/api/admin/users/${encodeURIComponent(recipientId)}/credit-points`,
+            {
+              method: 'POST',
+              body: JSON.stringify({ creditPoints, purpose, orderNumber }),
+            },
+          );
+          user.creditPoint = result.adminCreditPoint;
+          localStorage.setItem('tomatoUser', JSON.stringify(user));
+
+          const walletText = document.getElementById('profile-wallet-text');
+          if (walletText) {
+            walletText.textContent = `${Number(user.walletBalance ?? 0).toFixed(2)}/${Number(user.creditPoint ?? 0).toFixed(0)}`;
+          }
+
+          document.getElementById('admin-credit-transfer-form')?.reset();
+          showCurrentAdminWalletTransfer({
+            recipient: result.recipient,
+            creditPoints,
+            purpose,
+            orderNumber,
+            adminCreditPoint: result.adminCreditPoint,
+          });
+
+          showToastNotification({
+            title: 'Credit Points Transferred',
+            message: `${creditPoints} point(s) added to ${result.recipient.name} (${result.recipient.role}). Admin wallet: ${result.adminCreditPoint} points remaining.`,
+            type: 'success',
+          });
+          refreshAdminViews();
+        } catch (error) {
+          alert(`Credit-point transfer failed: ${error.message}`);
+        } finally {
+          if (submitButton) submitButton.disabled = false;
+        }
+      }
+
       function refreshAdminViews() {
-        if (activeView === 'admin-restaurants') fetchAdminRestaurants();
-        else if (activeView === 'admin-riders') fetchAdminRiders();
-        else if (activeView === 'admin-customers') fetchAdminCustomers();
+        if (activeView === 'admin-restaurants') fetchAdminRestaurants(null, true);
+        else if (activeView === 'admin-riders') fetchAdminRiders(null, true);
+        else if (activeView === 'admin-customers') fetchAdminCustomers(null, true);
         else loadRoleOverview();
       }
 
@@ -4536,7 +4954,7 @@
 
         clearTimeout(adminSubAdminSearchDebounceTimer);
         adminSubAdminSearchDebounceTimer = setTimeout(() => {
-          fetchAdminSubAdmins();
+          fetchAdminSubAdmins(true);
         }, 350);
       }
 
@@ -4545,20 +4963,35 @@
         if (input) input.value = '';
         const clearBtn = document.getElementById('admin-subadmins-clear-btn');
         if (clearBtn) clearBtn.style.display = 'none';
-        fetchAdminSubAdmins();
+        fetchAdminSubAdmins(true);
       }
 
-      async function fetchAdminSubAdmins() {
+      async function fetchAdminSubAdmins(force = false) {
         const container = document.getElementById('admin-subadmins-table');
         const statsContainer = document.getElementById('admin-subadmins-stats');
         if (!container) return;
-        container.innerHTML = '<p style="color:var(--muted); padding:1rem 0;">Loading sub-administrators...</p>';
 
         const q = document.getElementById('admin-subadmins-search')?.value?.trim() || '';
+        const cacheKey = `subadmins_${q}`;
+        const hasExisting = container.children.length > 0 && !container.querySelector('.skeleton-shimmer');
+        const now = Date.now();
+
+        if (!force && hasExisting && viewLastFetched[cacheKey] && (now - viewLastFetched[cacheKey] < 15000)) {
+          return;
+        }
+
+        if (!hasExisting) {
+          container.innerHTML = renderTableSkeleton('sub-administrators');
+        } else {
+          container.style.opacity = '0.75';
+          container.style.transition = 'opacity 0.15s ease';
+        }
+
         const queryParam = q ? `?search=${encodeURIComponent(q)}` : '';
 
         try {
           const res = await apiFetch(`/api/admin/subadmins${queryParam}`);
+          viewLastFetched[cacheKey] = now;
           const subadmins = res.subadmins || [];
           currentSubAdminsList = subadmins;
 
@@ -4582,6 +5015,9 @@
                 <span style="font-size:2rem; display:block; margin-bottom:0.5rem;">🛡️</span>
                 <strong style="font-size:1.1rem; color:var(--ink);">${q ? `No sub-admins found matching "${escapeHtml(q)}"` : 'No Sub-Administrators Created Yet'}</strong>
                 <p style="margin-top:0.4rem; font-size:0.85rem;">Click "+ Create Sub-Admin" above to delegate management roles with custom permissions.</p>
+                <div style="margin-top:1rem;">
+                  <button type="button" class="btn btn-primary btn-sm" style="background:var(--green); border-color:var(--green);" onclick="openCreateSubAdminModal()">➕ Create Sub-Admin</button>
+                </div>
               </div>
             `;
             return;
@@ -4653,39 +5089,88 @@
             </div>
           `;
         } catch (err) {
-          container.innerHTML = `<p style="color:var(--tomato-dark);">${err.message}</p>`;
+          if (!hasExisting) {
+            container.innerHTML = `<p style="color:var(--tomato-dark); padding:1rem 0;">${err.message}</p>`;
+          } else {
+            console.error('Fetch subadmins error:', err);
+          }
+        } finally {
+          container.style.opacity = '1';
         }
       }
 
       function openCreateSubAdminModal() {
-        document.getElementById('create-subadmin-form').reset();
-        document.getElementById('subadm-preset').value = 'operations_lead';
-        applySubAdminPreset('operations_lead', 'subadm-perm-');
+        try {
+          const form = document.getElementById('create-subadmin-form');
+          if (form) form.reset();
+
+          const nameInput = document.getElementById('subadm-name');
+          if (nameInput) nameInput.value = '';
+          const emailInput = document.getElementById('subadm-email');
+          if (emailInput) emailInput.value = '';
+          const phoneInput = document.getElementById('subadm-phone');
+          if (phoneInput) phoneInput.value = '';
+          const passInput = document.getElementById('subadm-password');
+          if (passInput) passInput.value = '';
+          const titleInput = document.getElementById('subadm-title');
+          if (titleInput) titleInput.value = 'Operations Sub-Admin';
+          const presetSelect = document.getElementById('subadm-preset');
+          if (presetSelect) presetSelect.value = 'operations_lead';
+
+          if (typeof applySubAdminPreset === 'function') {
+            applySubAdminPreset('operations_lead', 'subadm-perm-');
+          }
+        } catch (err) {
+          console.warn('Error preparing subadmin form:', err);
+        }
         openModal('admin-create-subadmin-modal');
       }
 
       async function submitCreateSubAdmin(e) {
-        e.preventDefault();
+        if (e && e.preventDefault) e.preventDefault();
         const submitBtn = document.getElementById('btn-create-subadmin-submit');
-        if (submitBtn) submitBtn.disabled = true;
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.textContent = 'Creating...';
+        }
 
-        const name = document.getElementById('subadm-name').value.trim();
-        const email = document.getElementById('subadm-email').value.trim();
-        const phone = document.getElementById('subadm-phone').value.trim();
-        const password = document.getElementById('subadm-password').value;
-        const adminRoleTitle = document.getElementById('subadm-title').value.trim() || 'Operations Sub-Admin';
+        const name = document.getElementById('subadm-name')?.value?.trim() || '';
+        const email = document.getElementById('subadm-email')?.value?.trim() || '';
+        const phone = document.getElementById('subadm-phone')?.value?.trim() || '';
+        const password = document.getElementById('subadm-password')?.value || '';
+        const adminRoleTitle = document.getElementById('subadm-title')?.value?.trim() || 'Operations Sub-Admin';
+
+        if (!name) {
+          alert('Full name is required.');
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Create Sub-Admin'; }
+          return;
+        }
+
+        if (!email && !phone) {
+          alert('Please enter either an email address or mobile number.');
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Create Sub-Admin'; }
+          return;
+        }
+
+        if (!password || password.length < 8) {
+          alert('Password must be at least 8 characters long.');
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Create Sub-Admin'; }
+          return;
+        }
 
         // Collect checked permissions
         const permissions = [];
-        Object.keys(RBAC_PERMISSIONS_MAP).forEach((key) => {
-          if (document.getElementById(`subadm-perm-${key}`)?.checked) {
-            permissions.push(key);
-          }
-        });
+        if (typeof RBAC_PERMISSIONS_MAP !== 'undefined') {
+          Object.keys(RBAC_PERMISSIONS_MAP).forEach((key) => {
+            if (document.getElementById(`subadm-perm-${key}`)?.checked) {
+              permissions.push(key);
+            }
+          });
+        }
 
         if (!permissions.length) {
           alert('Please select at least one permission for this sub-admin.');
-          if (submitBtn) submitBtn.disabled = false;
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Create Sub-Admin'; }
           return;
         }
 
@@ -4701,7 +5186,10 @@
         } catch (err) {
           alert(`Error: ${err.message}`);
         } finally {
-          if (submitBtn) submitBtn.disabled = false;
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Create Sub-Admin';
+          }
         }
       }
 
@@ -4803,7 +5291,7 @@
         const endInput = document.getElementById('admin-analytics-end-date');
         if (startInput) startInput.value = todayStr;
         if (endInput) endInput.value = todayStr;
-        fetchAdminAnalytics(false);
+        fetchAdminAnalytics(false, true);
       }
 
       function setAdminAnalyticsAllTime() {
@@ -4811,11 +5299,11 @@
         const endInput = document.getElementById('admin-analytics-end-date');
         if (startInput) startInput.value = '';
         if (endInput) endInput.value = '';
-        fetchAdminAnalytics(true);
+        fetchAdminAnalytics(true, true);
       }
 
       // Admin Analytics View
-      async function fetchAdminAnalytics(isAllTime = false) {
+      async function fetchAdminAnalytics(isAllTime = false, force = false) {
         const container = document.getElementById('admin-analytics-content');
         if (!container) return;
 
@@ -4838,6 +5326,21 @@
         const startDate = startInput ? startInput.value.trim() : '';
         const endDate = endInput ? endInput.value.trim() : '';
 
+        const cacheKey = `analytics_${isAllTime}_${startDate}_${endDate}`;
+        const hasExisting = container.children.length > 0 && !container.querySelector('.skeleton-shimmer');
+        const now = Date.now();
+
+        if (!force && hasExisting && viewLastFetched[cacheKey] && (now - viewLastFetched[cacheKey] < 30000)) {
+          return;
+        }
+
+        if (!hasExisting) {
+          container.innerHTML = renderAnalyticsSkeleton();
+        } else {
+          container.style.opacity = '0.75';
+          container.style.transition = 'opacity 0.15s ease';
+        }
+
         // Build query string
         let queryParams = '';
         if (isAllTime) {
@@ -4849,10 +5352,9 @@
           queryParams = `?${params.toString()}`;
         }
 
-        container.innerHTML = '<p style="color:var(--muted); padding:1rem 0;">Loading platform business analytics...</p>';
-
         try {
           const data = await apiFetch(`/api/admin/analytics${queryParams}`);
+          viewLastFetched[cacheKey] = now;
           const an = data.analytics || {};
 
           // Format Indian Rupee currency
@@ -5071,7 +5573,13 @@
             </div>
           `;
         } catch (e) {
-          container.innerHTML = `<p style="color:var(--tomato-dark); padding:1rem 0;">Error loading analytics: ${e.message}</p>`;
+          if (!hasExisting) {
+            container.innerHTML = `<p style="color:var(--tomato-dark); padding:1rem 0;">Error loading analytics: ${e.message}</p>`;
+          } else {
+            console.error('Fetch analytics error:', e);
+          }
+        } finally {
+          container.style.opacity = '1';
         }
       }
 

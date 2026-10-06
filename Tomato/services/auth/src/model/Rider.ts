@@ -11,6 +11,8 @@ export interface IRider extends Document {
   resetPasswordExpiresAt?: Date;
   isApproved: boolean;
   isBlocked: boolean;
+  walletBalance: number;
+  creditPoint: number;
   riderId: string;
   deliveryVehicle: string;
   currentLocation: {
@@ -45,6 +47,8 @@ const schema: Schema<IRider> = new Schema(
     resetPasswordExpiresAt: { type: Date, select: false },
     isApproved: { type: Boolean, default: false },
     isBlocked: { type: Boolean, default: false },
+    walletBalance: { type: Number, default: 0, min: 0 },
+    creditPoint: { type: Number, default: 0, min: 0 },
     riderId: { type: String, unique: true, sparse: true, trim: true },
     deliveryVehicle: { type: String, default: 'motorcycle' },
     currentLocation: {

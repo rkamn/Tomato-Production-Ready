@@ -11,6 +11,8 @@ export interface ICustomer extends Document {
   resetPasswordExpiresAt?: Date;
   isApproved: boolean;
   isBlocked: boolean;
+  walletBalance: number;
+  creditPoint: number;
   customerId: string;
   createdAt?: Date;
   updatedAt?: Date;
@@ -38,6 +40,8 @@ const schema: Schema<ICustomer> = new Schema(
     resetPasswordExpiresAt: { type: Date, select: false },
     isApproved: { type: Boolean, default: true },
     isBlocked: { type: Boolean, default: false },
+    walletBalance: { type: Number, default: 0, min: 0 },
+    creditPoint: { type: Number, default: 0, min: 0 },
     customerId: { type: String, unique: true, sparse: true, trim: true },
   },
   { timestamps: true, collection: 'customers' },

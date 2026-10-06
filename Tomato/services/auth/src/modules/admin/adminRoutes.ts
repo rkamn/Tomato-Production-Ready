@@ -8,6 +8,7 @@ import User, { IUser, USER_ROLES, UserRole } from '../../model/User.js';
 import Restaurant, { IRestaurant } from '../../model/Restaurant.js';
 import Customer, { ICustomer } from '../../model/Customer.js';
 import Rider, { IRider } from '../../model/Rider.js';
+import WalletCreditTrack from '../../model/WalletCreditTrack.js';
 import {
   authenticate,
   AuthenticatedRequest,
@@ -24,6 +25,10 @@ import {
   getPartnerDisplayName,
 } from '../../controllers/auth.js';
 import notificationService from '../../services/notificationService.js';
+import {
+  transferCreditPoints,
+  WalletServiceError,
+} from '../../services/walletService.js';
 import {
   formatBill,
   buildOrderLiveTrackingData,
@@ -63,6 +68,31 @@ const createAdminRouter = () => {
       return res.status(500).json({ message: 'Unable to fetch notifications' });
     }
   });
+
+  router.get(
+    '/wallet-credit-track',
+    requireRole('admin'),
+    async (req: Request, res: Response) => {
+      try {
+        const parsedLimit = Number.parseInt(String(req.query.limit || '50'), 10);
+        const limit = Number.isFinite(parsedLimit)
+          ? Math.min(Math.max(parsedLimit, 1), 100)
+          : 50;
+        const records = await WalletCreditTrack.find({
+          recordType: 'transfer',
+        })
+          .sort({ createdAt: -1 })
+          .limit(limit)
+          .lean();
+        return res.json({ records });
+      } catch (error) {
+        console.error('Wallet credit history fetch failed:', error);
+        return res.status(500).json({
+          message: 'Unable to fetch wallet credit history',
+        });
+      }
+    },
+  );
 
   // 1. Dashboard summary and analytics
   router.get(
@@ -916,6 +946,13 @@ const createAdminRouter = () => {
         });
       }
 
+      const currentUser = (req as AuthenticatedRequest).user;
+      if (currentUser?.role === 'subadmin' && role === 'admin') {
+        return res.status(403).json({
+          message: 'Access denied. Sub-admins cannot create administrator accounts.',
+        });
+      }
+
       const duplicateQuery = {
         $or: [
           ...(email ? [{ email: email.trim().toLowerCase() }] : []),
@@ -1070,11 +1107,75 @@ const createAdminRouter = () => {
   });
 
   // Update user
+  router.post(
+    '/users/:userId/credit-points',
+    requireRole('admin'),
+    async (req: Request, res: Response) => {
+      const adminId = (req as AuthenticatedRequest).user?.userId;
+      const recipientId = String(req.params.userId || '');
+
+      if (!adminId) {
+        return res.status(401).json({ message: 'Authentication required' });
+      }
+      if (!recipientId.trim() || recipientId.length > 128) {
+        return res.status(400).json({ message: 'Recipient user ID is required' });
+      }
+
+      try {
+        const transfer = await transferCreditPoints(
+          adminId,
+          recipientId,
+          req.body?.creditPoints,
+          req.body?.purpose,
+          req.body?.orderNumber,
+        );
+        return res.json({
+          message: `Transferred ${req.body.creditPoints} credit point(s) successfully`,
+          ...transfer,
+        });
+      } catch (error) {
+        if (error instanceof WalletServiceError) {
+          return res.status(error.statusCode).json({ message: error.message });
+        }
+        console.error('Admin credit-point transfer failed:', error);
+        return res.status(500).json({ message: 'Unable to transfer credit points' });
+      }
+    },
+  );
+
   router.put('/users/:userId', async (req: Request, res: Response) => {
     try {
       const userId = String(req.params.userId || '');
+      const currentUser = (req as AuthenticatedRequest).user;
       if (!userId || !mongoose.isValidObjectId(userId)) {
         return res.status(400).json({ message: 'Valid user ID is required' });
+      }
+
+      // Sub-admin can NEVER modify or update permissions of an admin account:
+      const targetUser = await User.findById(userId);
+      if (targetUser && targetUser.role === 'admin') {
+        if (currentUser?.role === 'subadmin') {
+          return res.status(403).json({
+            message: 'Access denied. Sub-admins can never delete, modify, or update permissions of administrator accounts.',
+          });
+        }
+      }
+
+      // Sub-admin can never elevate any account to admin role:
+      if (currentUser?.role === 'subadmin' && req.body.role === 'admin') {
+        return res.status(403).json({
+          message: 'Access denied. Sub-admins cannot assign or elevate to the administrator role.',
+        });
+      }
+
+      // Sub-admin can never modify permissions or operational titles:
+      if (
+        currentUser?.role === 'subadmin' &&
+        (req.body.permissions !== undefined || req.body.adminRoleTitle !== undefined)
+      ) {
+        return res.status(403).json({
+          message: 'Access denied. Sub-admins cannot modify administrator or operational permissions.',
+        });
       }
 
       const {
@@ -1342,8 +1443,24 @@ const createAdminRouter = () => {
   router.post('/users/:userId/block', async (req: Request, res: Response) => {
     try {
       const userId = String(req.params.userId || '');
+      const currentUser = (req as AuthenticatedRequest).user;
       if (!userId || !mongoose.isValidObjectId(userId)) {
         return res.status(400).json({ message: 'Valid user ID is required' });
+      }
+
+      // Check if target is an administrator or sub-admin
+      const targetUserRecord = await User.findById(userId);
+      if (targetUserRecord) {
+        if (targetUserRecord.role === 'admin') {
+          return res.status(403).json({
+            message: 'Access denied. Administrator accounts cannot be blocked or modified.',
+          });
+        }
+        if (targetUserRecord.role === 'subadmin' && currentUser?.role !== 'admin') {
+          return res.status(403).json({
+            message: 'Access denied. Only the platform administrator can block sub-admin accounts.',
+          });
+        }
       }
 
       let user: any = await Restaurant.findByIdAndUpdate(
@@ -1397,8 +1514,24 @@ const createAdminRouter = () => {
   router.post('/users/:userId/unblock', async (req: Request, res: Response) => {
     try {
       const userId = String(req.params.userId || '');
+      const currentUser = (req as AuthenticatedRequest).user;
       if (!userId || !mongoose.isValidObjectId(userId)) {
         return res.status(400).json({ message: 'Valid user ID is required' });
+      }
+
+      // Check if target is an administrator or sub-admin
+      const targetUserRecord = await User.findById(userId);
+      if (targetUserRecord) {
+        if (targetUserRecord.role === 'admin') {
+          return res.status(403).json({
+            message: 'Access denied. Administrator accounts cannot be modified.',
+          });
+        }
+        if (targetUserRecord.role === 'subadmin' && currentUser?.role !== 'admin') {
+          return res.status(403).json({
+            message: 'Access denied. Only the platform administrator can unblock sub-admin accounts.',
+          });
+        }
       }
 
       let user: any = await Restaurant.findByIdAndUpdate(
@@ -1504,6 +1637,12 @@ const createAdminRouter = () => {
     async (req: Request, res: Response) => {
       try {
         const creator = (req as AuthenticatedRequest).user;
+        if (creator?.role !== 'admin') {
+          return res.status(403).json({
+            message: 'Access denied. Only the platform administrator can create sub-admin accounts.',
+          });
+        }
+
         const { name, email, phone, password, adminRoleTitle, permissions } =
           req.body;
 
@@ -1601,6 +1740,13 @@ const createAdminRouter = () => {
     requirePermission('subadmins_manage'),
     async (req: Request, res: Response) => {
       try {
+        const currentUser = (req as AuthenticatedRequest).user;
+        if (currentUser?.role !== 'admin') {
+          return res.status(403).json({
+            message: 'Access denied. Only the platform administrator can update sub-admin roles and permissions.',
+          });
+        }
+
         const subAdminId = req.params.id;
         if (!mongoose.isValidObjectId(subAdminId)) {
           return res.status(400).json({ message: 'Invalid sub-admin ID' });
@@ -1609,6 +1755,12 @@ const createAdminRouter = () => {
         const targetUser = await User.findById(subAdminId);
         if (!targetUser) {
           return res.status(404).json({ message: 'Sub-admin not found' });
+        }
+
+        if (targetUser.role === 'admin') {
+          return res.status(403).json({
+            message: 'Access denied. Administrator permissions and roles cannot be modified.',
+          });
         }
 
         if (targetUser.role !== 'subadmin') {
@@ -1666,8 +1818,14 @@ const createAdminRouter = () => {
     requirePermission('subadmins_manage'),
     async (req: Request, res: Response) => {
       try {
-        const subAdminId = req.params.id;
         const currentUser = (req as AuthenticatedRequest).user;
+        if (currentUser?.role !== 'admin') {
+          return res.status(403).json({
+            message: 'Access denied. Only the platform administrator can change sub-admin status.',
+          });
+        }
+
+        const subAdminId = req.params.id;
         if (!mongoose.isValidObjectId(subAdminId)) {
           return res.status(400).json({ message: 'Invalid sub-admin ID' });
         }
@@ -1685,9 +1843,9 @@ const createAdminRouter = () => {
           return res.status(404).json({ message: 'Sub-admin not found' });
         if (target.role !== 'subadmin') {
           return res
-            .status(400)
+            .status(403)
             .json({
-              message: 'Cannot block super-admin through sub-admin management',
+              message: 'Access denied. Cannot modify status of administrator accounts.',
             });
         }
 
@@ -1717,8 +1875,14 @@ const createAdminRouter = () => {
     requirePermission('subadmins_manage'),
     async (req: Request, res: Response) => {
       try {
-        const subAdminId = req.params.id;
         const currentUser = (req as AuthenticatedRequest).user;
+        if (currentUser?.role !== 'admin') {
+          return res.status(403).json({
+            message: 'Access denied. Only the platform administrator can delete sub-admin accounts.',
+          });
+        }
+
+        const subAdminId = req.params.id;
         if (!mongoose.isValidObjectId(subAdminId)) {
           return res.status(400).json({ message: 'Invalid sub-admin ID' });
         }
@@ -1736,8 +1900,8 @@ const createAdminRouter = () => {
           return res.status(404).json({ message: 'Sub-admin not found' });
         if (target.role !== 'subadmin') {
           return res
-            .status(400)
-            .json({ message: 'Cannot delete super-admin account' });
+            .status(403)
+            .json({ message: 'Access denied. Administrator accounts cannot be deleted.' });
         }
 
         await User.findByIdAndDelete(subAdminId);

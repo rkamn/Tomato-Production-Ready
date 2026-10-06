@@ -11,6 +11,8 @@ export interface IRestaurant extends Document {
   resetPasswordExpiresAt?: Date;
   isApproved: boolean;
   isBlocked: boolean;
+  walletBalance: number;
+  creditPoint: number;
   restaurantId: string;
   digipin: string;
   restaurantAddress: string;
@@ -48,6 +50,8 @@ const schema: Schema<IRestaurant> = new Schema(
     resetPasswordExpiresAt: { type: Date, select: false },
     isApproved: { type: Boolean, default: false },
     isBlocked: { type: Boolean, default: false },
+    walletBalance: { type: Number, default: 0, min: 0 },
+    creditPoint: { type: Number, default: 0, min: 0 },
     restaurantId: { type: String, unique: true, sparse: true, trim: true },
     digipin: { type: String, default: '', trim: true },
     restaurantAddress: { type: String, default: '' },

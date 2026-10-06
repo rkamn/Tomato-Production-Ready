@@ -6,6 +6,7 @@ import Order, { IOrder, OrderStatus } from './Order.js';
 import FoodItem, { IFoodItem } from './FoodItem.js';
 import Notification, { INotification } from './Notification.js';
 import Address, { IAddress } from './Address.js';
+import WalletCreditTrack, { IWalletCreditTrack } from './WalletCreditTrack.js';
 
 export {
   User,
@@ -27,6 +28,8 @@ export {
   INotification,
   Address,
   IAddress,
+  WalletCreditTrack,
+  IWalletCreditTrack,
 };
 
 export default {
@@ -38,4 +41,5 @@ export default {
   FoodItem,
   Notification,
   Address,
+  WalletCreditTrack,
 };

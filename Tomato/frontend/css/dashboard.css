@@ -561,14 +561,38 @@
       /* Views handling */
       .view-section {
         display: none;
+        min-height: 520px;
       }
       .view-section.active {
         display: block;
-        animation: fadeIn 0.25s ease-out;
+        animation: viewFadeIn 0.15s ease-out;
       }
-      @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(6px); }
-        to { opacity: 1; transform: translateY(0); }
+      @keyframes viewFadeIn {
+        from { opacity: 0.85; }
+        to { opacity: 1; }
+      }
+
+      /* Skeleton loaders for seamless view switching without layout shift */
+      .skeleton-table-wrapper {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 1.25rem;
+        min-height: 380px;
+        display: flex;
+        flex-direction: column;
+        gap: 0.85rem;
+        box-shadow: var(--shadow-sm);
+      }
+      .skeleton-shimmer {
+        background: linear-gradient(90deg, #ede8dc 25%, #f7f5ee 50%, #ede8dc 75%);
+        background-size: 200% 100%;
+        animation: skeletonShimmer 1.4s ease-in-out infinite;
+        border-radius: 6px;
+      }
+      @keyframes skeletonShimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
       }
 
       /* Food ordering grid & cards */

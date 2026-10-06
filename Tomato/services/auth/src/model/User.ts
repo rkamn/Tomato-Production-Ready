@@ -20,6 +20,8 @@ export interface IUser extends Document {
   resetPasswordExpiresAt?: Date;
   isApproved?: boolean;
   isBlocked?: boolean;
+  walletBalance?: number;
+  creditPoint?: number;
   adminRoleTitle?: string;
   permissions?: string[];
   createdBy?: string;
@@ -67,6 +69,8 @@ const schema: Schema<IUser> = new Schema(
     resetPasswordExpiresAt: { type: Date, select: false },
     isApproved: { type: Boolean, default: true },
     isBlocked: { type: Boolean, default: false },
+    walletBalance: { type: Number, min: 0 },
+    creditPoint: { type: Number, min: 0 },
     adminRoleTitle: { type: String, default: 'Sub-Admin' },
     permissions: { type: [String], default: [] },
     createdBy: { type: String, default: '' },

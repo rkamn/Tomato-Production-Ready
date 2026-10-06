@@ -3,32 +3,14 @@ import mongoose from 'mongoose';
 import Address from '../../model/Address.js';
 import FoodItem from '../../model/FoodItem.js';
 import Notification from '../../model/Notification.js';
-import Order, { IOrder, OrderStatus } from '../../model/Order.js';
-import User, { IUser, USER_ROLES, UserRole } from '../../model/User.js';
-import Restaurant, { IRestaurant } from '../../model/Restaurant.js';
-import Customer, { ICustomer } from '../../model/Customer.js';
-import Rider, { IRider } from '../../model/Rider.js';
-import {
-  authenticate,
-  AuthenticatedRequest,
-  requireRole,
-  requirePermission,
-} from '../../middleware/authenticate.js';
-import {
-  hashPassword,
-  userResponse,
-  generateRestaurantId,
-  generateRiderId,
-  generateCustomerId,
-  generateSubAdminId,
-  getPartnerDisplayName,
-} from '../../controllers/auth.js';
+import Order, { IOrder } from '../../model/Order.js';
+import OrderCounter from '../../model/OrderCounter.js';
+import User from '../../model/User.js';
+import Restaurant from '../../model/Restaurant.js';
+import Customer from '../../model/Customer.js';
+import { authenticate, AuthenticatedRequest, requireRole } from '../../middleware/authenticate.js';
 import notificationService from '../../services/notificationService.js';
-import {
-  formatBill,
-  buildOrderLiveTrackingData,
-  createNotificationForRole,
-} from '../../utils/orderHelpers.js';
+import { formatBill, buildOrderLiveTrackingData } from '../../utils/orderHelpers.js';
 
 const createCustomerRouter = () => {
   const router = express.Router();
@@ -474,7 +456,7 @@ const createCustomerRouter = () => {
       const deliveryFee = 40;
       const totalAmount = Number((subtotal + tax + deliveryFee).toFixed(2));
 
-      let restaurantIdStr =
+      const restaurantIdStr =
         typeof req.body?.restaurantId === 'string' ? req.body.restaurantId : '';
       let restaurantUser: any = null;
 
@@ -527,45 +509,30 @@ const createCustomerRouter = () => {
       let deliveryAddress = req.body?.deliveryAddress;
       const addressId = req.body?.addressId;
 
-      if (
-        (!deliveryAddress || !deliveryAddress.line1) &&
-        addressId &&
-        mongoose.isValidObjectId(addressId)
-      ) {
-        const chosenAddr = await Address.findOne({
-          _id: new mongoose.Types.ObjectId(addressId),
-          userId: user.userId,
-        }).lean();
-        if (chosenAddr) {
-          deliveryAddress = {
-            label: chosenAddr.label || 'Home',
-            phone: chosenAddr.phone || customer?.phone || '',
-            line1: chosenAddr.line1,
-            line2: chosenAddr.line2 || '',
-            city: chosenAddr.city,
-            state: chosenAddr.state || '',
-            postalCode: chosenAddr.postalCode || '',
-            coordinates: chosenAddr.location?.coordinates || [77.5946, 12.9716],
-          };
-        }
-      }
-
       if (!deliveryAddress || !deliveryAddress.line1) {
-        const defaultAddr =
+        const savedAddress =
+          (addressId && mongoose.isValidObjectId(addressId)
+            ? await Address.findOne({
+                _id: new mongoose.Types.ObjectId(addressId),
+                userId: user.userId,
+              }).lean()
+            : null) ||
           (await Address.findOne({
             userId: user.userId,
             isDefault: true,
-          }).lean()) || (await Address.findOne({ userId: user.userId }).lean());
-        if (defaultAddr) {
+          }).lean()) ||
+          (await Address.findOne({ userId: user.userId }).lean());
+
+        if (savedAddress) {
           deliveryAddress = {
-            label: defaultAddr.label || 'Home',
-            phone: defaultAddr.phone || customer?.phone || '',
-            line1: defaultAddr.line1,
-            line2: defaultAddr.line2 || '',
-            city: defaultAddr.city,
-            state: defaultAddr.state || '',
-            postalCode: defaultAddr.postalCode || '',
-            coordinates: defaultAddr.location?.coordinates || [
+            label: savedAddress.label || 'Home',
+            phone: savedAddress.phone || customer?.phone || '',
+            line1: savedAddress.line1,
+            line2: savedAddress.line2 || '',
+            city: savedAddress.city,
+            state: savedAddress.state || '',
+            postalCode: savedAddress.postalCode || '',
+            coordinates: savedAddress.location?.coordinates || [
               77.5946, 12.9716,
             ],
           };
@@ -593,10 +560,36 @@ const createCustomerRouter = () => {
           : `TXN_${Date.now()}_${Math.random().toString(36).substring(2, 7).toUpperCase()}`);
       const paymentStatus = paymentMethod === 'cod' ? 'pending' : 'paid';
 
-      const randomSuffix = Math.floor(1000 + Math.random() * 9000);
       const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      const orderNumber = `TOM-${dateStr}-${randomSuffix}`;
-      const billNumber = `BILL-TOM-${dateStr}-${randomSuffix}`;
+      try {
+        await OrderCounter.updateOne(
+          { _id: dateStr },
+          { $setOnInsert: { lastNumber: 1000 } },
+          { upsert: true },
+        );
+      } catch (error) {
+        if (
+          typeof error !== 'object' ||
+          error === null ||
+          !('code' in error) ||
+          error.code !== 11000
+        ) {
+          throw error;
+        }
+      }
+
+      const orderCounter = await OrderCounter.findOneAndUpdate(
+        { _id: dateStr },
+        { $inc: { lastNumber: 1 } },
+        { new: true },
+      );
+      if (!orderCounter) {
+        throw new Error(`Unable to allocate order number for ${dateStr}`);
+      }
+
+      const orderNumberSuffix = orderCounter.lastNumber;
+      const orderNumber = `TOM-${dateStr}-${orderNumberSuffix}`;
+      const billNumber = `BILL-TOM-${dateStr}-${orderNumberSuffix}`;
 
       const orderData: Record<string, unknown> = {
         orderNumber,

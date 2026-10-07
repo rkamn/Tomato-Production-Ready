@@ -4,8 +4,7 @@ import Address from '../../model/Address.js';
 import FoodItem from '../../model/FoodItem.js';
 import Notification from '../../model/Notification.js';
 import Order, { IOrder } from '../../model/Order.js';
-import OrderCounter from '../../model/OrderCounter.js';
-import User from '../../model/User.js';
+import Counter, { getNextCounterValue } from '../../model/Counter.js';
 import Restaurant from '../../model/Restaurant.js';
 import Customer from '../../model/Customer.js';
 import { authenticate, AuthenticatedRequest, requireRole } from '../../middleware/authenticate.js';
@@ -58,7 +57,7 @@ const createCustomerRouter = () => {
       return res.json({
         restaurants: restaurants.map((r) => {
           const restId = r.restaurantId || '';
-          const displayName = `${r.name}${restId ? '/' + restId : ''}`;
+          const displayName = r.name;
           const isOpen = r.isOpen ?? r.isOnline ?? true;
           return {
             id: r._id,
@@ -404,9 +403,7 @@ const createCustomerRouter = () => {
       if (!user?.userId)
         return res.status(401).json({ message: 'Authentication required' });
 
-      const customer =
-        (await Customer.findById(user.userId).lean()) ||
-        (await User.findById(user.userId).lean());
+      const customer = await Customer.findById(user.userId).lean();
       const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
       if (!rawItems.length)
         return res.status(400).json({ message: 'Order items are required' });
@@ -461,24 +458,18 @@ const createCustomerRouter = () => {
       let restaurantUser: any = null;
 
       if (restaurantIdStr && mongoose.isValidObjectId(restaurantIdStr)) {
-        restaurantUser =
-          (await Restaurant.findById(restaurantIdStr)) ||
-          (await User.findById(restaurantIdStr));
+        restaurantUser = await Restaurant.findById(restaurantIdStr);
       }
 
       if (!restaurantUser && sanitizedItems[0]) {
         const itemDoc = await FoodItem.findById(sanitizedItems[0].foodItemId);
         if (itemDoc?.restaurantId) {
-          restaurantUser =
-            (await Restaurant.findById(itemDoc.restaurantId)) ||
-            (await User.findById(itemDoc.restaurantId));
+          restaurantUser = await Restaurant.findById(itemDoc.restaurantId);
         }
       }
 
       if (!restaurantUser) {
-        restaurantUser =
-          (await Restaurant.findOne()) ||
-          (await User.findOne({ role: 'restaurant' }));
+        restaurantUser = await Restaurant.findOne();
       }
 
       if (
@@ -496,7 +487,7 @@ const createCustomerRouter = () => {
       const restaurantCode = restaurantUser?.restaurantId || '';
       const digipin = restaurantUser?.digipin || '';
       const restaurantName = restaurantUser
-        ? `${restaurantUser.name}${restaurantUser.restaurantId ? '/' + restaurantUser.restaurantId : ''}`
+        ? restaurantUser.name
         : 'Tomato Partner Restaurant';
       const restaurantAddress =
         restaurantUser?.restaurantAddress ||
@@ -561,33 +552,8 @@ const createCustomerRouter = () => {
       const paymentStatus = paymentMethod === 'cod' ? 'pending' : 'paid';
 
       const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      try {
-        await OrderCounter.updateOne(
-          { _id: dateStr },
-          { $setOnInsert: { lastNumber: 1000 } },
-          { upsert: true },
-        );
-      } catch (error) {
-        if (
-          typeof error !== 'object' ||
-          error === null ||
-          !('code' in error) ||
-          error.code !== 11000
-        ) {
-          throw error;
-        }
-      }
-
-      const orderCounter = await OrderCounter.findOneAndUpdate(
-        { _id: dateStr },
-        { $inc: { lastNumber: 1 } },
-        { new: true },
-      );
-      if (!orderCounter) {
-        throw new Error(`Unable to allocate order number for ${dateStr}`);
-      }
-
-      const orderNumberSuffix = orderCounter.lastNumber;
+      const orderNumberSuffix = await getNextCounterValue(`orderId_${dateStr}`, 1000);
+      await getNextCounterValue('orderId', 1000);
       const orderNumber = `TOM-${dateStr}-${orderNumberSuffix}`;
       const billNumber = `BILL-TOM-${dateStr}-${orderNumberSuffix}`;
 
@@ -701,16 +667,14 @@ const createCustomerRouter = () => {
 
       const [restaurantUser, customerUser] = await Promise.all([
         order.restaurantId
-          ? (await Restaurant.findById(order.restaurantId).lean()) ||
-            (await User.findById(order.restaurantId).lean())
+          ? await Restaurant.findById(order.restaurantId).lean()
           : null,
         order.customerId
-          ? (await Customer.findById(order.customerId).lean()) ||
-            (await User.findById(order.customerId).lean())
+          ? await Customer.findById(order.customerId).lean()
           : null,
       ]);
 
-      const bill = formatBill(order, restaurantUser, customerUser);
+      const bill = formatBill(order, restaurantUser as any, customerUser as any);
       return res.json({ bill });
     } catch (error) {
       console.error('Customer bill fetch failed:', error);

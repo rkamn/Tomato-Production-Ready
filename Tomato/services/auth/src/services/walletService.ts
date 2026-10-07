@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import Customer, { ICustomer } from '../model/Customer.js';
 import Restaurant, { IRestaurant } from '../model/Restaurant.js';
 import Rider, { IRider } from '../model/Rider.js';
-import User, { IUser } from '../model/User.js';
+import Employee, { IEmployee } from '../model/Employee.js';
 import WalletCreditTrack from '../model/WalletCreditTrack.js';
 
 export class WalletServiceError extends Error {
@@ -29,8 +29,7 @@ const getAdminWalletSnapshot = async (adminId: string) => {
 type Recipient =
   | { model: 'customer'; record: ICustomer }
   | { model: 'restaurant'; record: IRestaurant }
-  | { model: 'rider'; record: IRider }
-  | { model: 'user'; record: IUser };
+  | { model: 'rider'; record: IRider };
 
 const RECIPIENT_PROJECTION =
   '_id name role email phone walletBalance creditPoint';
@@ -39,7 +38,7 @@ const adjustRecipientCredit = (
   recipient: Recipient,
   amount: number,
   projection = RECIPIENT_PROJECTION,
-): Promise<ICustomer | IRestaurant | IRider | IUser | null> => {
+): Promise<ICustomer | IRestaurant | IRider | null> => {
   const update = { $inc: { creditPoint: amount } };
   const options = { returnDocument: 'after' as const };
 
@@ -59,15 +58,6 @@ const adjustRecipientCredit = (
     case 'rider':
       return Rider.findByIdAndUpdate(
         recipient.record._id,
-        update,
-        options,
-      ).select(projection);
-    case 'user':
-      return User.findOneAndUpdate(
-        {
-          _id: recipient.record._id,
-          role: { $in: ['customer', 'restaurant', 'deliveryPartner'] },
-        },
         update,
         options,
       ).select(projection);
@@ -96,17 +86,22 @@ export const getWalletBalances = async (
     | ICustomer
     | IRestaurant
     | IRider
-    | IUser
+    | IEmployee
     | null = null;
 
-  if (role === 'admin') {
-    const snapshot = await getAdminWalletSnapshot(userId);
-    return {
-      walletBalance: Number(snapshot.wallet_balance ?? 0),
-      creditPoint: Number(snapshot.credit_point ?? 0),
-    };
-  }
-  if (role === 'customer') {
+  if (role === 'admin' || role === 'subadmin') {
+    const snapshot = await WalletCreditTrack.findOne({
+      recordType: 'balance_snapshot',
+      adminUserId: userId,
+    }).sort({ snapshotAt: -1, createdAt: -1 });
+    if (snapshot) {
+      return {
+        walletBalance: Number(snapshot.wallet_balance ?? 0),
+        creditPoint: Number(snapshot.credit_point ?? 0),
+      };
+    }
+    account = await Employee.findById(userId).select('walletBalance creditPoint');
+  } else if (role === 'customer') {
     account = await Customer.findById(userId).select('walletBalance creditPoint');
   } else if (role === 'restaurant') {
     account = await Restaurant.findById(userId).select('walletBalance creditPoint');
@@ -115,7 +110,7 @@ export const getWalletBalances = async (
   }
 
   if (!account) {
-    account = await User.findById(userId).select('walletBalance creditPoint');
+    account = await Employee.findById(userId).select('walletBalance creditPoint');
   }
   if (!account) {
     throw new WalletServiceError('User wallet was not found', 404);
@@ -175,21 +170,11 @@ export const transferCreditPoints = async (
       { [accountField]: lookupId },
     ],
   });
-  const [customer, restaurant, rider, user, currentAdmin] = await Promise.all([
+  const [customer, restaurant, rider, currentAdmin] = await Promise.all([
     Customer.findOne(byAccountId('customerId')).select(RECIPIENT_PROJECTION),
     Restaurant.findOne(byAccountId('restaurantId')).select(RECIPIENT_PROJECTION),
     Rider.findOne(byAccountId('riderId')).select(RECIPIENT_PROJECTION),
-    User.findOne({
-      $or: [
-        ...(mongoose.isValidObjectId(lookupId)
-          ? [{ _id: new mongoose.Types.ObjectId(lookupId) }]
-          : []),
-        { customerId: lookupId },
-        { restaurantId: lookupId },
-        { riderId: lookupId },
-      ],
-    }).select(RECIPIENT_PROJECTION),
-    User.findOne({ _id: adminId, role: 'admin' }).select(
+    Employee.findOne({ _id: adminId, role: 'admin' }).select(
       'name role email phone',
     ),
   ]);
@@ -200,7 +185,6 @@ export const transferCreditPoints = async (
       ? [{ model: 'restaurant' as const, record: restaurant }]
       : []),
     ...(rider ? [{ model: 'rider' as const, record: rider }] : []),
-    ...(user ? [{ model: 'user' as const, record: user }] : []),
   ];
 
   if (recipients.length === 0) {
@@ -249,7 +233,7 @@ export const transferCreditPoints = async (
     );
   }
 
-  let updatedRecipient: ICustomer | IRestaurant | IRider | IUser | null = null;
+  let updatedRecipient: ICustomer | IRestaurant | IRider | null = null;
   try {
     updatedRecipient = await adjustRecipientCredit(recipient, creditPoints);
 

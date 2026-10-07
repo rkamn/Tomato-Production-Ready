@@ -4,7 +4,6 @@ import Address from '../../model/Address.js';
 import FoodItem from '../../model/FoodItem.js';
 import Notification from '../../model/Notification.js';
 import Order, { IOrder, OrderStatus } from '../../model/Order.js';
-import User, { IUser, USER_ROLES, UserRole } from '../../model/User.js';
 import Restaurant, { IRestaurant } from '../../model/Restaurant.js';
 import Customer, { ICustomer } from '../../model/Customer.js';
 import Rider, { IRider } from '../../model/Rider.js';
@@ -68,13 +67,9 @@ const createRestaurantRouter = () => {
       const user = (req as AuthenticatedRequest).user;
       if (!user?.userId)
         return res.status(401).json({ message: 'Authentication required' });
-      const rest =
-        (await Restaurant.findById(user.userId)
-          .select('isOpen isOnline name restaurantId')
-          .lean()) ||
-        (await User.findById(user.userId)
-          .select('isOpen isOnline name restaurantId')
-          .lean());
+      const rest = await Restaurant.findById(user.userId)
+        .select('isOpen isOnline name restaurantId')
+        .lean();
       if (!rest)
         return res.status(404).json({ message: 'Restaurant not found' });
       const isOpen = rest.isOpen ?? rest.isOnline ?? true;
@@ -96,19 +91,11 @@ const createRestaurantRouter = () => {
         req.body?.isOpen !== undefined ? req.body.isOpen : req.body?.isOnline;
       const isOpen = Boolean(rawVal);
 
-      let updated: any = await Restaurant.findByIdAndUpdate(
+      const updated = await Restaurant.findByIdAndUpdate(
         user.userId,
         { $set: { isOpen, isOnline: isOpen } },
         { new: true },
       ).lean();
-
-      if (!updated) {
-        updated = await User.findByIdAndUpdate(
-          user.userId,
-          { $set: { isOpen, isOnline: isOpen } },
-          { new: true },
-        ).lean();
-      }
 
       return res.json({
         message: isOpen
@@ -131,21 +118,12 @@ const createRestaurantRouter = () => {
       const user = (req as AuthenticatedRequest).user;
       if (!user?.userId)
         return res.status(401).json({ message: 'Authentication required' });
-      const profile =
-        (await Restaurant.findById(user.userId)
-          .select(
-            'name restaurantId digipin email phone restaurantAddress restaurantLocation cuisine isApproved isBlocked isOpen isOnline',
-          )
-          .lean()) ||
-        (await User.findById(user.userId)
-          .select(
-            'name restaurantId digipin email phone restaurantAddress restaurantLocation cuisine isApproved isBlocked isOpen isOnline',
-          )
-          .lean());
-      const restId = profile?.restaurantId || '';
-      const displayName = profile
-        ? `${profile.name}${restId ? '/' + restId : ''}`
-        : '';
+      const profile = await Restaurant.findById(user.userId)
+        .select(
+          'name restaurantId digipin email phone restaurantAddress restaurantLocation cuisine isApproved isBlocked isOpen isOnline',
+        )
+        .lean();
+      const displayName = profile ? profile.name : '';
       return res.json({
         profile: profile
           ? {
@@ -188,18 +166,11 @@ const createRestaurantRouter = () => {
         updates.restaurantLocation = { lat: Number(lat), lng: Number(lng) };
       }
 
-      let updated = await Restaurant.findByIdAndUpdate(
+      const updated = await Restaurant.findByIdAndUpdate(
         user.userId,
         { $set: updates },
         { new: true },
       );
-      if (!updated) {
-        updated = await User.findByIdAndUpdate(
-          user.userId,
-          { $set: updates },
-          { new: true },
-        );
-      }
       return res.json({
         message: 'Restaurant profile updated',
         profile: updated,
@@ -265,9 +236,7 @@ const createRestaurantRouter = () => {
         });
       }
 
-      const restUser =
-        (await Restaurant.findById(user.userId).lean()) ||
-        (await User.findById(user.userId).lean());
+      const restUser = await Restaurant.findById(user.userId).lean();
 
       const item = await FoodItem.create({
         restaurantId: new mongoose.Types.ObjectId(user.userId),
@@ -422,9 +391,7 @@ const createRestaurantRouter = () => {
       if (!order) return res.status(404).json({ message: 'Order not found' });
 
       if (status === 'accepted') {
-        const restUser =
-          (await Restaurant.findById(user.userId).lean()) ||
-          (await User.findById(user.userId).lean());
+        const restUser = await Restaurant.findById(user.userId).lean();
         if (
           restUser &&
           (restUser.isOpen === false || restUser.isOnline === false)
@@ -495,15 +462,13 @@ const createRestaurantRouter = () => {
       if (!order) return res.status(404).json({ message: 'Order not found' });
 
       const [restaurantUser, customerUser] = await Promise.all([
-        (await Restaurant.findById(user.userId).lean()) ||
-          (await User.findById(user.userId).lean()),
+        Restaurant.findById(user.userId).lean(),
         order.customerId
-          ? (await Customer.findById(order.customerId).lean()) ||
-            (await User.findById(order.customerId).lean())
+          ? Customer.findById(order.customerId).lean()
           : null,
       ]);
 
-      const bill = formatBill(order, restaurantUser, customerUser);
+      const bill = formatBill(order, restaurantUser as any, customerUser as any);
       return res.json({ message: 'Bill generated successfully', bill });
     } catch (error) {
       console.error('Restaurant generate bill failed:', error);

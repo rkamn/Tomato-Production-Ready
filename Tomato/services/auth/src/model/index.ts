@@ -1,4 +1,9 @@
 import User, { IUser, USER_ROLES, UserRole } from './User.js';
+import Employee, {
+  IEmployee,
+  EMPLOYEE_ROLES,
+  EmployeeRole,
+} from './Employee.js';
 import Customer, { ICustomer } from './Customer.js';
 import Restaurant, { IRestaurant } from './Restaurant.js';
 import Rider, { IRider } from './Rider.js';
@@ -11,6 +16,10 @@ import WalletCreditTrack, { IWalletCreditTrack } from './WalletCreditTrack.js';
 export {
   User,
   IUser,
+  Employee,
+  IEmployee,
+  EMPLOYEE_ROLES,
+  EmployeeRole,
   USER_ROLES,
   UserRole,
   Customer,
@@ -34,6 +43,7 @@ export {
 
 export default {
   User,
+  Employee,
   Customer,
   Restaurant,
   Rider,

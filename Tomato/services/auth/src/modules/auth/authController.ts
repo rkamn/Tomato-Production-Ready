@@ -3,10 +3,12 @@ import { promisify } from 'node:util';
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import User, { USER_ROLES, UserRole, IUser } from '../../model/User.js';
+import Employee, { IEmployee } from '../../model/Employee.js';
 import Restaurant, { IRestaurant } from '../../model/Restaurant.js';
 import Customer, { ICustomer } from '../../model/Customer.js';
 import Rider, { IRider } from '../../model/Rider.js';
 import Notification from '../../model/Notification.js';
+import Counter, { getNextCounterValue, generateIdFromCounter } from '../../model/Counter.js';
 import { AuthenticatedRequest } from '../../middleware/authenticate.js';
 
 const getPublicBaseUrl = () => process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 5050}`;
@@ -58,45 +60,33 @@ const getRegistrationPayload = (body: Request['body']) => {
 	return payload;
 };
 
-export const generateRestaurantId = async (): Promise<string> => {
-	for (let i = 0; i < 20; i++) {
-		const code = `REST-${Math.floor(1000 + Math.random() * 9000)}`;
-		const existing = await Restaurant.findOne({ restaurantId: code });
-		if (!existing) return code;
-	}
-	return `REST-${Date.now().toString().slice(-4)}`;
-};
+export const generateRestaurantId = (): Promise<string> =>
+	generateIdFromCounter('restaurentId', 'REST', 1000, async (id: string) =>
+		Boolean(await Restaurant.exists({ restaurantId: id })),
+	);
 
-export const generateRiderId = async (): Promise<string> => {
-	for (let i = 0; i < 20; i++) {
-		const code = `RIDE-${Math.floor(1000 + Math.random() * 9000)}`;
-		const existing = await Rider.findOne({ riderId: code });
-		if (!existing) return code;
-	}
-	return `RIDE-${Date.now().toString().slice(-4)}`;
-};
+export const generateRiderId = (): Promise<string> =>
+	generateIdFromCounter('riderId', 'RIDE', 1000, async (id: string) =>
+		Boolean(await Rider.exists({ riderId: id })),
+	);
 
-export const generateCustomerId = async (): Promise<string> => {
-	for (let i = 0; i < 20; i++) {
-		const code = `CUST-${Math.floor(1000 + Math.random() * 9000)}`;
-		const existing = await Customer.findOne({ customerId: code });
-		if (!existing) return code;
-	}
-	return `CUST-${Date.now().toString().slice(-4)}`;
-};
+export const generateCustomerId = (): Promise<string> =>
+	generateIdFromCounter('customerId', 'CUST', 1000, async (id: string) =>
+		Boolean(await Customer.exists({ customerId: id })),
+	);
 
-export const generateSubAdminId = async (): Promise<string> => {
-	for (let i = 0; i < 20; i++) {
-		const code = `SUB-${Math.floor(1000 + Math.random() * 9000)}`;
-		const existing = await User.findOne({ subadminId: code });
-		if (!existing) return code;
-	}
-	return `SUB-${Date.now().toString().slice(-4)}`;
-};
+export const generateSubAdminId = (): Promise<string> =>
+	generateIdFromCounter('subadminId', 'SUB', 1000, async (id: string) =>
+		Boolean(await Employee.exists({ subadminId: id })),
+	);
 
-export const getPartnerDisplayName = (name: string, partnerId?: string) => {
-	if (!partnerId) return name;
-	return `${name}/${partnerId}`;
+export const generateAdminId = (): Promise<string> =>
+	generateIdFromCounter('adminId', 'ADM', 1000, async (id: string) =>
+		Boolean(await Employee.exists({ adminId: id })),
+	);
+
+export const getPartnerDisplayName = (name: string, _partnerId?: string) => {
+	return name;
 };
 
 export const createToken = (user: {
@@ -164,15 +154,7 @@ export const userResponse = (user: {
 	const customerId = user.customerId || (user.role === 'customer' ? `CUST-${String(user._id).slice(-4).toUpperCase()}` : '');
 	const subadminId = user.subadminId || (user.role === 'subadmin' ? `SUB-${String(user._id).slice(-4).toUpperCase()}` : '');
 
-	const displayName = user.role === 'restaurant' && user.restaurantId
-		? `${user.name}/${user.restaurantId}`
-		: (user.role === 'deliveryPartner' || user.role === 'rider') && user.riderId
-			? `${user.name}/${user.riderId}`
-			: user.role === 'customer' && customerId
-				? `${user.name}/${customerId}`
-				: user.role === 'subadmin' && subadminId
-					? `${user.name}/${subadminId}`
-					: user.name;
+	const displayName = user.name;
 
 	return {
 		id: user._id,
@@ -265,14 +247,14 @@ export const registerUser = async (req: Request, res: Response) => {
 			],
 		};
 
-		const [existingUser, existingRestaurant, existingCustomer, existingRider] = await Promise.all([
-			User.findOne(duplicateQuery),
+		const [existingEmployee, existingRestaurant, existingCustomer, existingRider] = await Promise.all([
+			Employee.findOne(duplicateQuery),
 			Restaurant.findOne(duplicateQuery),
 			Customer.findOne(duplicateQuery),
 			Rider.findOne(duplicateQuery),
 		]);
 
-		if (existingUser || existingRestaurant || existingCustomer || existingRider) {
+		if (existingEmployee || existingRestaurant || existingCustomer || existingRider) {
 			return res.status(409).json({ message: 'An account with that email or mobile number already exists' });
 		}
 
@@ -297,13 +279,11 @@ export const registerUser = async (req: Request, res: Response) => {
 
 			const restaurant = await Restaurant.create(restaurantPayload) as unknown as IRestaurant;
 
-			const roleDisplayName = `${restaurant.name}/${restaurant.restaurantId}`;
-
 			await Notification.create({
 				userId: String(restaurant._id),
 				role: 'restaurant',
 				title: 'Welcome to Tomato',
-				message: `Your restaurant registration (${roleDisplayName}) has been submitted and is pending admin approval.`,
+				message: `Your restaurant registration (${restaurant.name}) has been submitted and is pending admin approval.`,
 				type: 'service',
 			});
 
@@ -328,13 +308,12 @@ export const registerUser = async (req: Request, res: Response) => {
 			if (phone) customerPayload.phone = phone;
 
 			const customer = await Customer.create(customerPayload) as unknown as ICustomer;
-			const roleDisplayName = `${customer.name}/${customer.customerId}`;
 
 			await Notification.create({
 				userId: String(customer._id),
 				role: 'customer',
 				title: 'Welcome to Tomato',
-				message: `Your customer account (${roleDisplayName}) is ready. Service updates will appear here.`,
+				message: `Your customer account (${customer.name}) is ready. Service updates will appear here.`,
 				type: 'service',
 			});
 
@@ -369,13 +348,12 @@ export const registerUser = async (req: Request, res: Response) => {
 			if (phone) riderPayload.phone = phone;
 
 			const rider = await Rider.create(riderPayload) as unknown as IRider;
-			const roleDisplayName = `${rider.name}/${rider.riderId}`;
 
 			await Notification.create({
 				userId: String(rider._id),
 				role: 'deliveryPartner',
 				title: 'Welcome to Tomato',
-				message: `Your delivery partner registration (${roleDisplayName}) has been submitted and is pending admin approval.`,
+				message: `Your delivery partner registration (${rider.name}) has been submitted and is pending admin approval.`,
 				type: 'service',
 			});
 
@@ -386,30 +364,35 @@ export const registerUser = async (req: Request, res: Response) => {
 			});
 		}
 
-		// Admins / Sub-admins only in User table
 		const isApproved = true;
-		const userPayload: Record<string, unknown> = {
+		const adminId = role === 'admin' ? await generateAdminId() : undefined;
+		const subadminId = role === 'subadmin' ? await generateSubAdminId() : undefined;
+		const employeePayload: Record<string, unknown> = {
 			name,
 			...registrationData,
 			passwordHash: await hashPassword(password),
 			role,
+			adminRoleTitle: role === 'admin' ? 'Platform Administrator' : 'Operations Sub-Admin',
 			isApproved,
 			isBlocked: false,
+			permissions: role === 'admin' ? ['*'] : ['orders_manage'],
+			...(adminId ? { adminId } : {}),
+			...(subadminId ? { subadminId } : {}),
 		};
 
-		const user = await User.create(userPayload);
+		const employee = await Employee.create(employeePayload);
 
 		await Notification.create({
-			userId: String(user._id),
-			role: user.role,
+			userId: String(employee._id),
+			role: employee.role,
 			title: 'Welcome to Tomato',
-			message: `Your ${user.role} account is ready.`,
+			message: `Your ${employee.role} account is ready.`,
 			type: 'service',
 		});
 
 		return res.status(201).json({
-			token: createToken(user),
-			user: userResponse(user),
+			token: createToken(employee as any),
+			user: userResponse(employee as any),
 			message: 'Registration successful',
 		});
 	} catch (error) {
@@ -445,7 +428,7 @@ export const loginUser = async (req: Request, res: Response) => {
 			user = await Customer.findOne(emailQuery).select('+passwordHash');
 			if (!user) user = await Rider.findOne(emailQuery).select('+passwordHash');
 			if (!user) user = await Restaurant.findOne(emailQuery).select('+passwordHash');
-			if (!user) user = await User.findOne(emailQuery).select('+passwordHash');
+			if (!user) user = await Employee.findOne(emailQuery).select('+passwordHash');
 		} else {
 			const digits = rawValue.replace(/\D/g, '');
 			const phoneVariants = new Set<string>();
@@ -472,7 +455,7 @@ export const loginUser = async (req: Request, res: Response) => {
 			user = await Customer.findOne(phoneQuery).select('+passwordHash');
 			if (!user) user = await Rider.findOne(phoneQuery).select('+passwordHash');
 			if (!user) user = await Restaurant.findOne(phoneQuery).select('+passwordHash');
-			if (!user) user = await User.findOne(phoneQuery).select('+passwordHash');
+			if (!user) user = await Employee.findOne(phoneQuery).select('+passwordHash');
 		}
 
 		if (!user || !(await verifyPassword(password, user.passwordHash))) {
@@ -512,7 +495,7 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
 			user = await Customer.findOne(emailQuery);
 			if (!user) user = await Rider.findOne(emailQuery);
 			if (!user) user = await Restaurant.findOne(emailQuery);
-			if (!user) user = await User.findOne(emailQuery);
+			if (!user) user = await Employee.findOne(emailQuery);
 		} else {
 			const digits = rawValue.replace(/\D/g, '');
 			const phoneVariants = new Set<string>();
@@ -538,7 +521,7 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
 			user = await Customer.findOne(phoneQuery);
 			if (!user) user = await Rider.findOne(phoneQuery);
 			if (!user) user = await Restaurant.findOne(phoneQuery);
-			if (!user) user = await User.findOne(phoneQuery);
+			if (!user) user = await Employee.findOne(phoneQuery);
 		}
 
 		if (!user) {
@@ -593,7 +576,7 @@ export const resetPassword = async (req: Request, res: Response) => {
 		}
 
 		if (!user) {
-			user = await User.findOne({
+			user = await Employee.findOne({
 				resetPasswordTokenHash: hashResetToken(token),
 				resetPasswordExpiresAt: { $gt: new Date() },
 			}).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
@@ -666,14 +649,14 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 			],
 		};
 
-		const [dupUser, dupRest, dupCust, dupRider] = await Promise.all([
-			nextEmail || nextPhone ? User.findOne(duplicateFilter) : null,
+		const [dupEmp, dupRest, dupCust, dupRider] = await Promise.all([
+			nextEmail || nextPhone ? Employee.findOne(duplicateFilter) : null,
 			nextEmail || nextPhone ? Restaurant.findOne(duplicateFilter) : null,
 			nextEmail || nextPhone ? Customer.findOne(duplicateFilter) : null,
 			nextEmail || nextPhone ? Rider.findOne(duplicateFilter) : null,
 		]);
 
-		if (dupUser || dupRest || dupCust || dupRider) {
+		if (dupEmp || dupRest || dupCust || dupRider) {
 			return res.status(409).json({ message: 'An account with that email or mobile number already exists' });
 		}
 
@@ -697,7 +680,7 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 				{ new: true, runValidators: true },
 			).lean();
 		} else {
-			user = await User.findByIdAndUpdate(
+			user = await Employee.findByIdAndUpdate(
 				userId,
 				updates,
 				{ new: true, runValidators: true },

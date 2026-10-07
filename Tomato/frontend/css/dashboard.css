@@ -12,6 +12,7 @@
         --yellow: #d4a337;
         --yellow-soft: #fcf6e5;
         --blue: #2a6f97;
+        --blue-deep: #003366;
         --blue-soft: #e8f3f9;
         --shadow: 0 16px 45px rgba(45, 38, 26, 0.09);
         --shadow-sm: 0 4px 15px rgba(45, 38, 26, 0.05);
@@ -286,7 +287,7 @@
       }
       .date-badge {
         padding: 0.4rem 0.9rem;
-        border: 1px solid var(--line);
+        border: 1px solid var(--blue-deep);
         border-radius: 999px;
         background: var(--panel);
         font-size: 0.8rem;

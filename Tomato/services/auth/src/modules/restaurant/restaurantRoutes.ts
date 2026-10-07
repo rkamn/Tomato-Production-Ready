@@ -13,16 +13,7 @@ import {
   requireRole,
   requirePermission,
 } from '../../middleware/authenticate.js';
-import {
-  hashPassword,
-  userResponse,
-  generateRestaurantId,
-  generateRiderId,
-  generateCustomerId,
-  generateSubAdminId,
-  getPartnerDisplayName,
-} from '../../controllers/auth.js';
-import notificationService from '../../services/notificationService.js';
+import notificationService from '../notification/notificationService.js';
 import {
   formatBill,
   buildOrderLiveTrackingData,

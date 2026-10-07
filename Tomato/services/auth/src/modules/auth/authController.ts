@@ -2,8 +2,7 @@ import { Request, Response } from 'express';
 import { promisify } from 'node:util';
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import jwt from 'jsonwebtoken';
-import User, { USER_ROLES, UserRole, IUser } from '../../model/User.js';
-import Employee, { IEmployee } from '../../model/Employee.js';
+import Employee, { IEmployee, USER_ROLES, UserRole } from '../../model/Employee.js';
 import Restaurant, { IRestaurant } from '../../model/Restaurant.js';
 import Customer, { ICustomer } from '../../model/Customer.js';
 import Rider, { IRider } from '../../model/Rider.js';
@@ -693,7 +692,7 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 
 		return res.status(200).json({
 			message: 'Profile updated successfully',
-			user: userResponse(user as unknown as IUser),
+			user: userResponse(user as any),
 		});
 	} catch (error) {
 		console.error('Profile update failed:', error);

@@ -8,7 +8,7 @@ import Counter, { getNextCounterValue } from '../../model/Counter.js';
 import Restaurant from '../../model/Restaurant.js';
 import Customer from '../../model/Customer.js';
 import { authenticate, AuthenticatedRequest, requireRole } from '../../middleware/authenticate.js';
-import notificationService from '../../services/notificationService.js';
+import notificationService from '../notification/notificationService.js';
 import { formatBill, buildOrderLiveTrackingData } from '../../utils/orderHelpers.js';
 
 const createCustomerRouter = () => {

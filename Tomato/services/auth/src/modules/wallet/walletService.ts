@@ -1,9 +1,9 @@
 import mongoose from 'mongoose';
-import Customer, { ICustomer } from '../model/Customer.js';
-import Restaurant, { IRestaurant } from '../model/Restaurant.js';
-import Rider, { IRider } from '../model/Rider.js';
-import Employee, { IEmployee } from '../model/Employee.js';
-import WalletCreditTrack from '../model/WalletCreditTrack.js';
+import Customer, { ICustomer } from '../../model/Customer.js';
+import Restaurant, { IRestaurant } from '../../model/Restaurant.js';
+import Rider, { IRider } from '../../model/Rider.js';
+import Employee, { IEmployee } from '../../model/Employee.js';
+import WalletCreditTrack from '../../model/WalletCreditTrack.js';
 
 export class WalletServiceError extends Error {
   constructor(

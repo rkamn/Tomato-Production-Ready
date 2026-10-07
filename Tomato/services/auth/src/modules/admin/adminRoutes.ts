@@ -4,8 +4,7 @@ import Address from '../../model/Address.js';
 import FoodItem from '../../model/FoodItem.js';
 import Notification from '../../model/Notification.js';
 import Order, { IOrder, OrderStatus } from '../../model/Order.js';
-import User, { IUser, USER_ROLES, UserRole } from '../../model/User.js';
-import Employee, { IEmployee } from '../../model/Employee.js';
+import Employee, { IEmployee, USER_ROLES, UserRole } from '../../model/Employee.js';
 import Restaurant, { IRestaurant } from '../../model/Restaurant.js';
 import Customer, { ICustomer } from '../../model/Customer.js';
 import Rider, { IRider } from '../../model/Rider.js';
@@ -24,13 +23,12 @@ import {
   generateCustomerId,
   generateSubAdminId,
   generateAdminId,
-  getPartnerDisplayName,
-} from '../../controllers/auth.js';
-import notificationService from '../../services/notificationService.js';
+} from '../auth/authController.js';
+import notificationService from '../notification/notificationService.js';
 import {
   transferCreditPoints,
   WalletServiceError,
-} from '../../services/walletService.js';
+} from '../wallet/walletService.js';
 import {
   formatBill,
   buildOrderLiveTrackingData,
@@ -1111,9 +1109,9 @@ const createAdminRouter = () => {
           message: `Transferred ${req.body.creditPoints} credit point(s) successfully`,
           ...transfer,
         });
-      } catch (error) {
-        if (error instanceof WalletServiceError) {
-          return res.status(error.statusCode).json({ message: error.message });
+      } catch (error: any) {
+        if (error instanceof WalletServiceError || error?.name === 'WalletServiceError') {
+          return res.status(error.statusCode || 400).json({ message: error.message });
         }
         console.error('Admin credit-point transfer failed:', error);
         return res.status(500).json({ message: 'Unable to transfer credit points' });
@@ -1130,7 +1128,7 @@ const createAdminRouter = () => {
       }
 
       // Sub-admin can NEVER modify or update permissions of an admin account:
-      const targetUser = (await Employee.findById(userId)) || (await User.findById(userId));
+      const targetUser = await Employee.findById(userId);
       if (targetUser && targetUser.role === 'admin') {
         if (currentUser?.role === 'subadmin') {
           return res.status(403).json({
@@ -1265,7 +1263,7 @@ const createAdminRouter = () => {
         return res.json({
           riders: allRiders.map((r) => {
             return {
-              ...userResponse(r as unknown as IUser),
+              ...userResponse(r as any),
               displayName: r.name,
               activeOrder: orderMap.get(String(r._id)) || null,
             };
@@ -1418,7 +1416,7 @@ const createAdminRouter = () => {
       }
 
       // Check if target is an administrator or sub-admin
-      const targetUserRecord = (await Employee.findById(userId)) || (await User.findById(userId));
+      const targetUserRecord = await Employee.findById(userId);
       if (targetUserRecord) {
         if (targetUserRecord.role === 'admin') {
           return res.status(403).json({
@@ -1489,7 +1487,7 @@ const createAdminRouter = () => {
       }
 
       // Check if target is an administrator or sub-admin
-      const targetUserRecord = (await Employee.findById(userId)) || (await User.findById(userId));
+      const targetUserRecord = await Employee.findById(userId);
       if (targetUserRecord) {
         if (targetUserRecord.role === 'admin') {
           return res.status(403).json({

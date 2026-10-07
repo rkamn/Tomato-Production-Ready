@@ -1,10 +1,17 @@
 import mongoose from "mongoose";
+import dns from "node:dns";
 import Employee from "../model/Employee.js";
 import Customer from "../model/Customer.js";
 import Restaurant from "../model/Restaurant.js";
 import Rider from "../model/Rider.js";
 import Counter from "../model/Counter.js";
-import { hashPassword } from "../controllers/auth.js";
+import { hashPassword } from "../modules/auth/authController.js";
+
+try {
+    dns.setDefaultResultOrder?.('ipv4first');
+} catch {
+    // Ignore if not supported in runtime
+}
 
 const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -30,6 +37,26 @@ const ensureCollectionIndexes = async (model: mongoose.Model<any>) => {
         }
     } catch (err: any) {
         console.warn(`[Index Setup] Notice on ${model.modelName} indexes:`, err?.message);
+    }
+};
+
+const ensureIdentifierIndex = async (model: mongoose.Model<any>, field: string) => {
+    try {
+        const indexName = `${field}_1`;
+        const indexes = await model.collection.indexes();
+        const existingIndex = indexes.find((index) => index.name === indexName);
+        if (!existingIndex) {
+            await model.collection.createIndex(
+                { [field]: 1 },
+                {
+                    name: indexName,
+                    unique: true,
+                    sparse: true,
+                },
+            );
+        }
+    } catch (err: any) {
+        console.warn(`[Index Setup] Notice on ${model.modelName} ${field} index:`, err?.message);
     }
 };
 
@@ -284,14 +311,20 @@ export const connectDB = async (attempts = 3) => {
         try {
             await mongoose.connect(mongoUri, {
                 dbName: process.env.MONGO_DB_NAME || 'Tomato_clone',
-                serverSelectionTimeoutMS: 10_000,
+                serverSelectionTimeoutMS: 15_000,
+                family: 4,
             });
             await migrateUsersToEmployeesAndDropUsersTable();
             await migrateCountersAndDropOldCounterTables();
             await ensureCollectionIndexes(Employee);
+            await ensureIdentifierIndex(Employee, 'adminId');
+            await ensureIdentifierIndex(Employee, 'subadminId');
             await ensureCollectionIndexes(Customer);
+            await ensureIdentifierIndex(Customer, 'customerId');
             await ensureCollectionIndexes(Restaurant);
+            await ensureIdentifierIndex(Restaurant, 'restaurantId');
             await ensureCollectionIndexes(Rider);
+            await ensureIdentifierIndex(Rider, 'riderId');
             console.log("Connected to MongoDB (Tomato_clone database ready)");
             return;
         } catch (error) {

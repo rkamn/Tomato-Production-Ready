@@ -15,7 +15,7 @@ import {
 import {
   getWalletBalances,
   WalletServiceError,
-} from '../../services/walletService.js';
+} from '../wallet/walletService.js';
 
 const createAuthRouter = (upload: multer.Multer) => {
   const router = express.Router();
@@ -34,9 +34,9 @@ const createAuthRouter = (upload: multer.Multer) => {
         currentUser.role,
       );
       return res.json(wallet);
-    } catch (error) {
-      if (error instanceof WalletServiceError) {
-        return res.status(error.statusCode).json({ message: error.message });
+    } catch (error: any) {
+      if (error instanceof WalletServiceError || error?.name === 'WalletServiceError') {
+        return res.status(error.statusCode || 400).json({ message: error.message });
       }
       console.error('Wallet fetch failed:', error);
       return res.status(500).json({ message: 'Unable to fetch wallet' });

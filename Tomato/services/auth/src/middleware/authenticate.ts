@@ -1,7 +1,6 @@
 import { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import Employee from '../model/Employee.js';
-import User, { UserRole } from '../model/User.js';
+import Employee, { UserRole } from '../model/Employee.js';
 import Restaurant from '../model/Restaurant.js';
 import Customer from '../model/Customer.js';
 import Rider from '../model/Rider.js';

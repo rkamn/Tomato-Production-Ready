@@ -3,6 +3,15 @@ import mongoose, { Document, Schema } from 'mongoose';
 export const EMPLOYEE_ROLES = ['admin', 'subadmin'] as const;
 export type EmployeeRole = (typeof EMPLOYEE_ROLES)[number];
 
+export const USER_ROLES = [
+  'customer',
+  'restaurant',
+  'deliveryPartner',
+  'admin',
+  'subadmin',
+] as const;
+export type UserRole = (typeof USER_ROLES)[number];
+
 export interface IEmployee extends Document {
   name: string;
   email?: string;

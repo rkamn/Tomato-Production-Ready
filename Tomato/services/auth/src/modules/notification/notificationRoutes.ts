@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 import Notification from '../../model/Notification.js';
 import notificationService from './notificationService.js';
 import { authenticate, AuthenticatedRequest } from '../../middleware/authenticate.js';
-import { UserRole } from '../../model/User.js';
+import { UserRole } from '../../model/Employee.js';
 
 const router = express.Router();
 

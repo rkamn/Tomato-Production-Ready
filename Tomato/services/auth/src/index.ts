@@ -14,7 +14,7 @@ import {
   customerRoutes,
   restaurantRoutes,
   riderRoutes,
-} from './routes/index.js';
+} from './modules/index.js';
 
 dotenv.config({ path: fileURLToPath(new URL('../.env', import.meta.url)) });
 

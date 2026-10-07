@@ -68,6 +68,9 @@
           <!-- Populated dynamically per role -->
         </nav>
 
+        <!-- Gap of an empty panel below Profile Settings -->
+        <div class="sidebar-spacer" aria-hidden="true"></div>
+
         <button id="sign-out" class="sign-out" type="button">Sign out</button>
       </aside>
 
@@ -80,11 +83,14 @@
             <h1 id="welcome-heading">Welcome back</h1>
             <p id="welcome-copy" class="welcome">Keep things flowing smoothly.</p>
           </div>
-          <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
-            <div id="live-indicator" class="live-indicator-badge" title="Real-Time Server Sent Events">
-              <span class="live-dot" id="live-dot"></span> <span id="live-status-text">Live Sync</span>
+          <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.35rem;">
+            <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
+              <div id="live-indicator" class="live-indicator-badge" title="Real-Time Server Sent Events">
+                <span class="live-dot" id="live-dot"></span> <span id="live-status-text">Live Sync</span>
+              </div>
+              <time id="today-date" class="date-badge"></time>
             </div>
-            <time id="today-date" class="date-badge"></time>
+            <div id="user-location-badge" class="location-badge" title="User default saved address location">NA,000</div>
           </div>
         </header>
 
@@ -110,7 +116,7 @@
             </div>
             <div id="activity-feed" class="activity-feed-container"></div>
             <div id="notif-pagination-container" class="notif-pagination-bar" style="display:none;">
-              <div class="notif-pagination-info" id="notif-pagination-info">Showing 1–10 of 10</div>
+              <div class="notif-pagination-info" id="notif-pagination-info">Showing 1–5 of 5</div>
               <div class="notif-pagination-controls">
                 <button id="notif-prev-btn" class="btn btn-outline btn-sm" type="button" onclick="changeNotifPage(-1)" disabled>← Previous</button>
                 <div id="notif-page-numbers" class="notif-page-numbers"></div>
@@ -869,6 +875,22 @@
 
         <div style="display:flex; justify-content:flex-end; align-items:center; margin-top:1rem; padding-top:0.6rem; border-top:1px solid var(--line);">
           <button type="button" class="btn btn-secondary btn-sm" onclick="closeFilterModal()">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- =====================================================================
+         MODAL: AUTO-DISMISS NOTICE POPUP
+         ===================================================================== -->
+    <div id="notice-auto-dismiss-modal" class="modal-overlay" onclick="handleNoticeModalBackdropClick(event)" style="z-index:999999;">
+      <div class="modal-box" style="max-width:420px; text-align:center; padding:2rem 1.6rem; border-radius:14px; position:relative; box-shadow:0 25px 65px rgba(0,0,0,0.3);">
+        <button type="button" class="modal-close" style="position:absolute; top:0.8rem; right:1rem;" onclick="closeNoticeModal()">&times;</button>
+        <div id="notice-modal-icon" style="font-size:3rem; margin-bottom:0.6rem; line-height:1;">📦</div>
+        <h3 id="notice-modal-title" style="font-size:1.25rem; font-weight:700; margin-bottom:0.4rem; color:var(--ink);">Notice</h3>
+        <p id="notice-modal-message" style="color:var(--muted); font-size:0.95rem; margin-bottom:1.2rem; line-height:1.45;"></p>
+        <div style="font-size:0.8rem; color:var(--muted); opacity:0.8; display:flex; align-items:center; justify-content:center; gap:0.4rem;">
+          <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--tomato); animation:pulse 1.2s infinite ease-in-out;"></span>
+          Closing automatically...
         </div>
       </div>
     </div>

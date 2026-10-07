@@ -39,12 +39,13 @@ const createRestaurantRouter = () => {
       const user = (req as AuthenticatedRequest).user;
       if (!user?.userId)
         return res.status(401).json({ message: 'Authentication required' });
+      await (Notification as any).cleanExpiredAndExcess(user.userId);
       const notifications = await Notification.find({
         userId: user.userId,
         role: 'restaurant',
       })
         .sort({ createdAt: -1 })
-        .limit(200);
+        .limit(15);
       return res.json({ notifications });
     } catch (error) {
       console.error('Restaurant notification fetch failed:', error);

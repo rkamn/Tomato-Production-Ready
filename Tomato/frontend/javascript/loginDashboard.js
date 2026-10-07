@@ -830,6 +830,37 @@
         }
       }
 
+      // Location badge helper
+      async function fetchUserLocation(cachedAddress = null) {
+        const badge = document.getElementById('user-location-badge');
+        if (!badge) return;
+
+        let addr = cachedAddress;
+        if (!addr) {
+          try {
+            const res = await apiFetch('/api/auth/default-address').catch(() => null);
+            addr = res && res.address;
+          } catch (e) {
+            console.warn('Error fetching user location:', e);
+          }
+        }
+
+        if (!addr) {
+          badge.textContent = 'NA,000';
+          badge.title = 'No saved default address found';
+          return;
+        }
+
+        const city = (addr.city || '').trim() || 'NA';
+        const locality = (addr.locality || addr.line1 || addr.line2 || '').trim();
+        const pincode = (addr.postalCode || '').trim() || '000';
+
+        badge.textContent = `${city}-${pincode}`;
+        badge.title = `${locality ? locality + ', ' : ''}${city}, ${addr.state || ''} ${pincode}`.trim();
+      }
+
+      window.fetchUserLocation = fetchUserLocation;
+
       // Initialize Dashboard
       function initDashboard() {
         let partnerDisplay = user.displayName || user.name || 'Tomato User';
@@ -867,6 +898,9 @@
           day: 'numeric',
           year: 'numeric',
         }).format(new Date());
+
+        // Populate Location: <stateCode>,<City>,<locality>,<pincode>
+        fetchUserLocation();
 
         // Initialize Duty Status Toggle for Restaurant & Rider
         initDutyStatusToggle();
@@ -1050,6 +1084,107 @@
       }
 
       // =========================================================================
+      // AUTO-DISMISS NOTICE POPUP & STAT CARD CLICK HANDLERS
+      // =========================================================================
+      let noticeModalTimer = null;
+      function showAutoDismissNotice({ title = 'Notice', message = '', icon = 'ℹ️', duration = 2500 }) {
+        const modal = document.getElementById('notice-auto-dismiss-modal');
+        const titleEl = document.getElementById('notice-modal-title');
+        const msgEl = document.getElementById('notice-modal-message');
+        const iconEl = document.getElementById('notice-modal-icon');
+
+        if (noticeModalTimer) {
+          clearTimeout(noticeModalTimer);
+          noticeModalTimer = null;
+        }
+
+        if (titleEl) titleEl.textContent = title;
+        if (msgEl) msgEl.textContent = message;
+        if (iconEl) iconEl.textContent = icon;
+
+        if (modal) {
+          modal.classList.add('visible');
+          modal.style.display = 'grid';
+          modal.style.opacity = '1';
+
+          noticeModalTimer = setTimeout(() => {
+            closeNoticeModal();
+          }, duration);
+        }
+
+        // Also trigger toast notification for immediate corner alert
+        showToastNotification({
+          title,
+          message,
+          type: 'info',
+          duration: Math.max(duration, 3000),
+        });
+      }
+
+      function closeNoticeModal() {
+        if (noticeModalTimer) {
+          clearTimeout(noticeModalTimer);
+          noticeModalTimer = null;
+        }
+        const modal = document.getElementById('notice-auto-dismiss-modal');
+        if (modal) {
+          modal.style.transition = 'opacity 0.2s ease';
+          modal.style.opacity = '0';
+          setTimeout(() => {
+            modal.classList.remove('visible');
+            modal.style.display = 'none';
+            modal.style.opacity = '1';
+          }, 200);
+        }
+      }
+
+      function handleNoticeModalBackdropClick(event) {
+        if (event.target.id === 'notice-auto-dismiss-modal') {
+          closeNoticeModal();
+        }
+      }
+
+      function handleActiveOrdersCardClick(activeCount) {
+        if (activeCount > 0) {
+          switchView('customer-orders');
+          fetchCustomerOrders();
+        } else {
+          showAutoDismissNotice({
+            title: 'Active Orders',
+            message: 'No active orders',
+            icon: '🛵',
+            duration: 2500,
+          });
+        }
+      }
+
+      function handleTotalPlacedCardClick(totalCount) {
+        if (totalCount > 0) {
+          switchView('customer-orders');
+          fetchCustomerOrders();
+        } else {
+          showAutoDismissNotice({
+            title: 'Total Placed',
+            message: 'You have not placed any order yet',
+            icon: '🍽️',
+            duration: 2500,
+          });
+        }
+      }
+
+      function handleSavedAddressesCardClick() {
+        switchView('customer-address');
+        fetchCustomerAddresses();
+      }
+
+      window.showAutoDismissNotice = showAutoDismissNotice;
+      window.closeNoticeModal = closeNoticeModal;
+      window.handleNoticeModalBackdropClick = handleNoticeModalBackdropClick;
+      window.handleActiveOrdersCardClick = handleActiveOrdersCardClick;
+      window.handleTotalPlacedCardClick = handleTotalPlacedCardClick;
+      window.handleSavedAddressesCardClick = handleSavedAddressesCardClick;
+
+      // =========================================================================
       // OVERVIEW STATS & ACTIVITY
       // =========================================================================
       async function loadRoleOverview() {
@@ -1062,7 +1197,7 @@
 
         if (role === 'customer') {
           kickerEl.textContent = 'Customer Ordering Hub';
-          copyEl.textContent = 'Browse kitchens, place food orders, and track deliveries in real time.';
+          copyEl.textContent = 'Browse kitchens, place food / grocery orders, and track deliveries in real time.';
           try {
             const [ordersData, addrData] = await Promise.all([
               apiFetch('/api/customer/orders').catch(() => ({ orders: [] })),
@@ -1072,11 +1207,29 @@
             const activeOrders = orders.filter((o) => !['delivered', 'cancelled'].includes(o.status)).length;
 
             statsEl.innerHTML = `
-              <div class="stat-card"><span class="stat-label">Active Orders</span><div class="stat-value">${activeOrders}</div><span class="stat-note">Live on route</span></div>
-              <div class="stat-card"><span class="stat-label">Total Placed</span><div class="stat-value">${orders.length}</div><span class="stat-note">Lifetime meals</span></div>
-              <div class="stat-card"><span class="stat-label">Saved Addresses</span><div class="stat-value">${addrData.addresses?.length || 0}</div><span class="stat-note">Ready for checkout</span></div>
+              <div class="stat-card clickable" onclick="handleActiveOrdersCardClick(${activeOrders})" title="Click to view active orders">
+                <span class="stat-label">Active Orders</span>
+                <div class="stat-value">${activeOrders}</div>
+                <span class="stat-note">Live on route ${activeOrders > 0 ? '↗' : ''}</span>
+              </div>
+              <div class="stat-card clickable" onclick="handleTotalPlacedCardClick(${orders.length})" title="Click to view all orders">
+                <span class="stat-label">Total Placed</span>
+                <div class="stat-value">${orders.length}</div>
+                <span class="stat-note">Lifetime meals ${orders.length > 0 ? '↗' : ''}</span>
+              </div>
+              <div class="stat-card clickable" onclick="handleSavedAddressesCardClick()" title="Click to manage saved delivery addresses">
+                <span class="stat-label">Saved Addresses</span>
+                <div class="stat-value">${addrData.addresses?.length || 0}</div>
+                <span class="stat-note">Ready for checkout ↗</span>
+              </div>
               <div class="stat-card"><span class="stat-label">Tomato Points</span><div class="stat-value">250</div><span class="stat-note">Earn 10% off</span></div>
             `;
+
+            const addresses = addrData.addresses || [];
+            const defaultAddr = addresses.find((a) => a.isDefault) || addresses[0];
+            if (defaultAddr) {
+              fetchUserLocation(defaultAddr);
+            }
           } catch (e) {
             console.error(e);
           }
@@ -1147,7 +1300,7 @@
 
       let currentNotifications = [];
       let currentNotifPage = 1;
-      const NOTIFICATIONS_PER_PAGE = 10;
+      const NOTIFICATIONS_PER_PAGE = 5;
 
       async function loadNotifications(targetPage = null) {
         const feed = document.getElementById('activity-feed');
@@ -2448,6 +2601,7 @@
         try {
           await apiFetch(`/api/customer/addresses/${addressId}/default`, { method: 'POST' });
           await fetchCustomerAddresses();
+          await fetchUserLocation();
           if (cart.length) {
             renderCart();
           }
@@ -2564,6 +2718,7 @@
           }
           cancelAddressEdit();
           await fetchCustomerAddresses();
+          await fetchUserLocation();
           if (cart.length) {
             renderCart();
           }
@@ -2577,6 +2732,7 @@
         try {
           await apiFetch(`/api/customer/addresses/${id}`, { method: 'DELETE' });
           await fetchCustomerAddresses();
+          await fetchUserLocation();
           if (cart.length) {
             renderCart();
           }

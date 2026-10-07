@@ -12,6 +12,7 @@ import {
   authenticate,
   AuthenticatedRequest,
 } from '../../middleware/authenticate.js';
+import Address from '../../model/Address.js';
 import {
   getWalletBalances,
   WalletServiceError,
@@ -40,6 +41,26 @@ const createAuthRouter = (upload: multer.Multer) => {
       }
       console.error('Wallet fetch failed:', error);
       return res.status(500).json({ message: 'Unable to fetch wallet' });
+    }
+  });
+
+  router.get('/default-address', authenticate, async (req, res) => {
+    const currentUser = (req as AuthenticatedRequest).user;
+    if (!currentUser?.userId) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    try {
+      const defaultAddress = await Address.findOne({
+        userId: currentUser.userId,
+      })
+        .sort({ isDefault: -1, createdAt: -1 })
+        .lean();
+
+      return res.json({ address: defaultAddress || null });
+    } catch (error: any) {
+      console.error('Fetch default address failed:', error);
+      return res.status(500).json({ message: 'Unable to fetch default address' });
     }
   });
   router.put('/profile', authenticate, upload.single('photo'), updateProfile);

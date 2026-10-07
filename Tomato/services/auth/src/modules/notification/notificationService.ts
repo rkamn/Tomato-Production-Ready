@@ -37,6 +37,17 @@ interface SSEClient {
 class NotificationService {
   private clients: SSEClient[] = [];
 
+  constructor() {
+    // Periodic global cleanup every hour to automatically delete notifications older than 7 days
+    setInterval(async () => {
+      try {
+        await (Notification as any).cleanExpiredAndExcess();
+      } catch (err) {
+        console.error('Periodic notification purge error:', err);
+      }
+    }, 60 * 60 * 1000);
+  }
+
   /**
    * Register a new client for Server-Sent Events (SSE)
    */

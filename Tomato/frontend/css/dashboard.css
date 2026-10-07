@@ -226,19 +226,27 @@
         font-size: 1.1rem;
       }
 
+      .sidebar-spacer {
+        min-height: 2.75rem;
+        margin-top: 1rem;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
       .sign-out {
-        margin-top: auto;
+        margin-top: 0;
         padding: 0.85rem 1rem;
         border: 1px solid rgba(255, 255, 255, 0.2);
         border-radius: 8px;
         color: #f8e6c8;
         background: transparent;
         font-size: 0.88rem;
-        transition: background 0.15s;
+        transition: background 0.15s, color 0.15s, border-color 0.15s;
+        cursor: pointer;
       }
       .sign-out:hover {
         background: rgba(255, 255, 255, 0.1);
         color: #fff;
+        border-color: rgba(255, 255, 255, 0.35);
       }
 
       /* Main container */
@@ -285,6 +293,19 @@
         color: var(--muted);
         font-weight: 500;
       }
+      .location-badge {
+        padding: 0.4rem 0.9rem;
+        border: 1px solid var(--blue);
+        border-radius: 999px;
+        background: var(--panel);
+        font-size: 0.8rem;
+        color: var(--muted);
+        font-weight: 500;
+        line-height: 1.25;
+        letter-spacing: 0.02em;
+        text-align: right;
+        display: inline-block;
+      }
 
       /* Status Banner for Pending/Blocked */
       .alert-banner {
@@ -323,6 +344,19 @@
         border: 1px solid var(--line);
         border-radius: 10px;
         box-shadow: var(--shadow-sm);
+      }
+      .stat-card.clickable {
+        cursor: pointer;
+        transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+        user-select: none;
+      }
+      .stat-card.clickable:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 20px rgba(0,0,0,0.08);
+        border-color: var(--tomato);
+      }
+      .stat-card.clickable:active {
+        transform: translateY(0);
       }
       .stat-label {
         font-size: 0.78rem;

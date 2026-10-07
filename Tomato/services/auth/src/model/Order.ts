@@ -259,7 +259,7 @@ const orderSchema: Schema<IOrder> = new Schema(
     },
     rejectedByRiders: {
       type: [Schema.Types.ObjectId],
-      ref: 'User',
+      ref: 'Rider',
       default: [],
     },
     isArchived: {

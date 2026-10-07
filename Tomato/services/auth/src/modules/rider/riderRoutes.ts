@@ -4,7 +4,6 @@ import Address from '../../model/Address.js';
 import FoodItem from '../../model/FoodItem.js';
 import Notification from '../../model/Notification.js';
 import Order, { IOrder, OrderStatus } from '../../model/Order.js';
-import User, { IUser, USER_ROLES, UserRole } from '../../model/User.js';
 import Restaurant, { IRestaurant } from '../../model/Restaurant.js';
 import Customer, { ICustomer } from '../../model/Customer.js';
 import Rider, { IRider } from '../../model/Rider.js';
@@ -14,16 +13,7 @@ import {
   requireRole,
   requirePermission,
 } from '../../middleware/authenticate.js';
-import {
-  hashPassword,
-  userResponse,
-  generateRestaurantId,
-  generateRiderId,
-  generateCustomerId,
-  generateSubAdminId,
-  getPartnerDisplayName,
-} from '../../controllers/auth.js';
-import notificationService from '../../services/notificationService.js';
+import notificationService from '../notification/notificationService.js';
 import {
   formatBill,
   buildOrderLiveTrackingData,
@@ -77,7 +67,7 @@ const createRiderRouter = () => {
           .json({ message: 'Valid lat and lng coordinates are required' });
       }
 
-      let updated: any = await Rider.findByIdAndUpdate(
+      const updated: any = await Rider.findByIdAndUpdate(
         user.userId,
         {
           $set: {
@@ -88,24 +78,9 @@ const createRiderRouter = () => {
         },
         { new: true },
       ).lean();
-      if (!updated) {
-        updated = await User.findByIdAndUpdate(
-          user.userId,
-          {
-            $set: {
-              currentLocation: { lat: numLat, lng: numLng },
-              isOnline: isOnline !== undefined ? Boolean(isOnline) : true,
-              lastLocationUpdated: new Date(),
-            },
-          },
-          { new: true },
-        ).lean();
-      }
 
+      const displayName = updated ? updated.name : '';
       const riderIdStr = updated?.riderId || '';
-      const displayName = updated
-        ? `${updated.name}${riderIdStr ? '/' + riderIdStr : ''}`
-        : '';
 
       return res.json({
         message: 'Live GPS location updated',
@@ -130,13 +105,9 @@ const createRiderRouter = () => {
       if (!user?.userId)
         return res.status(401).json({ message: 'Authentication required' });
 
-      const rider =
-        (await Rider.findById(user.userId)
-          .select('isOnline lastLocationUpdated name riderId')
-          .lean()) ||
-        (await User.findById(user.userId)
-          .select('isOnline lastLocationUpdated name riderId')
-          .lean());
+      const rider = await Rider.findById(user.userId)
+        .select('isOnline lastLocationUpdated name riderId')
+        .lean();
       if (!rider) return res.status(404).json({ message: 'Rider not found' });
       return res.json({ isOnline: rider.isOnline ?? true });
     } catch (error) {
@@ -156,7 +127,7 @@ const createRiderRouter = () => {
         req.body?.isOnline !== undefined ? req.body.isOnline : req.body?.isOpen;
       const isOnline = Boolean(rawVal);
 
-      let updated: any = await Rider.findByIdAndUpdate(
+      const updated: any = await Rider.findByIdAndUpdate(
         user.userId,
         {
           $set: {
@@ -166,18 +137,6 @@ const createRiderRouter = () => {
         },
         { new: true },
       ).lean();
-      if (!updated) {
-        updated = await User.findByIdAndUpdate(
-          user.userId,
-          {
-            $set: {
-              isOnline,
-              lastLocationUpdated: new Date(),
-            },
-          },
-          { new: true },
-        ).lean();
-      }
 
       return res.json({
         message: isOnline
@@ -199,23 +158,17 @@ const createRiderRouter = () => {
       if (!user?.userId)
         return res.status(401).json({ message: 'Authentication required' });
 
-      const rider =
-        (await Rider.findById(user.userId)
-          .select(
-            'name riderId currentLocation isOnline lastLocationUpdated phone deliveryVehicle',
-          )
-          .lean()) ||
-        (await User.findById(user.userId)
-          .select(
-            'name riderId currentLocation isOnline lastLocationUpdated phone deliveryVehicle',
-          )
-          .lean());
+      const rider = await Rider.findById(user.userId)
+        .select(
+          'name riderId currentLocation isOnline lastLocationUpdated phone deliveryVehicle',
+        )
+        .lean();
       if (!rider) return res.status(404).json({ message: 'Rider not found' });
 
       const riderIdStr = rider.riderId || '';
       return res.json({
         riderId: riderIdStr,
-        displayName: `${rider.name}${riderIdStr ? '/' + riderIdStr : ''}`,
+        displayName: rider.name,
         currentLocation: rider.currentLocation || {
           lat: 12.9716,
           lng: 77.5946,
@@ -240,8 +193,7 @@ const createRiderRouter = () => {
           : null;
 
       const riderDoc = user?.userId
-        ? (await Rider.findById(user.userId).select('isOnline').lean()) ||
-          (await User.findById(user.userId).select('isOnline').lean())
+        ? await Rider.findById(user.userId).select('isOnline').lean()
         : null;
       if (riderDoc && riderDoc.isOnline === false) {
         return res.json({
@@ -343,9 +295,7 @@ const createRiderRouter = () => {
           });
         }
 
-        const riderUser =
-          (await Rider.findById(user.userId).lean()) ||
-          (await User.findById(user.userId).lean());
+        const riderUser = await Rider.findById(user.userId).lean();
         if (riderUser && riderUser.isOnline === false) {
           return res.status(400).json({
             message:
@@ -353,9 +303,7 @@ const createRiderRouter = () => {
           });
         }
         const riderCode = riderUser?.riderId || '';
-        const riderDisplayName = riderUser
-          ? `${riderUser.name}${riderCode ? '/' + riderCode : ''}`
-          : 'Tomato Rider';
+        const riderDisplayName = riderUser ? riderUser.name : 'Tomato Rider';
 
         order.riderId = new mongoose.Types.ObjectId(user.userId);
         order.riderCode = riderCode;

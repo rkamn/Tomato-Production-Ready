@@ -1,7 +1,6 @@
 import { Response } from 'express';
 import mongoose from 'mongoose';
 import Notification, { INotification } from '../../model/Notification.js';
-import User from '../../model/User.js';
 import Rider from '../../model/Rider.js';
 import { IOrder } from '../../model/Order.js';
 

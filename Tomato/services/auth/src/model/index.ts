@@ -1,4 +1,10 @@
-import User, { IUser, USER_ROLES, UserRole } from './User.js';
+import Employee, {
+  IEmployee,
+  EMPLOYEE_ROLES,
+  EmployeeRole,
+  USER_ROLES,
+  UserRole,
+} from './Employee.js';
 import Customer, { ICustomer } from './Customer.js';
 import Restaurant, { IRestaurant } from './Restaurant.js';
 import Rider, { IRider } from './Rider.js';
@@ -7,10 +13,13 @@ import FoodItem, { IFoodItem } from './FoodItem.js';
 import Notification, { INotification } from './Notification.js';
 import Address, { IAddress } from './Address.js';
 import WalletCreditTrack, { IWalletCreditTrack } from './WalletCreditTrack.js';
+import Counter, { ICounter, getNextCounterValue, generateIdFromCounter } from './Counter.js';
 
 export {
-  User,
-  IUser,
+  Employee,
+  IEmployee,
+  EMPLOYEE_ROLES,
+  EmployeeRole,
   USER_ROLES,
   UserRole,
   Customer,
@@ -30,10 +39,14 @@ export {
   IAddress,
   WalletCreditTrack,
   IWalletCreditTrack,
+  Counter,
+  ICounter,
+  getNextCounterValue,
+  generateIdFromCounter,
 };
 
 export default {
-  User,
+  Employee,
   Customer,
   Restaurant,
   Rider,
@@ -42,4 +55,6 @@ export default {
   Notification,
   Address,
   WalletCreditTrack,
+  Counter,
 };
+

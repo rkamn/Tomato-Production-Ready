@@ -1,6 +1,6 @@
 import { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import User, { UserRole } from '../model/User.js';
+import Employee, { UserRole } from '../model/Employee.js';
 import Restaurant from '../model/Restaurant.js';
 import Customer from '../model/Customer.js';
 import Rider from '../model/Rider.js';
@@ -56,14 +56,14 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 			} else if (uRole === 'customer') {
 				dbUser = await Customer.findById(uid).select('isBlocked isApproved name role customerId');
 			} else {
-				dbUser = await User.findById(uid).select('isBlocked isApproved name role permissions adminRoleTitle restaurantId riderId customerId subadminId');
+				dbUser = await Employee.findById(uid).select('isBlocked isApproved name role permissions adminRoleTitle restaurantId riderId customerId subadminId');
 			}
 
 			if (!dbUser) {
 				dbUser = (await Customer.findById(uid).select('isBlocked isApproved name role customerId'))
 					|| (await Rider.findById(uid).select('isBlocked isApproved name role riderId'))
 					|| (await Restaurant.findById(uid).select('isBlocked isApproved name role restaurantId'))
-					|| (await User.findById(uid).select('isBlocked isApproved name role permissions adminRoleTitle restaurantId riderId customerId subadminId'));
+					|| (await Employee.findById(uid).select('isBlocked isApproved name role permissions adminRoleTitle restaurantId riderId customerId subadminId'));
 			}
 			if (dbUser && dbUser.isBlocked) {
 				return res.status(403).json({ message: 'Your account has been blocked by administrator. Please contact support.' });

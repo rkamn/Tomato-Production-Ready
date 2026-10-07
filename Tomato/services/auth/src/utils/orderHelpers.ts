@@ -1,9 +1,8 @@
 import Order, { IOrder } from '../model/Order.js';
-import User, { IUser } from '../model/User.js';
 import Restaurant from '../model/Restaurant.js';
 import Customer from '../model/Customer.js';
 import Rider from '../model/Rider.js';
-import notificationService from '../services/notificationService.js';
+import notificationService from '../modules/notification/notificationService.js';
 
 export const createNotificationForRole = async (args: {
   userId: string;
@@ -19,8 +18,8 @@ export const createNotificationForRole = async (args: {
 
 export const formatBill = (
   order: IOrder,
-  restaurantUser?: IUser | null,
-  customerUser?: IUser | null,
+  restaurantUser?: any | null,
+  customerUser?: any | null,
 ) => {
   const subtotal = order.subtotal || 0;
   const cgst = Number((subtotal * 0.025).toFixed(2));
@@ -86,14 +85,12 @@ export const buildOrderLiveTrackingData = async (orderId: string) => {
   } | null = null;
 
   if (order.riderId) {
-    const rider =
-      (await Rider.findById(order.riderId).lean()) ||
-      (await User.findById(order.riderId).lean());
+    const rider = await Rider.findById(order.riderId).lean();
     if (rider) {
       const riderIdStr = rider.riderId || '';
       riderData = {
         riderId: riderIdStr,
-        displayName: `${rider.name}${riderIdStr ? '/' + riderIdStr : ''}`,
+        displayName: rider.name,
         phone: rider.phone || '',
         currentLocation: rider.currentLocation || {
           lat: 12.9716,
@@ -115,14 +112,12 @@ export const buildOrderLiveTrackingData = async (orderId: string) => {
   } | null = null;
 
   if (order.restaurantId) {
-    const rest =
-      (await Restaurant.findById(order.restaurantId).lean()) ||
-      (await User.findById(order.restaurantId).lean());
+    const rest = await Restaurant.findById(order.restaurantId).lean();
     if (rest) {
       const restIdStr = rest.restaurantId || '';
       restaurantData = {
         restaurantId: restIdStr,
-        displayName: `${rest.name}${restIdStr ? '/' + restIdStr : ''}`,
+        displayName: rest.name,
         address: rest.restaurantAddress || order.restaurantAddress || '',
         location: rest.restaurantLocation ||
           order.restaurantLocation || { lat: 12.9716, lng: 77.5946 },

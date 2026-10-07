@@ -4,7 +4,7 @@ import Address from '../../model/Address.js';
 import FoodItem from '../../model/FoodItem.js';
 import Notification from '../../model/Notification.js';
 import Order, { IOrder, OrderStatus } from '../../model/Order.js';
-import User, { IUser, USER_ROLES, UserRole } from '../../model/User.js';
+import Employee, { IEmployee, USER_ROLES, UserRole } from '../../model/Employee.js';
 import Restaurant, { IRestaurant } from '../../model/Restaurant.js';
 import Customer, { ICustomer } from '../../model/Customer.js';
 import Rider, { IRider } from '../../model/Rider.js';
@@ -22,13 +22,13 @@ import {
   generateRiderId,
   generateCustomerId,
   generateSubAdminId,
-  getPartnerDisplayName,
-} from '../../controllers/auth.js';
-import notificationService from '../../services/notificationService.js';
+  generateAdminId,
+} from '../auth/authController.js';
+import notificationService from '../notification/notificationService.js';
 import {
   transferCreditPoints,
   WalletServiceError,
-} from '../../services/walletService.js';
+} from '../wallet/walletService.js';
 import {
   formatBill,
   buildOrderLiveTrackingData,
@@ -124,15 +124,9 @@ const createAdminRouter = () => {
           }),
           Order.countDocuments({ status: 'delivered' }),
           Order.countDocuments({ status: 'cancelled' }),
-          Promise.all([
-            Customer.countDocuments(),
-            User.countDocuments({ role: 'customer' }),
-          ]).then(([c, u]) => c + u),
+          Customer.countDocuments(),
           Restaurant.find().lean(),
-          Promise.all([
-            Rider.find().lean(),
-            User.find({ role: 'deliveryPartner' }).lean(),
-          ]).then(([r, u]) => [...r, ...u]),
+          Rider.find().lean(),
           Order.find().sort({ createdAt: -1 }).limit(200).lean(),
         ]);
 
@@ -736,17 +730,8 @@ const createAdminRouter = () => {
           }
           restFilter.$or = orConditions;
         }
-        const [restaurants, legacyRestaurants] = await Promise.all([
-          Restaurant.find(restFilter).sort({ createdAt: -1 }),
-          User.find({ ...restFilter, role: 'restaurant' }).sort({
-            createdAt: -1,
-          }),
-        ]);
-        const combined = [
-          ...restaurants.map((r) => userResponse(r as any)),
-          ...legacyRestaurants.map((u) => userResponse(u)),
-        ];
-        return res.json(paginateList(combined));
+        const restaurants = await Restaurant.find(restFilter).sort({ createdAt: -1 });
+        return res.json(paginateList(restaurants.map((r) => userResponse(r as any))));
       }
 
       if (role === 'customer') {
@@ -774,17 +759,8 @@ const createAdminRouter = () => {
           }
           custFilter.$or = orConditions;
         }
-        const [customers, legacyCustomers] = await Promise.all([
-          Customer.find(custFilter).sort({ createdAt: -1 }),
-          User.find({ ...custFilter, role: 'customer' }).sort({
-            createdAt: -1,
-          }),
-        ]);
-        const combined = [
-          ...customers.map((c) => userResponse(c as any)),
-          ...legacyCustomers.map((u) => userResponse(u)),
-        ];
-        return res.json(paginateList(combined));
+        const customers = await Customer.find(custFilter).sort({ createdAt: -1 });
+        return res.json(paginateList(customers.map((c) => userResponse(c as any))));
       }
 
       if (role === 'deliveryPartner') {
@@ -812,17 +788,8 @@ const createAdminRouter = () => {
           }
           riderFilter.$or = orConditions;
         }
-        const [riders, legacyRiders] = await Promise.all([
-          Rider.find(riderFilter).sort({ createdAt: -1 }),
-          User.find({ ...riderFilter, role: 'deliveryPartner' }).sort({
-            createdAt: -1,
-          }),
-        ]);
-        const combined = [
-          ...riders.map((r) => userResponse(r as any)),
-          ...legacyRiders.map((u) => userResponse(u)),
-        ];
-        return res.json(paginateList(combined));
+        const riders = await Rider.find(riderFilter).sort({ createdAt: -1 });
+        return res.json(paginateList(riders.map((r) => userResponse(r as any))));
       }
 
       const filter: Record<string, unknown> = {};
@@ -898,15 +865,15 @@ const createAdminRouter = () => {
           ];
         }
 
-        const [users, restaurants, riders, customers] = await Promise.all([
-          User.find(filter).sort({ createdAt: -1 }),
+        const [employees, restaurants, riders, customers] = await Promise.all([
+          Employee.find(filter).sort({ createdAt: -1 }),
           Restaurant.find(restFilter).sort({ createdAt: -1 }),
           Rider.find(riderFilter).sort({ createdAt: -1 }),
           Customer.find(custFilter).sort({ createdAt: -1 }),
         ]);
 
         const combined = [
-          ...users.map((u) => userResponse(u)),
+          ...employees.map((u) => userResponse(u as any)),
           ...restaurants.map((r) => userResponse(r as any)),
           ...riders.map((r) => userResponse(r as any)),
           ...customers.map((c) => userResponse(c as any)),
@@ -919,8 +886,8 @@ const createAdminRouter = () => {
         return res.json(paginateList(combined));
       }
 
-      const users = await User.find(filter).sort({ createdAt: -1 });
-      return res.json(paginateList(users.map((u) => userResponse(u))));
+      const employees = await Employee.find(filter).sort({ createdAt: -1 });
+      return res.json(paginateList(employees.map((u) => userResponse(u as any))));
     } catch (error) {
       console.error('Admin users fetch failed:', error);
       return res.status(500).json({ message: 'Unable to fetch users' });
@@ -961,19 +928,19 @@ const createAdminRouter = () => {
       };
 
       const [
-        existingUser,
+        existingEmployee,
         existingRestaurant,
         existingRider,
         existingCustomer,
       ] = await Promise.all([
-        User.findOne(duplicateQuery),
+        Employee.findOne(duplicateQuery),
         Restaurant.findOne(duplicateQuery),
         Rider.findOne(duplicateQuery),
         Customer.findOne(duplicateQuery),
       ]);
 
       if (
-        existingUser ||
+        existingEmployee ||
         existingRestaurant ||
         existingRider ||
         existingCustomer
@@ -1084,21 +1051,30 @@ const createAdminRouter = () => {
         });
       }
 
-      const userData: Record<string, unknown> = {
+      const adminId = role === 'admin' ? await generateAdminId() : undefined;
+      const subadminId = role === 'subadmin' ? await generateSubAdminId() : undefined;
+      const employeeData: Record<string, unknown> = {
         name: name.trim(),
         email: email ? email.trim().toLowerCase() : undefined,
         phone: phone ? phone.trim() : undefined,
         passwordHash: await hashPassword(password),
         role,
+        adminRoleTitle:
+          role === 'admin'
+            ? 'Platform Administrator'
+            : 'Operations Sub-Admin',
         isApproved: true,
         isBlocked: false,
+        permissions: role === 'admin' ? ['*'] : ['orders_manage'],
+        ...(adminId ? { adminId } : {}),
+        ...(subadminId ? { subadminId } : {}),
       };
 
-      const user = await User.create(userData);
+      const employee = await Employee.create(employeeData);
 
       return res.status(201).json({
-        message: 'User created successfully',
-        user: userResponse(user),
+        message: 'Account created successfully in Employees table',
+        user: userResponse(employee as any),
       });
     } catch (error) {
       console.error('Admin create user failed:', error);
@@ -1133,9 +1109,9 @@ const createAdminRouter = () => {
           message: `Transferred ${req.body.creditPoints} credit point(s) successfully`,
           ...transfer,
         });
-      } catch (error) {
-        if (error instanceof WalletServiceError) {
-          return res.status(error.statusCode).json({ message: error.message });
+      } catch (error: any) {
+        if (error instanceof WalletServiceError || error?.name === 'WalletServiceError') {
+          return res.status(error.statusCode || 400).json({ message: error.message });
         }
         console.error('Admin credit-point transfer failed:', error);
         return res.status(500).json({ message: 'Unable to transfer credit points' });
@@ -1152,7 +1128,7 @@ const createAdminRouter = () => {
       }
 
       // Sub-admin can NEVER modify or update permissions of an admin account:
-      const targetUser = await User.findById(userId);
+      const targetUser = await Employee.findById(userId);
       if (targetUser && targetUser.role === 'admin') {
         if (currentUser?.role === 'subadmin') {
           return res.status(403).json({
@@ -1232,7 +1208,7 @@ const createAdminRouter = () => {
         );
       }
       if (!user) {
-        user = await User.findByIdAndUpdate(
+        user = await Employee.findByIdAndUpdate(
           userId,
           { $set: updates },
           { new: true, runValidators: true },
@@ -1256,19 +1232,11 @@ const createAdminRouter = () => {
     requirePermission('riders_manage'),
     async (_req: Request, res: Response) => {
       try {
-        const [riders, legacyRiders] = await Promise.all([
-          Rider.find()
-            .select(
-              'name riderId phone email currentLocation isOnline lastLocationUpdated deliveryVehicle isApproved isBlocked',
-            )
-            .lean(),
-          User.find({ role: 'deliveryPartner' })
-            .select(
-              'name riderId phone email currentLocation isOnline lastLocationUpdated deliveryVehicle isApproved isBlocked',
-            )
-            .lean(),
-        ]);
-        const allRiders = [...riders, ...legacyRiders];
+        const allRiders = await Rider.find()
+          .select(
+            'name riderId phone email currentLocation isOnline lastLocationUpdated deliveryVehicle isApproved isBlocked',
+          )
+          .lean();
 
         // Find active orders assigned to riders
         const activeOrders = await Order.find({
@@ -1294,10 +1262,9 @@ const createAdminRouter = () => {
 
         return res.json({
           riders: allRiders.map((r) => {
-            const riderIdStr = r.riderId || '';
             return {
-              ...userResponse(r as unknown as IUser),
-              displayName: `${r.name}${riderIdStr ? '/' + riderIdStr : ''}`,
+              ...userResponse(r as any),
+              displayName: r.name,
               activeOrder: orderMap.get(String(r._id)) || null,
             };
           }),
@@ -1366,7 +1333,7 @@ const createAdminRouter = () => {
         );
       }
       if (!user) {
-        user = await User.findByIdAndUpdate(
+        user = await Employee.findByIdAndUpdate(
           userId,
           { $set: { isApproved: true } },
           { new: true },
@@ -1421,7 +1388,7 @@ const createAdminRouter = () => {
         );
       }
       if (!user) {
-        user = await User.findByIdAndUpdate(
+        user = await Employee.findByIdAndUpdate(
           userId,
           { $set: { isApproved: false } },
           { new: true },
@@ -1449,7 +1416,7 @@ const createAdminRouter = () => {
       }
 
       // Check if target is an administrator or sub-admin
-      const targetUserRecord = await User.findById(userId);
+      const targetUserRecord = await Employee.findById(userId);
       if (targetUserRecord) {
         if (targetUserRecord.role === 'admin') {
           return res.status(403).json({
@@ -1483,7 +1450,7 @@ const createAdminRouter = () => {
         );
       }
       if (!user) {
-        user = await User.findByIdAndUpdate(
+        user = await Employee.findByIdAndUpdate(
           userId,
           { $set: { isBlocked: true } },
           { new: true },
@@ -1520,7 +1487,7 @@ const createAdminRouter = () => {
       }
 
       // Check if target is an administrator or sub-admin
-      const targetUserRecord = await User.findById(userId);
+      const targetUserRecord = await Employee.findById(userId);
       if (targetUserRecord) {
         if (targetUserRecord.role === 'admin') {
           return res.status(403).json({
@@ -1554,7 +1521,7 @@ const createAdminRouter = () => {
         );
       }
       if (!user) {
-        user = await User.findByIdAndUpdate(
+        user = await Employee.findByIdAndUpdate(
           userId,
           { $set: { isBlocked: false } },
           { new: true },
@@ -1618,7 +1585,7 @@ const createAdminRouter = () => {
           filter.$or = orConditions;
         }
 
-        const subadmins = await User.find(filter).sort({ createdAt: -1 });
+        const subadmins = await Employee.find(filter).sort({ createdAt: -1 });
         return res.json({
           subadmins: subadmins.map((u) => userResponse(u)),
           total: subadmins.length,
@@ -1664,7 +1631,7 @@ const createAdminRouter = () => {
           typeof email === 'string' ? email.trim().toLowerCase() : '';
         const cleanPhone = typeof phone === 'string' ? phone.trim() : '';
 
-        const existing = await User.findOne({
+        const existing = await Employee.findOne({
           $or: [
             ...(cleanEmail ? [{ email: cleanEmail }] : []),
             ...(cleanPhone ? [{ phone: cleanPhone }] : []),
@@ -1713,7 +1680,7 @@ const createAdminRouter = () => {
         if (cleanEmail) subAdminData.email = cleanEmail;
         if (cleanPhone) subAdminData.phone = cleanPhone;
 
-        const subAdmin = await User.create(subAdminData);
+        const subAdmin = await Employee.create(subAdminData);
 
         await Notification.create({
           userId: String(subAdmin._id),
@@ -1752,7 +1719,7 @@ const createAdminRouter = () => {
           return res.status(400).json({ message: 'Invalid sub-admin ID' });
         }
 
-        const targetUser = await User.findById(subAdminId);
+        const targetUser = await Employee.findById(subAdminId);
         if (!targetUser) {
           return res.status(404).json({ message: 'Sub-admin not found' });
         }
@@ -1793,7 +1760,7 @@ const createAdminRouter = () => {
           updates.adminRoleTitle = adminRoleTitle.trim();
         }
 
-        const updated = await User.findByIdAndUpdate(
+        const updated = await Employee.findByIdAndUpdate(
           subAdminId,
           { $set: updates },
           { new: true },
@@ -1838,7 +1805,7 @@ const createAdminRouter = () => {
             });
         }
 
-        const target = await User.findById(subAdminId);
+        const target = await Employee.findById(subAdminId);
         if (!target)
           return res.status(404).json({ message: 'Sub-admin not found' });
         if (target.role !== 'subadmin') {
@@ -1895,7 +1862,7 @@ const createAdminRouter = () => {
             });
         }
 
-        const target = await User.findById(subAdminId);
+        const target = await Employee.findById(subAdminId);
         if (!target)
           return res.status(404).json({ message: 'Sub-admin not found' });
         if (target.role !== 'subadmin') {
@@ -1904,7 +1871,7 @@ const createAdminRouter = () => {
             .json({ message: 'Access denied. Administrator accounts cannot be deleted.' });
         }
 
-        await User.findByIdAndDelete(subAdminId);
+        await Employee.findByIdAndDelete(subAdminId);
 
         return res.json({
           message: `Sub-admin "${target.name}" deleted successfully`,
@@ -1926,7 +1893,7 @@ const createAdminRouter = () => {
         const { startDate, endDate, allTime } = req.query;
 
         const allOrders = await Order.find().lean();
-        const users = await User.find().lean();
+        const employees = await Employee.find().lean();
         const restaurants = await Restaurant.find().lean();
         const customers = await Customer.find().lean();
         const riders = await Rider.find().lean();
@@ -1982,13 +1949,13 @@ const createAdminRouter = () => {
           return true;
         });
 
-        // Filter users by selected date period
-        const filteredUsers = users.filter((u: any) => {
+        // Filter employees by selected date period
+        const filteredEmployees = employees.filter((e: any) => {
           if (!start && !end) return true;
-          if (!u.createdAt) return false;
-          const uDate = new Date(u.createdAt);
-          if (start && uDate < start) return false;
-          if (end && uDate > end) return false;
+          if (!e.createdAt) return false;
+          const eDate = new Date(e.createdAt);
+          if (start && eDate < start) return false;
+          if (end && eDate > end) return false;
           return true;
         });
 
@@ -2001,11 +1968,7 @@ const createAdminRouter = () => {
           return true;
         });
 
-        const allCustomersCombined = [
-          ...customers,
-          ...users.filter((u) => u.role === 'customer'),
-        ];
-        const filteredCustomers = allCustomersCombined.filter((c: any) => {
+        const filteredCustomers = customers.filter((c: any) => {
           if (!start && !end) return true;
           if (!c.createdAt) return false;
           const cDate = new Date(c.createdAt);
@@ -2014,11 +1977,7 @@ const createAdminRouter = () => {
           return true;
         });
 
-        const allRidersCombined = [
-          ...riders,
-          ...users.filter((u) => u.role === 'deliveryPartner'),
-        ];
-        const filteredRiders = allRidersCombined.filter((r: any) => {
+        const filteredRiders = riders.filter((r: any) => {
           if (!start && !end) return true;
           if (!r.createdAt) return false;
           const rDate = new Date(r.createdAt);
@@ -2084,11 +2043,11 @@ const createAdminRouter = () => {
           periodCustomersCount +
           periodRestaurantsCount +
           periodRidersCount +
-          filteredUsers.length;
+          filteredEmployees.length;
 
-        const totalCustomers = allCustomersCombined.length;
+        const totalCustomers = customers.length;
         const totalRestaurants = restaurants.length;
-        const totalRiders = allRidersCombined.length;
+        const totalRiders = riders.length;
 
         // Payment method distribution in period
         const paymentDistribution: Record<
@@ -2196,7 +2155,7 @@ const createAdminRouter = () => {
             periodCustomersCount,
             periodRestaurantsCount,
             periodRidersCount,
-            totalUsersCount: users.length + restaurants.length,
+            totalUsersCount: customers.length + restaurants.length + riders.length + employees.length,
             totalCustomers,
             totalRestaurants,
             totalRiders,

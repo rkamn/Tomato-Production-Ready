@@ -1,6 +1,6 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
-export interface IFoodItem extends Document {
+export interface IMenuItem extends Document {
   restaurantId: mongoose.Types.ObjectId;
   restaurantName?: string;
   name: string;
@@ -15,11 +15,13 @@ export interface IFoodItem extends Document {
   updatedAt: Date;
 }
 
-const foodItemSchema: Schema<IFoodItem> = new Schema(
+export type IFoodItem = IMenuItem;
+
+const menuItemSchema: Schema<IMenuItem> = new Schema(
   {
     restaurantId: {
       type: Schema.Types.ObjectId,
-      ref: 'User',
+      ref: 'Restaurant',
       required: true,
       index: true,
     },
@@ -69,12 +71,13 @@ const foodItemSchema: Schema<IFoodItem> = new Schema(
       default: true,
     },
   },
-  { timestamps: true },
+  { timestamps: true, collection: 'menuitems' },
 );
 
-foodItemSchema.index({ restaurantId: 1, isActive: 1 });
-foodItemSchema.index({ name: 'text', category: 'text' });
+menuItemSchema.index({ restaurantId: 1, isActive: 1 });
+menuItemSchema.index({ name: 'text', category: 'text' });
 
-const FoodItem = mongoose.model<IFoodItem>('FoodItem', foodItemSchema);
+export const MenuItem = mongoose.model<IMenuItem>('MenuItem', menuItemSchema, 'menuitems');
+export const FoodItem = MenuItem;
 
-export default FoodItem;
+export default MenuItem;

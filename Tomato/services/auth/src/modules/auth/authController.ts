@@ -35,17 +35,6 @@ const normalizeEmail = (value: string) => value.trim().toLowerCase();
 const normalizePhone = (value: string) => value.replace(/[\s()-]/g, '');
 const isPhone = (value: string) => /^\+?[1-9]\d{9,14}$/.test(value);
 const hashResetToken = (token: string) => createHash('sha256').update(token).digest('hex');
-const getIdentifier = (body: Request['body']) => {
-	const value = typeof body?.identifier === 'string'
-		? body.identifier.trim()
-		: typeof body?.email === 'string'
-			? body.email.trim()
-			: typeof body?.phone === 'string'
-				? body.phone.trim()
-				: '';
-	const normalized = value.includes('@') ? value.toLowerCase() : normalizePhone(value);
-	return { value: normalized, field: normalized.includes('@') ? 'email' : 'phone' as const };
-};
 
 const getRegistrationPayload = (body: Request['body']) => {
 	const rawIdentifier = typeof body?.identifier === 'string' ? body.identifier.trim() : '';
@@ -83,10 +72,6 @@ export const generateAdminId = (): Promise<string> =>
 	generateIdFromCounter('adminId', 'ADM', 1000, async (id: string) =>
 		Boolean(await Employee.exists({ adminId: id })),
 	);
-
-export const getPartnerDisplayName = (name: string, _partnerId?: string) => {
-	return name;
-};
 
 export const createToken = (user: {
 	_id: { toString: () => string };

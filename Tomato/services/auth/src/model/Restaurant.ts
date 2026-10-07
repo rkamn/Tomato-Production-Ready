@@ -67,6 +67,22 @@ const schema: Schema<IRestaurant> = new Schema(
   { timestamps: true, collection: 'restaurants' },
 );
 
+// Cascade delete associated menu items whenever a restaurant is deleted
+schema.pre(['deleteOne', 'findOneAndDelete'], { document: false, query: true }, async function () {
+  const doc = await this.model.findOne(this.getQuery()).select('_id');
+  if (doc?._id) {
+    const MenuItemModel = mongoose.models.MenuItem || mongoose.model('MenuItem');
+    await MenuItemModel.deleteMany({ restaurantId: doc._id });
+  }
+});
+
+schema.pre('deleteOne', { document: true, query: false }, async function () {
+  if (this._id) {
+    const MenuItemModel = mongoose.models.MenuItem || mongoose.model('MenuItem');
+    await MenuItemModel.deleteMany({ restaurantId: this._id });
+  }
+});
+
 const Restaurant = mongoose.model<IRestaurant>('Restaurant', schema);
 
 export default Restaurant;

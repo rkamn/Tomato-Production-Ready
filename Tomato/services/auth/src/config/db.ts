@@ -155,6 +155,32 @@ export const migrateUsersToEmployeesAndDropUsersTable = async () => {
             });
             console.log("[DB Migration] Default Platform Administrator (admin@tomato.com) created in employees table.");
         }
+
+        // Migrate records from legacy 'fooditems' or 'food_items' into 'menuitems', then drop old tables
+        const menuItemsCol = mongoose.connection.db.collection('menuitems');
+        for (const oldColName of ['fooditems', 'food_items']) {
+            if (collections.some((c) => c.name === oldColName)) {
+                const oldCol = mongoose.connection.db.collection(oldColName);
+                const oldDocs = await oldCol.find({}).toArray();
+                if (oldDocs.length > 0) {
+                    console.log(`[DB Migration] Migrating ${oldDocs.length} records from '${oldColName}' to 'menuitems'...`);
+                    for (const doc of oldDocs) {
+                        await menuItemsCol.updateOne(
+                            { _id: doc._id },
+                            { $set: doc },
+                            { upsert: true },
+                        );
+                    }
+                }
+                await oldCol.deleteMany({});
+                try {
+                    await oldCol.drop();
+                    console.log(`[DB Migration] '${oldColName}' table dropped successfully.`);
+                } catch (dropErr: any) {
+                    console.warn(`[DB Migration] Notice on dropping ${oldColName}:`, dropErr?.message);
+                }
+            }
+        }
     } catch (migrationErr: any) {
         console.error('[DB Migration Error]:', migrationErr?.message || migrationErr);
     }

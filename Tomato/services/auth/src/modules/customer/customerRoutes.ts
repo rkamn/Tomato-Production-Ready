@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import Address from '../../model/Address.js';
-import FoodItem from '../../model/FoodItem.js';
+import MenuItem, { FoodItem } from '../../model/MenuItem.js';
 import Notification from '../../model/Notification.js';
 import Order, { IOrder } from '../../model/Order.js';
 import Counter, { getNextCounterValue } from '../../model/Counter.js';

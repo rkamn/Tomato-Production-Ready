@@ -1,7 +1,6 @@
 import express, { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import Address from '../../model/Address.js';
-import FoodItem from '../../model/FoodItem.js';
 import Notification from '../../model/Notification.js';
 import Order, { IOrder, OrderStatus } from '../../model/Order.js';
 import Restaurant, { IRestaurant } from '../../model/Restaurant.js';

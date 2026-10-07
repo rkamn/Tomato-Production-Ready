@@ -136,8 +136,11 @@
             </div>
 
             <div class="restaurant-select-bar" id="restaurant-pills">
-              <!-- Rendered via JS -->
+              <!-- Main headers (All Restaurants, All Menus, Category, Grocery) rendered via JS -->
             </div>
+
+            <!-- Contextual sub-filter pills (e.g. restaurant list, categories, grocery items) -->
+            <div class="restaurant-select-bar" id="sub-filter-pills" style="margin-top: -0.75rem; margin-bottom: 1.25rem;"></div>
 
             <div id="menu-items-grid" class="menu-grid">
               <!-- Rendered via JS -->
@@ -833,6 +836,39 @@
         <div style="display:flex; justify-content:flex-end; gap:0.8rem; margin-top:1.2rem;">
           <button type="button" class="btn btn-secondary" onclick="closeModal('payment-gateway-modal')">Cancel</button>
           <button type="button" class="btn btn-primary" id="gateway-pay-btn" onclick="executePaymentAndOrder()">Authorize & Pay</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- =====================================================================
+         MODAL: CUSTOMER EXPLORE & ALL SELECTION POPUP
+         ===================================================================== -->
+    <div id="filter-selection-modal" class="modal-overlay" onclick="handleFilterModalBackdropClick(event)">
+      <div class="modal-box" style="max-width:580px; max-height:85vh; display:flex; flex-direction:column;">
+        <div class="modal-header" style="margin-bottom:0.8rem; padding-bottom:0.6rem;">
+          <h2 id="filter-modal-title" style="font-size:1.25rem; font-weight:700;">Select Restaurant</h2>
+          <button class="modal-close" onclick="closeFilterModal()">&times;</button>
+        </div>
+
+        <!-- Search on the top of popup -->
+        <div style="position:relative; margin-bottom:1rem;">
+          <input
+            id="filter-modal-search"
+            type="text"
+            placeholder="Search by name, cuisine, etc..."
+            style="width:100%; padding:0.65rem 1rem 0.65rem 2.2rem; font-size:0.9rem; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); box-sizing:border-box; outline:none;"
+            oninput="handleFilterModalSearch(this)"
+          />
+          <span style="position:absolute; left:0.75rem; top:50%; transform:translateY(-50%); color:var(--muted); font-size:0.95rem; pointer-events:none;">🔍</span>
+        </div>
+
+        <!-- Scrollable list of all items -->
+        <div id="filter-modal-items-container" style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:0.5rem; padding-right:0.25rem; max-height:400px;" onclick="handleFilterModalItemClick(event)">
+          <!-- Filled dynamically by renderFilterModalItems -->
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; align-items:center; margin-top:1rem; padding-top:0.6rem; border-top:1px solid var(--line);">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="closeFilterModal()">Close</button>
         </div>
       </div>
     </div>

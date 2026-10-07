@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import Address from '../../model/Address.js';
-import FoodItem from '../../model/FoodItem.js';
+import MenuItem, { FoodItem } from '../../model/MenuItem.js';
 import Notification from '../../model/Notification.js';
 import Order, { IOrder, OrderStatus } from '../../model/Order.js';
 import Employee, { IEmployee, USER_ROLES, UserRole } from '../../model/Employee.js';
@@ -1544,6 +1544,83 @@ const createAdminRouter = () => {
     } catch (error) {
       console.error('Unblock user failed:', error);
       return res.status(500).json({ message: 'Unable to unblock user' });
+    }
+  });
+
+  // Delete any partner, customer, or employee account permanently (with cascade menu item deletion for restaurants)
+  router.delete('/users/:userId', async (req: Request, res: Response) => {
+    try {
+      const userId = String(req.params.userId || '');
+      const currentUser = (req as AuthenticatedRequest).user;
+      if (!userId || !mongoose.isValidObjectId(userId)) {
+        return res.status(400).json({ message: 'Valid user ID is required' });
+      }
+
+      // Check if target is an administrator or sub-admin
+      const targetUserRecord = await Employee.findById(userId);
+      if (targetUserRecord) {
+        if (targetUserRecord.role === 'admin') {
+          return res.status(403).json({
+            message: 'Access denied. Administrator accounts cannot be deleted.',
+          });
+        }
+        if (targetUserRecord.role === 'subadmin' && currentUser?.role !== 'admin') {
+          return res.status(403).json({
+            message: 'Access denied. Only the platform administrator can delete sub-admin accounts.',
+          });
+        }
+      }
+
+      // 1. Try deleting Restaurant and cascade delete all its associated menu items
+      let deletedType = '';
+      let deletedName = '';
+      let deletedDoc: any = await Restaurant.findByIdAndDelete(userId);
+      if (deletedDoc) {
+        deletedType = 'Restaurant';
+        deletedName = deletedDoc.name;
+        const menuResult = await FoodItem.deleteMany({ restaurantId: deletedDoc._id });
+        console.log(`Cascade deleted ${menuResult.deletedCount} menu items for restaurant ${deletedDoc.name} (${deletedDoc._id})`);
+      }
+
+      // 2. Try deleting Rider
+      if (!deletedDoc) {
+        deletedDoc = await Rider.findByIdAndDelete(userId);
+        if (deletedDoc) {
+          deletedType = 'Delivery Partner';
+          deletedName = deletedDoc.name;
+        }
+      }
+
+      // 3. Try deleting Customer
+      if (!deletedDoc) {
+        deletedDoc = await Customer.findByIdAndDelete(userId);
+        if (deletedDoc) {
+          deletedType = 'Customer';
+          deletedName = deletedDoc.name;
+          await Address.deleteMany({ userId: String(deletedDoc._id) });
+        }
+      }
+
+      // 4. Try deleting Employee (subadmin)
+      if (!deletedDoc) {
+        deletedDoc = await Employee.findByIdAndDelete(userId);
+        if (deletedDoc) {
+          deletedType = 'Sub-admin';
+          deletedName = deletedDoc.name;
+        }
+      }
+
+      if (!deletedDoc) {
+        return res.status(404).json({ message: 'Account not found' });
+      }
+
+      return res.json({
+        message: `${deletedType} "${deletedName}" and all associated data deleted successfully`,
+        userId,
+      });
+    } catch (error) {
+      console.error('Delete account failed:', error);
+      return res.status(500).json({ message: 'Unable to delete account' });
     }
   });
 

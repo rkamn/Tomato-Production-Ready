@@ -601,6 +601,7 @@
         flex-wrap: wrap;
         gap: 0.6rem;
         margin-bottom: 1.5rem;
+        align-items: center;
       }
       .filter-pill {
         padding: 0.5rem 1rem;
@@ -609,11 +610,106 @@
         background: var(--panel);
         font-size: 0.84rem;
         color: var(--muted);
+        cursor: pointer;
+        transition: all 0.15s ease;
       }
       .filter-pill.active {
         background: var(--ink);
         color: #fff;
         border-color: var(--ink);
+      }
+      .filter-pill:hover:not(.active) {
+        border-color: var(--primary, #e11d48);
+        color: var(--ink);
+      }
+
+      /* Unified Split Pill with Downward Arrow */
+      .split-filter-pill {
+        display: inline-flex;
+        align-items: stretch;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--panel);
+        overflow: hidden;
+        transition: all 0.15s ease;
+      }
+      .split-filter-pill.active {
+        background: var(--ink);
+        border-color: var(--ink);
+        color: #fff;
+      }
+      .split-filter-pill:hover:not(.active) {
+        border-color: var(--primary, #e11d48);
+      }
+      .split-filter-pill-action {
+        border: none;
+        background: transparent;
+        padding: 0.4rem 0.7rem 0.4rem 0.95rem;
+        font-size: 0.82rem;
+        font-weight: 500;
+        color: inherit;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        white-space: nowrap;
+      }
+      .split-filter-pill-caret {
+        border: none;
+        background: transparent;
+        border-left: 1px solid rgba(128, 128, 128, 0.25);
+        padding: 0.4rem 0.7rem;
+        font-size: 0.72rem;
+        color: inherit;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.15s ease;
+      }
+      .split-filter-pill-caret:hover {
+        background: rgba(0, 0, 0, 0.08);
+      }
+      .split-filter-pill.active .split-filter-pill-caret:hover {
+        background: rgba(255, 255, 255, 0.2);
+      }
+
+      /* Filter Popup Modal Card Styles */
+      .filter-modal-card {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        padding: 0.75rem 1rem;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        text-align: left;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .filter-modal-card:hover {
+        border-color: var(--primary, #e11d48);
+        background: rgba(225, 29, 72, 0.04);
+        transform: translateY(-1px);
+      }
+      .filter-modal-card.active {
+        border-color: var(--ink);
+        background: rgba(0, 0, 0, 0.06);
+        font-weight: 600;
+      }
+      .filter-modal-card-badge {
+        font-size: 0.76rem;
+        padding: 0.18rem 0.55rem;
+        border-radius: 999px;
+        background: rgba(128, 128, 128, 0.12);
+        color: var(--ink);
+        white-space: nowrap;
+      }
+      .filter-modal-card.active .filter-modal-card-badge {
+        background: var(--ink);
+        color: #fff;
       }
       .menu-grid {
         display: grid;

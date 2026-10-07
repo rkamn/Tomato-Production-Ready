@@ -83,7 +83,7 @@ const orderItemSchema: Schema<IOrderItem> = new Schema(
   {
     foodItemId: {
       type: Schema.Types.ObjectId,
-      ref: 'FoodItem',
+      ref: 'MenuItem',
       required: true,
     },
     name: { type: String, required: true, trim: true },

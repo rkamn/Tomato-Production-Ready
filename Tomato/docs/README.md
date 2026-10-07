@@ -40,6 +40,6 @@ This directory houses all service specifications, architecture designs, and data
   - `restaurants`: Restaurant partners and kitchen locations.
   - `riders`: Delivery partners and fleet state.
   - `orders`: Food orders with items, pricing, delivery address, and status.
-  - `fooditems`: Menu dishes per restaurant.
+  - `menuitems`: Menu dishes per restaurant.
   - `notifications`: Real-time system notifications.
   - `addresses`: Customer saved delivery addresses.

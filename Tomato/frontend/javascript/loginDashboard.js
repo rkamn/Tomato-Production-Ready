@@ -839,6 +839,36 @@
         }
       }
 
+      // Helper to parse address strings to city and 6-digit pincode
+      function parseAddressStringToCityAndPincode(rawAddress) {
+        const defaultCity = 'Bengaluru';
+        const defaultPincode = '560001';
+        if (!rawAddress || typeof rawAddress !== 'string' || !rawAddress.trim()) {
+          return { city: defaultCity, postalCode: defaultPincode };
+        }
+        const str = rawAddress.trim();
+        const pinMatch = str.match(/\b([1-9]\d{5})\b/);
+        const postalCode = pinMatch ? pinMatch[1] : defaultPincode;
+        const cleanStr = str.replace(/\b[1-9]\d{5}\b/g, '').replace(/[-–,]+$/, '').trim();
+        const parts = cleanStr.split(/[,;\n]+/).map((p) => p.trim()).filter(Boolean);
+        const indianStates = new Set([
+          'karnataka', 'maharashtra', 'delhi', 'tamil nadu', 'telangana', 'uttar pradesh',
+          'west bengal', 'gujarat', 'kerala', 'rajasthan', 'madhya pradesh', 'punjab',
+          'haryana', 'bihar', 'odisha', 'assam', 'ka', 'mh', 'dl', 'tn', 'ts', 'up', 'wb'
+        ]);
+        let city = '';
+        for (let i = parts.length - 1; i >= 0; i--) {
+          const part = (parts[i] || '').replace(/[-–]+$/, '').trim();
+          if (!part) continue;
+          if (indianStates.has(part.toLowerCase()) && !city) {
+            continue;
+          } else if (!city) {
+            city = part;
+          }
+        }
+        return { city: city || defaultCity, postalCode };
+      }
+
       // Location badge helper
       async function fetchUserLocation(cachedAddress = null) {
         const badge = document.getElementById('user-location-badge');
@@ -854,18 +884,47 @@
           }
         }
 
-        if (!addr) {
-          badge.textContent = 'NA,000';
-          badge.title = 'No saved default address found';
-          return;
+        // Fallback to user session data if addr is still missing
+        if (!addr && user) {
+          if (role === 'restaurant' && user.restaurantAddress) {
+            const parsed = parseAddressStringToCityAndPincode(user.restaurantAddress);
+            addr = {
+              city: parsed.city,
+              postalCode: parsed.postalCode,
+              locality: user.restaurantAddress,
+              state: 'KA',
+            };
+          } else {
+            addr = {
+              city: 'Bengaluru',
+              postalCode: '560001',
+              state: 'Karnataka',
+              locality: 'Central',
+            };
+          }
         }
 
-        const city = (addr.city || '').trim() || 'NA';
-        const locality = (addr.locality || addr.line1 || addr.line2 || '').trim();
-        const pincode = (addr.postalCode || '').trim() || '000';
+        let city = (addr?.city || '').trim();
+        let pincode = (addr?.postalCode || addr?.pincode || '').trim();
+        const locality = (addr?.locality || addr?.line1 || addr?.line2 || '').trim();
 
-        badge.textContent = `${city}-${pincode}`;
-        badge.title = `${locality ? locality + ', ' : ''}${city}, ${addr.state || ''} ${pincode}`.trim();
+        // If city is NA or missing, resolve from restaurantAddress or platform default
+        if (!city || city === 'NA') {
+          if (role === 'restaurant' && user?.restaurantAddress) {
+            const parsed = parseAddressStringToCityAndPincode(user.restaurantAddress);
+            city = parsed.city;
+            if (!pincode || pincode === '000') pincode = parsed.postalCode;
+          } else {
+            city = 'Bengaluru';
+          }
+        }
+
+        if (!pincode || pincode === '000') {
+          pincode = '560001';
+        }
+
+        badge.textContent = `${city}, ${pincode}`;
+        badge.title = `${locality ? locality + ', ' : ''}${city}, ${addr?.state || 'KA'} ${pincode}`.trim();
       }
 
       window.fetchUserLocation = fetchUserLocation;

@@ -49,6 +49,64 @@ const createAuthRouter = (upload: multer.Multer) => {
     }
   });
 
+  const parseAddressString = (rawAddress?: string) => {
+    const defaultCity = 'Bengaluru';
+    const defaultPincode = '560001';
+    const defaultState = 'Karnataka';
+
+    if (!rawAddress || typeof rawAddress !== 'string' || !rawAddress.trim()) {
+      return {
+        city: defaultCity,
+        postalCode: defaultPincode,
+        state: defaultState,
+        locality: 'Central',
+        line1: 'Bengaluru Central',
+      };
+    }
+
+    const str = rawAddress.trim();
+    const pincodeMatch = str.match(/\b([1-9]\d{5})\b/);
+    const postalCode = pincodeMatch ? (pincodeMatch[1] ?? defaultPincode) : defaultPincode;
+
+    const cleanStr = str.replace(/\b[1-9]\d{5}\b/g, '').replace(/[-–,]+$/, '').trim();
+    const parts = cleanStr.split(/[,;\n]+/).map((p) => p.trim()).filter(Boolean);
+
+    const indianStates = new Set([
+      'karnataka', 'maharashtra', 'delhi', 'tamil nadu', 'telangana', 'uttar pradesh',
+      'west bengal', 'gujarat', 'kerala', 'rajasthan', 'madhya pradesh', 'punjab',
+      'haryana', 'bihar', 'odisha', 'assam', 'ka', 'mh', 'dl', 'tn', 'ts', 'up', 'wb'
+    ]);
+
+    let city = '';
+    let state = defaultState;
+    let locality = '';
+
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const part = (parts[i] ?? '').replace(/[-–]+$/, '').trim();
+      if (!part) continue;
+      const lower = part.toLowerCase();
+      if (indianStates.has(lower) && !city) {
+        state = part;
+      } else if (!city) {
+        city = part;
+      } else if (!locality) {
+        locality = part;
+      }
+    }
+
+    if (!city) {
+      city = defaultCity;
+    }
+
+    return {
+      city,
+      postalCode,
+      state,
+      locality: locality || (parts[0] ?? 'Central'),
+      line1: str,
+    };
+  };
+
   router.get('/default-address', authenticate, async (req, res) => {
     const currentUser = (req as AuthenticatedRequest).user;
     if (!currentUser?.userId) {
@@ -56,11 +114,90 @@ const createAuthRouter = (upload: multer.Multer) => {
     }
 
     try {
-      const defaultAddress = await Address.findOne({
+      let defaultAddress: any = await Address.findOne({
         userId: currentUser.userId,
       })
         .sort({ isDefault: -1, createdAt: -1 })
         .lean();
+
+      if (!defaultAddress) {
+        if (currentUser.role === 'restaurant') {
+          const rest = await Restaurant.findById(currentUser.userId).lean();
+          const parsed = parseAddressString(rest?.restaurantAddress);
+          defaultAddress = {
+            userId: currentUser.userId,
+            label: 'Restaurant Location',
+            line1: rest?.restaurantAddress || parsed.line1,
+            locality: parsed.locality,
+            city: parsed.city,
+            state: parsed.state,
+            postalCode: parsed.postalCode,
+            isDefault: true,
+            location: {
+              type: 'Point',
+              coordinates: [
+                rest?.restaurantLocation?.lng ?? 77.5946,
+                rest?.restaurantLocation?.lat ?? 12.9716,
+              ],
+            },
+          };
+        } else if (
+          currentUser.role === 'deliveryPartner' ||
+          (currentUser.role as string) === 'rider'
+        ) {
+          const rider = await Rider.findById(currentUser.userId).lean();
+          defaultAddress = {
+            userId: currentUser.userId,
+            label: 'Rider Base Location',
+            line1: 'Bengaluru Central Delivery Hub',
+            locality: 'Delivery Hub',
+            city: 'Bengaluru',
+            state: 'Karnataka',
+            postalCode: '560001',
+            isDefault: true,
+            location: {
+              type: 'Point',
+              coordinates: [
+                rider?.currentLocation?.lng ?? 77.5946,
+                rider?.currentLocation?.lat ?? 12.9716,
+              ],
+            },
+          };
+        } else if (
+          currentUser.role === 'admin' ||
+          currentUser.role === 'subadmin'
+        ) {
+          defaultAddress = {
+            userId: currentUser.userId,
+            label: 'Operations HQ',
+            line1: 'Tomato Operations Headquarters',
+            locality: 'Central HQ',
+            city: 'Bengaluru',
+            state: 'Karnataka',
+            postalCode: '560001',
+            isDefault: true,
+            location: {
+              type: 'Point',
+              coordinates: [77.5946, 12.9716],
+            },
+          };
+        } else {
+          defaultAddress = {
+            userId: currentUser.userId,
+            label: 'Default Delivery Area',
+            line1: 'Bengaluru Central',
+            locality: 'Central',
+            city: 'Bengaluru',
+            state: 'Karnataka',
+            postalCode: '560001',
+            isDefault: true,
+            location: {
+              type: 'Point',
+              coordinates: [77.5946, 12.9716],
+            },
+          };
+        }
+      }
 
       return res.json({ address: defaultAddress || null });
     } catch (error: any) {

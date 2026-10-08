@@ -9,7 +9,7 @@ import Customer, { ICustomer } from './Customer.js';
 import Restaurant, { IRestaurant } from './Restaurant.js';
 import Rider, { IRider } from './Rider.js';
 import Order, { IOrder, OrderStatus } from './Order.js';
-import FoodItem, { IFoodItem } from './FoodItem.js';
+import MenuItem, { IMenuItem, FoodItem, IFoodItem } from './MenuItem.js';
 import Notification, { INotification } from './Notification.js';
 import Address, { IAddress } from './Address.js';
 import WalletCreditTrack, { IWalletCreditTrack } from './WalletCreditTrack.js';
@@ -31,6 +31,8 @@ export {
   Order,
   IOrder,
   OrderStatus,
+  MenuItem,
+  IMenuItem,
   FoodItem,
   IFoodItem,
   Notification,
@@ -51,6 +53,7 @@ export default {
   Restaurant,
   Rider,
   Order,
+  MenuItem,
   FoodItem,
   Notification,
   Address,

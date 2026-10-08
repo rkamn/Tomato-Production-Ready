@@ -1,15 +1,22 @@
 import express, { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import Address from '../../model/Address.js';
-import FoodItem from '../../model/FoodItem.js';
+import MenuItem, { FoodItem } from '../../model/MenuItem.js';
 import Notification from '../../model/Notification.js';
 import Order, { IOrder } from '../../model/Order.js';
 import Counter, { getNextCounterValue } from '../../model/Counter.js';
 import Restaurant from '../../model/Restaurant.js';
 import Customer from '../../model/Customer.js';
-import { authenticate, AuthenticatedRequest, requireRole } from '../../middleware/authenticate.js';
+import {
+  authenticate,
+  AuthenticatedRequest,
+  requireRole,
+} from '../../middleware/authenticate.js';
 import notificationService from '../notification/notificationService.js';
-import { formatBill, buildOrderLiveTrackingData } from '../../utils/orderHelpers.js';
+import {
+  formatBill,
+  buildOrderLiveTrackingData,
+} from '../../utils/orderHelpers.js';
 
 const createCustomerRouter = () => {
   const router = express.Router();
@@ -30,12 +37,13 @@ const createCustomerRouter = () => {
       const user = (req as AuthenticatedRequest).user;
       if (!user?.userId)
         return res.status(401).json({ message: 'Authentication required' });
+      await (Notification as any).cleanExpiredAndExcess(user.userId);
       const notifications = await Notification.find({
         userId: user.userId,
         role: 'customer',
       })
         .sort({ createdAt: -1 })
-        .limit(200);
+        .limit(15);
       return res.json({ notifications });
     } catch (error) {
       console.error('Customer notification fetch failed:', error);
@@ -173,6 +181,8 @@ const createCustomerRouter = () => {
         typeof payload.postalCode === 'string' ? payload.postalCode.trim() : '';
       const line2 =
         typeof payload.line2 === 'string' ? payload.line2.trim() : '';
+      const locality =
+        typeof payload.locality === 'string' ? payload.locality.trim() : '';
       const isDefault = Boolean(payload.isDefault);
       const coordinates =
         Array.isArray(payload.coordinates) && payload.coordinates.length === 2
@@ -201,10 +211,11 @@ const createCustomerRouter = () => {
         userId: user.userId,
         label: label || 'Home',
         line1,
+        line2,
+        locality,
         city,
         state,
         postalCode,
-        line2,
         phone: phone || undefined,
         isDefault: shouldBeDefault,
         location: {
@@ -552,7 +563,10 @@ const createCustomerRouter = () => {
       const paymentStatus = paymentMethod === 'cod' ? 'pending' : 'paid';
 
       const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      const orderNumberSuffix = await getNextCounterValue(`orderId_${dateStr}`, 1000);
+      const orderNumberSuffix = await getNextCounterValue(
+        `orderId_${dateStr}`,
+        1000,
+      );
       await getNextCounterValue('orderId', 1000);
       const orderNumber = `TOM-${dateStr}-${orderNumberSuffix}`;
       const billNumber = `BILL-TOM-${dateStr}-${orderNumberSuffix}`;
@@ -674,7 +688,11 @@ const createCustomerRouter = () => {
           : null,
       ]);
 
-      const bill = formatBill(order, restaurantUser as any, customerUser as any);
+      const bill = formatBill(
+        order,
+        restaurantUser as any,
+        customerUser as any,
+      );
       return res.json({ bill });
     } catch (error) {
       console.error('Customer bill fetch failed:', error);

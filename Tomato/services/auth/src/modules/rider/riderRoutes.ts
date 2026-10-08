@@ -1,7 +1,6 @@
 import express, { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import Address from '../../model/Address.js';
-import FoodItem from '../../model/FoodItem.js';
 import Notification from '../../model/Notification.js';
 import Order, { IOrder, OrderStatus } from '../../model/Order.js';
 import Restaurant, { IRestaurant } from '../../model/Restaurant.js';
@@ -39,12 +38,13 @@ const createRiderRouter = () => {
       const user = (req as AuthenticatedRequest).user;
       if (!user?.userId)
         return res.status(401).json({ message: 'Authentication required' });
+      await (Notification as any).cleanExpiredAndExcess(user.userId);
       const notifications = await Notification.find({
         userId: user.userId,
         role: 'deliveryPartner',
       })
         .sort({ createdAt: -1 })
-        .limit(200);
+        .limit(15);
       return res.json({ notifications });
     } catch (error) {
       console.error('Rider notification fetch failed:', error);

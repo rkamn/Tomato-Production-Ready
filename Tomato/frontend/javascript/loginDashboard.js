@@ -8,7 +8,16 @@
         window.location.href = '../index.html';
       }
 
+      function formatCleanName(str) {
+        if (!str) return '';
+        return String(str).split('/')[0].trim();
+      }
+
       const user = storedUser;
+      if (user) {
+        if (user.name) user.name = formatCleanName(user.name);
+        if (user.displayName) user.displayName = formatCleanName(user.displayName);
+      }
       const normalizeRole = (r) => {
         const val = String(r || 'customer').trim().toLowerCase();
         if (['deliverypartner', 'delivery_partner', 'delivery partner', 'rider'].includes(val)) return 'deliveryPartner';
@@ -23,6 +32,10 @@
       let allRestaurants = [];
       let allMenuItems = [];
       let currentSelectedRestaurantId = 'all';
+      let mainCustomerTab = 'all_restaurants'; // 'all_restaurants' | 'all_menus' | 'category' | 'grocery'
+      let selectedCategory = 'all';
+      let selectedMenuItemId = 'all';
+      let openDropdownTab = null;
       const cart = [];
       let customerAddresses = [];
       let selectedPaymentMethod = 'card';
@@ -826,14 +839,100 @@
         }
       }
 
+      // Location badge helper
+      async function fetchUserLocation(cachedAddress = null) {
+        const badge = document.getElementById('user-location-badge');
+        if (!badge) return;
+
+        let addr = cachedAddress;
+        if (!addr) {
+          try {
+            const res = await apiFetch('/api/auth/default-address').catch(() => null);
+            addr = res && res.address;
+          } catch (e) {
+            console.warn('Error fetching user location:', e);
+          }
+        }
+
+        if (!addr) {
+          badge.textContent = 'NA,000';
+          badge.title = 'No saved default address found';
+          return;
+        }
+
+        const city = (addr.city || '').trim() || 'NA';
+        const locality = (addr.locality || addr.line1 || addr.line2 || '').trim();
+        const pincode = (addr.postalCode || '').trim() || '000';
+
+        badge.textContent = `${city}-${pincode}`;
+        badge.title = `${locality ? locality + ', ' : ''}${city}, ${addr.state || ''} ${pincode}`.trim();
+      }
+
+      window.fetchUserLocation = fetchUserLocation;
+
+      function formatUserId(id) {
+        if (!id || typeof id !== 'string') return '';
+        const trimmed = id.trim();
+        if (trimmed.length <= 4) return trimmed.toLowerCase();
+        return trimmed.slice(0, 4).toLowerCase() + trimmed.slice(4);
+      }
+
+      window.formatUserId = formatUserId;
+
+      // Resolve global user/role identifier with first 4 characters lowercase
+      function getUserIdentifier() {
+        if (!user) return '';
+        let rawId = '';
+        if (role === 'customer') {
+          rawId = user.customerId || (user._id || user.id ? `cust-${String(user._id || user.id).slice(-4).toLowerCase()}` : '') || user.userId || user.id || user._id || '';
+        } else if (role === 'restaurant') {
+          rawId = user.restaurantId || (user._id || user.id ? `rest-${String(user._id || user.id).slice(-4).toLowerCase()}` : '') || user.userId || user.id || user._id || '';
+        } else if (role === 'deliveryPartner') {
+          rawId = user.riderId || (user._id || user.id ? `ride-${String(user._id || user.id).slice(-4).toLowerCase()}` : '') || user.userId || user.id || user._id || '';
+        } else if (role === 'subadmin') {
+          rawId = user.subadminId || (user._id || user.id ? `sub-${String(user._id || user.id).slice(-4).toLowerCase()}` : '') || user.userId || user.id || user._id || '';
+        } else if (role === 'admin') {
+          rawId = user.adminId || (user._id || user.id ? `adm-${String(user._id || user.id).slice(-4).toLowerCase()}` : '') || user.userId || user.id || user._id || 'adm-1001';
+        } else {
+          rawId = user.customerId || user.restaurantId || user.riderId || user.subadminId || user.adminId || user.userId || user.id || user._id || '';
+        }
+        return formatUserId(rawId);
+      }
+
+      function populateSettingsUserIdBadge() {
+        const uid = getUserIdentifier();
+
+        // 1. Settings view panel header badge
+        const valEl = document.getElementById('settings-user-id-val');
+        const badgeEl = document.getElementById('settings-user-id-badge');
+        if (valEl && badgeEl) {
+          if (uid) {
+            valEl.textContent = uid;
+            badgeEl.style.display = 'inline-flex';
+          } else {
+            badgeEl.style.display = 'none';
+          }
+        }
+
+        // 2. Left panel sidebar badge after typeOfUser
+        const sideValEl = document.getElementById('sidebar-user-id-val');
+        const sideBadgeEl = document.getElementById('sidebar-user-id-badge');
+        if (sideValEl && sideBadgeEl) {
+          if (uid) {
+            sideValEl.textContent = uid;
+            sideBadgeEl.style.display = 'inline-flex';
+          } else {
+            sideBadgeEl.style.display = 'none';
+          }
+        }
+      }
+
+      window.getUserIdentifier = getUserIdentifier;
+      window.populateSettingsUserIdBadge = populateSettingsUserIdBadge;
+
       // Initialize Dashboard
       function initDashboard() {
-        let partnerDisplay = user.displayName || user.name || 'Tomato User';
-        if (role === 'restaurant' && user.restaurantId && !partnerDisplay.includes(user.restaurantId)) {
-          partnerDisplay = `${user.name} / ${user.restaurantId}`;
-        } else if (role === 'deliveryPartner' && user.riderId && !partnerDisplay.includes(user.riderId)) {
-          partnerDisplay = `${user.name} / ${user.riderId}`;
-        }
+        const partnerDisplay = formatCleanName(user.displayName || user.name || 'Tomato User');
         document.getElementById('mini-name').textContent = partnerDisplay;
         const displayRole = role === 'deliveryPartner' ? 'Delivery Partner' : role === 'subadmin' ? (user.adminRoleTitle || 'Sub-Admin') : role.charAt(0).toUpperCase() + role.slice(1);
         document.getElementById('mini-role').textContent = displayRole;
@@ -863,6 +962,27 @@
           day: 'numeric',
           year: 'numeric',
         }).format(new Date());
+
+        // Populate Location: <stateCode>,<City>,<locality>,<pincode>
+        fetchUserLocation();
+
+        // Populate Profile Settings and Sidebar User ID badges globally
+        populateSettingsUserIdBadge();
+
+        // Sync fresh profile to ensure user IDs are completely up to date for all user roles
+        apiFetch('/api/auth/profile')
+          .then((data) => {
+            if (data?.user) {
+              if (data.user.name) data.user.name = formatCleanName(data.user.name);
+              if (data.user.displayName) data.user.displayName = formatCleanName(data.user.displayName);
+              Object.assign(user, data.user);
+              localStorage.setItem('tomatoUser', JSON.stringify(user));
+              const miniNameEl = document.getElementById('mini-name');
+              if (miniNameEl) miniNameEl.textContent = formatCleanName(user.displayName || user.name || 'Tomato User');
+              populateSettingsUserIdBadge();
+            }
+          })
+          .catch(() => {});
 
         // Initialize Duty Status Toggle for Restaurant & Rider
         initDutyStatusToggle();
@@ -1046,6 +1166,107 @@
       }
 
       // =========================================================================
+      // AUTO-DISMISS NOTICE POPUP & STAT CARD CLICK HANDLERS
+      // =========================================================================
+      let noticeModalTimer = null;
+      function showAutoDismissNotice({ title = 'Notice', message = '', icon = 'ℹ️', duration = 2500 }) {
+        const modal = document.getElementById('notice-auto-dismiss-modal');
+        const titleEl = document.getElementById('notice-modal-title');
+        const msgEl = document.getElementById('notice-modal-message');
+        const iconEl = document.getElementById('notice-modal-icon');
+
+        if (noticeModalTimer) {
+          clearTimeout(noticeModalTimer);
+          noticeModalTimer = null;
+        }
+
+        if (titleEl) titleEl.textContent = title;
+        if (msgEl) msgEl.textContent = message;
+        if (iconEl) iconEl.textContent = icon;
+
+        if (modal) {
+          modal.classList.add('visible');
+          modal.style.display = 'grid';
+          modal.style.opacity = '1';
+
+          noticeModalTimer = setTimeout(() => {
+            closeNoticeModal();
+          }, duration);
+        }
+
+        // Also trigger toast notification for immediate corner alert
+        showToastNotification({
+          title,
+          message,
+          type: 'info',
+          duration: Math.max(duration, 3000),
+        });
+      }
+
+      function closeNoticeModal() {
+        if (noticeModalTimer) {
+          clearTimeout(noticeModalTimer);
+          noticeModalTimer = null;
+        }
+        const modal = document.getElementById('notice-auto-dismiss-modal');
+        if (modal) {
+          modal.style.transition = 'opacity 0.2s ease';
+          modal.style.opacity = '0';
+          setTimeout(() => {
+            modal.classList.remove('visible');
+            modal.style.display = 'none';
+            modal.style.opacity = '1';
+          }, 200);
+        }
+      }
+
+      function handleNoticeModalBackdropClick(event) {
+        if (event.target.id === 'notice-auto-dismiss-modal') {
+          closeNoticeModal();
+        }
+      }
+
+      function handleActiveOrdersCardClick(activeCount) {
+        if (activeCount > 0) {
+          switchView('customer-orders');
+          fetchCustomerOrders();
+        } else {
+          showAutoDismissNotice({
+            title: 'Active Orders',
+            message: 'No active orders',
+            icon: '🛵',
+            duration: 2500,
+          });
+        }
+      }
+
+      function handleTotalPlacedCardClick(totalCount) {
+        if (totalCount > 0) {
+          switchView('customer-orders');
+          fetchCustomerOrders();
+        } else {
+          showAutoDismissNotice({
+            title: 'Total Placed',
+            message: 'You have not placed any order yet',
+            icon: '🍽️',
+            duration: 2500,
+          });
+        }
+      }
+
+      function handleSavedAddressesCardClick() {
+        switchView('customer-address');
+        fetchCustomerAddresses();
+      }
+
+      window.showAutoDismissNotice = showAutoDismissNotice;
+      window.closeNoticeModal = closeNoticeModal;
+      window.handleNoticeModalBackdropClick = handleNoticeModalBackdropClick;
+      window.handleActiveOrdersCardClick = handleActiveOrdersCardClick;
+      window.handleTotalPlacedCardClick = handleTotalPlacedCardClick;
+      window.handleSavedAddressesCardClick = handleSavedAddressesCardClick;
+
+      // =========================================================================
       // OVERVIEW STATS & ACTIVITY
       // =========================================================================
       async function loadRoleOverview() {
@@ -1058,7 +1279,7 @@
 
         if (role === 'customer') {
           kickerEl.textContent = 'Customer Ordering Hub';
-          copyEl.textContent = 'Browse kitchens, place food orders, and track deliveries in real time.';
+          copyEl.textContent = 'Browse kitchens, place food / grocery orders, and track deliveries in real time.';
           try {
             const [ordersData, addrData] = await Promise.all([
               apiFetch('/api/customer/orders').catch(() => ({ orders: [] })),
@@ -1068,11 +1289,29 @@
             const activeOrders = orders.filter((o) => !['delivered', 'cancelled'].includes(o.status)).length;
 
             statsEl.innerHTML = `
-              <div class="stat-card"><span class="stat-label">Active Orders</span><div class="stat-value">${activeOrders}</div><span class="stat-note">Live on route</span></div>
-              <div class="stat-card"><span class="stat-label">Total Placed</span><div class="stat-value">${orders.length}</div><span class="stat-note">Lifetime meals</span></div>
-              <div class="stat-card"><span class="stat-label">Saved Addresses</span><div class="stat-value">${addrData.addresses?.length || 0}</div><span class="stat-note">Ready for checkout</span></div>
+              <div class="stat-card clickable" onclick="handleActiveOrdersCardClick(${activeOrders})" title="Click to view active orders">
+                <span class="stat-label">Active Orders</span>
+                <div class="stat-value">${activeOrders}</div>
+                <span class="stat-note">Live on route ${activeOrders > 0 ? '↗' : ''}</span>
+              </div>
+              <div class="stat-card clickable" onclick="handleTotalPlacedCardClick(${orders.length})" title="Click to view all orders">
+                <span class="stat-label">Total Placed</span>
+                <div class="stat-value">${orders.length}</div>
+                <span class="stat-note">Lifetime meals ${orders.length > 0 ? '↗' : ''}</span>
+              </div>
+              <div class="stat-card clickable" onclick="handleSavedAddressesCardClick()" title="Click to manage saved delivery addresses">
+                <span class="stat-label">Saved Addresses</span>
+                <div class="stat-value">${addrData.addresses?.length || 0}</div>
+                <span class="stat-note">Ready for checkout ↗</span>
+              </div>
               <div class="stat-card"><span class="stat-label">Tomato Points</span><div class="stat-value">250</div><span class="stat-note">Earn 10% off</span></div>
             `;
+
+            const addresses = addrData.addresses || [];
+            const defaultAddr = addresses.find((a) => a.isDefault) || addresses[0];
+            if (defaultAddr) {
+              fetchUserLocation(defaultAddr);
+            }
           } catch (e) {
             console.error(e);
           }
@@ -1143,7 +1382,7 @@
 
       let currentNotifications = [];
       let currentNotifPage = 1;
-      const NOTIFICATIONS_PER_PAGE = 10;
+      const NOTIFICATIONS_PER_PAGE = 5;
 
       async function loadNotifications(targetPage = null) {
         const feed = document.getElementById('activity-feed');
@@ -1337,33 +1576,597 @@
         }
       }
 
-      function renderRestaurantPills() {
-        const container = document.getElementById('restaurant-pills');
+      function isGroceryItem(item) {
+        const cat = (item.category || '').toLowerCase();
+        const groceryKeywords = ['grocery', 'spices', 'spice', 'kirana', 'dairy', 'staples', 'vegetables', 'fruits'];
+        return groceryKeywords.some((kw) => cat === kw || cat.startsWith(kw));
+      }
+
+      // Helper: case-insensitively deduplicated & nicely formatted distinct categories
+      function getDistinctCategories() {
+        const categoryMap = new Map();
+        allMenuItems.forEach((m) => {
+          const raw = (m.category || 'Main Course').trim();
+          if (!raw) return;
+          const key = raw.toLowerCase();
+          if (!categoryMap.has(key)) {
+            const formatted = raw.charAt(0).toUpperCase() + raw.slice(1);
+            categoryMap.set(key, formatted);
+          }
+        });
+        return Array.from(categoryMap.values());
+      }
+
+      // Customer visited items storage and retrieval helpers
+      function getCustomerVisitedStorageKey(type) {
+        const uid = (user && (user._id || user.id)) || 'guest';
+        return `tomato_visited_${type}_${uid}`;
+      }
+
+      function getVisitedItems(type) {
+        try {
+          const raw = localStorage.getItem(getCustomerVisitedStorageKey(type));
+          return raw ? JSON.parse(raw) : [];
+        } catch {
+          return [];
+        }
+      }
+
+      function saveVisitedItems(type, items) {
+        try {
+          const key = getCustomerVisitedStorageKey(type);
+          localStorage.setItem(key, JSON.stringify(items.slice(0, 5)));
+        } catch (e) {
+          console.warn('Could not save visited items to localStorage', e);
+        }
+      }
+
+      function getStablePillItems(type, availableItems, getIdFn) {
+        let stored = getVisitedItems(type);
+        let valid = [];
+        for (const id of stored) {
+          const found = availableItems.find((item) => String(getIdFn(item)).toLowerCase() === String(id).toLowerCase());
+          if (found && !valid.some((v) => String(getIdFn(v)).toLowerCase() === String(getIdFn(found)).toLowerCase())) {
+            valid.push(found);
+          }
+        }
+
+        // If fewer than 5, fill up to 5 with remaining available items in stable order
+        if (valid.length < 5) {
+          for (const item of availableItems) {
+            if (valid.length >= 5) break;
+            const itemId = String(getIdFn(item)).toLowerCase();
+            if (!valid.some((v) => String(getIdFn(v)).toLowerCase() === itemId)) {
+              valid.push(item);
+            }
+          }
+          saveVisitedItems(type, valid.map(getIdFn));
+        }
+        return valid.slice(0, 5);
+      }
+
+      function recordVisitedItem(type, idOrName) {
+        if (!idOrName || idOrName === 'all') return;
+        try {
+          const key = getCustomerVisitedStorageKey(type);
+          let items = getVisitedItems(type);
+          const exists = items.some((x) => String(x).toLowerCase() === String(idOrName).toLowerCase());
+          if (exists) {
+            // Already in the list! Do NOT move or change its index!
+            return;
+          }
+          if (items.length >= 5) {
+            items[4] = idOrName; // Replace the 5th slot so existing 0-3 indices stay fixed
+          } else {
+            items.push(idOrName);
+          }
+          localStorage.setItem(key, JSON.stringify(items));
+        } catch (e) {
+          console.warn('Could not save visited item to localStorage', e);
+        }
+      }
+
+      let activeFilterModalTab = 'all_restaurants';
+
+      function openFilterSelectionModal(tab) {
+        activeFilterModalTab = tab || mainCustomerTab;
+        const modal = document.getElementById('filter-selection-modal');
+        if (!modal) return;
+
+        const titleEl = document.getElementById('filter-modal-title');
+        const searchInput = document.getElementById('filter-modal-search');
+
+        if (titleEl) {
+          if (activeFilterModalTab === 'all_restaurants') {
+            titleEl.textContent = '🏪 Select Restaurant';
+            if (searchInput) searchInput.placeholder = 'Search restaurant by name, cuisine, address...';
+          } else if (activeFilterModalTab === 'all_menus') {
+            titleEl.textContent = '🍽️ Select Menu / Dish';
+            if (searchInput) searchInput.placeholder = 'Search dishes by name, description, or category...';
+          } else if (activeFilterModalTab === 'category') {
+            titleEl.textContent = '📑 Select Food Category';
+            if (searchInput) searchInput.placeholder = 'Search food category...';
+          } else if (activeFilterModalTab === 'grocery') {
+            titleEl.textContent = '🛒 Select Grocery Category';
+            if (searchInput) searchInput.placeholder = 'Search grocery category...';
+          }
+        }
+
+        if (searchInput) {
+          searchInput.value = '';
+        }
+
+        renderFilterModalItems(activeFilterModalTab, '');
+        openModal('filter-selection-modal');
+
+        setTimeout(() => {
+          if (searchInput) searchInput.focus();
+        }, 60);
+      }
+
+      function closeFilterModal() {
+        closeModal('filter-selection-modal');
+      }
+
+      function handleFilterModalBackdropClick(e) {
+        if (e.target && e.target.id === 'filter-selection-modal') {
+          closeFilterModal();
+        }
+      }
+
+      function handleFilterModalSearch(input) {
+        const q = (input?.value || '').trim();
+        renderFilterModalItems(activeFilterModalTab, q);
+      }
+
+      function handleFilterModalCardClick(card) {
+        if (!card) return;
+        const filterType = card.getAttribute('data-filter-type');
+        const filterVal = card.getAttribute('data-filter-value');
+        if (!filterType || filterVal === null || filterVal === undefined) return;
+
+        if (filterType === 'restaurant') {
+          selectRestaurantFilter(filterVal);
+        } else if (filterType === 'category') {
+          selectCategoryFilter(filterVal);
+        } else if (filterType === 'grocery') {
+          selectGroceryFilter(filterVal);
+        } else if (filterType === 'menu') {
+          selectMenuItemFilter(filterVal);
+        }
+      }
+
+      function handleFilterModalItemClick(e) {
+        const card = e.target.closest('.filter-modal-card');
+        if (card) {
+          handleFilterModalCardClick(card);
+        }
+      }
+
+      function renderFilterModalItems(tab, query = '') {
+        const container = document.getElementById('filter-modal-items-container');
         if (!container) return;
 
-        let html = `
-          <button class="filter-pill ${currentSelectedRestaurantId === 'all' ? 'active' : ''}" onclick="selectRestaurantFilter('all')">
-            All Restaurants (${allMenuItems.length})
-          </button>
-        `;
+        const q = (query || '').toLowerCase().trim();
+        let html = '';
 
-        allRestaurants.forEach((rest) => {
-          const count = allMenuItems.filter((m) => String(m.restaurantId) === String(rest.id || rest._id)).length;
-          const restDisplay = formatCleanName(rest.name || rest.displayName || 'Restaurant');
-          const isClosed = rest.isOpen === false || rest.isOnline === false;
-          const statusBadge = isClosed ? ' <span style="font-size:0.7em; color:#ef4444; font-weight:700;">[CLOSED]</span>' : '';
-          html += `
-            <button class="filter-pill ${currentSelectedRestaurantId === String(rest.id || rest._id) ? 'active' : ''}" style="${isClosed ? 'opacity:0.85; border-color:#fca5a5;' : ''}" onclick="selectRestaurantFilter('${rest.id || rest._id}')">
-              ${escapeHtml(restDisplay)}${statusBadge} (${count})
-            </button>
-          `;
-        });
+        if (tab === 'all_restaurants') {
+          const isAllActive = currentSelectedRestaurantId === 'all';
+          if (!q || 'all restaurants'.includes(q)) {
+            html += `
+              <div class="filter-modal-card ${isAllActive ? 'active' : ''}" data-filter-type="restaurant" data-filter-value="all" onclick="handleFilterModalCardClick(this)">
+                <div>
+                  <div style="font-weight:700; font-size:0.95rem;">All Restaurants</div>
+                  <div style="font-size:0.78rem; color:var(--muted);">View menus and dishes across all restaurants</div>
+                </div>
+                <span class="filter-modal-card-badge">${allMenuItems.length} dishes</span>
+              </div>
+            `;
+          }
+
+          const filteredRests = allRestaurants.filter((rest) => {
+            if (!q) return true;
+            const name = (rest.name || rest.displayName || '').toLowerCase();
+            const cuisine = (rest.cuisine || '').toLowerCase();
+            const addr = (rest.restaurantAddress || rest.address || '').toLowerCase();
+            return name.includes(q) || cuisine.includes(q) || addr.includes(q);
+          });
+
+          if (!filteredRests.length && q) {
+            html += `<p style="color:var(--muted); text-align:center; padding:1.5rem 0;">No restaurants match "${escapeHtml(query)}"</p>`;
+          } else {
+            filteredRests.forEach((rest) => {
+              const restId = String(rest.id || rest._id);
+              const count = allMenuItems.filter((m) => String(m.restaurantId) === restId).length;
+              const restDisplay = formatCleanName(rest.name || rest.displayName || 'Restaurant');
+              const isClosed = rest.isOpen === false || rest.isOnline === false;
+              const isActive = currentSelectedRestaurantId === restId;
+              const cuisineText = rest.cuisine ? ` • ${escapeHtml(rest.cuisine)}` : '';
+              const addrText = (rest.restaurantAddress || rest.address) ? ` • ${escapeHtml(rest.restaurantAddress || rest.address)}` : '';
+
+              html += `
+                <div class="filter-modal-card ${isActive ? 'active' : ''}" data-filter-type="restaurant" data-filter-value="${escapeHtml(restId)}" onclick="handleFilterModalCardClick(this)">
+                  <div style="flex:1; min-width:0;">
+                    <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
+                      <span style="font-weight:600; font-size:0.92rem; color:var(--ink);">${escapeHtml(restDisplay)}</span>
+                      ${isClosed ? '<span style="font-size:0.7em; color:#ef4444; font-weight:700; background:#fee2e2; padding:0.1rem 0.35rem; border-radius:4px;">[CLOSED]</span>' : ''}
+                    </div>
+                    <div style="font-size:0.76rem; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:0.2rem;">
+                      ${count} menu items${cuisineText}${addrText}
+                    </div>
+                  </div>
+                  <span class="filter-modal-card-badge">${count} items</span>
+                </div>
+              `;
+            });
+          }
+        } else if (tab === 'category') {
+          const distinctCategories = getDistinctCategories();
+          const isAllActive = selectedCategory === 'all';
+
+          if (!q || 'all categories'.includes(q)) {
+            html += `
+              <div class="filter-modal-card ${isAllActive ? 'active' : ''}" data-filter-type="category" data-filter-value="all" onclick="handleFilterModalCardClick(this)">
+                <div>
+                  <div style="font-weight:700; font-size:0.95rem;">All Categories</div>
+                  <div style="font-size:0.78rem; color:var(--muted);">Explore all food categories</div>
+                </div>
+                <span class="filter-modal-card-badge">${allMenuItems.length} dishes</span>
+              </div>
+            `;
+          }
+
+          const filteredCats = distinctCategories.filter((c) => !q || c.toLowerCase().includes(q));
+          if (!filteredCats.length && q) {
+            html += `<p style="color:var(--muted); text-align:center; padding:1.5rem 0;">No categories match "${escapeHtml(query)}"</p>`;
+          } else {
+            filteredCats.forEach((cat) => {
+              const count = allMenuItems.filter((m) => (m.category || 'Main Course').toLowerCase() === cat.toLowerCase()).length;
+              const isActive = selectedCategory.toLowerCase() === cat.toLowerCase();
+              html += `
+                <div class="filter-modal-card ${isActive ? 'active' : ''}" data-filter-type="category" data-filter-value="${escapeHtml(cat)}" onclick="handleFilterModalCardClick(this)">
+                  <div>
+                    <div style="font-weight:600; font-size:0.92rem;">${escapeHtml(cat)}</div>
+                  </div>
+                  <span class="filter-modal-card-badge">${count} items</span>
+                </div>
+              `;
+            });
+          }
+        } else if (tab === 'grocery') {
+          const groceryItems = allMenuItems.filter(isGroceryItem);
+          const standardGroceryCategories = ['Spices', 'Dairy & Eggs', 'Staples', 'Snacks & Beverages', 'Fruits & Vegetables'];
+          const existingGroceryCategories = Array.from(new Set(groceryItems.map((m) => (m.category || '').trim()).filter(Boolean)));
+          const allGroceryCatsToDisplay = Array.from(new Set([...standardGroceryCategories, ...existingGroceryCategories]));
+          const isAllActive = selectedCategory === 'all';
+
+          if (!q || 'all grocery'.includes(q)) {
+            html += `
+              <div class="filter-modal-card ${isAllActive ? 'active' : ''}" data-filter-type="grocery" data-filter-value="all" onclick="handleFilterModalCardClick(this)">
+                <div>
+                  <div style="font-weight:700; font-size:0.95rem;">All Grocery</div>
+                  <div style="font-size:0.78rem; color:var(--muted);">Explore all groceries & essentials</div>
+                </div>
+                <span class="filter-modal-card-badge">${groceryItems.length} items</span>
+              </div>
+            `;
+          }
+
+          const filteredGroceries = allGroceryCatsToDisplay.filter((sc) => !q || sc.toLowerCase().includes(q));
+          if (!filteredGroceries.length && q) {
+            html += `<p style="color:var(--muted); text-align:center; padding:1.5rem 0;">No grocery categories match "${escapeHtml(query)}"</p>`;
+          } else {
+            filteredGroceries.forEach((sc) => {
+              const count = groceryItems.filter((m) => (m.category || '').toLowerCase() === sc.toLowerCase()).length;
+              const isActive = selectedCategory.toLowerCase() === sc.toLowerCase();
+              html += `
+                <div class="filter-modal-card ${isActive ? 'active' : ''}" data-filter-type="grocery" data-filter-value="${escapeHtml(sc)}" onclick="handleFilterModalCardClick(this)">
+                  <div>
+                    <div style="font-weight:600; font-size:0.92rem;">${escapeHtml(sc)}</div>
+                  </div>
+                  <span class="filter-modal-card-badge">${count} items</span>
+                </div>
+              `;
+            });
+          }
+        } else if (tab === 'all_menus') {
+          const isAllActive = selectedCategory === 'all' && selectedMenuItemId === 'all';
+          const vegCount = allMenuItems.filter((m) => m.dietary !== 'non-veg').length;
+          const nonVegCount = allMenuItems.filter((m) => m.dietary === 'non-veg').length;
+
+          if (!q || 'all menus dishes'.includes(q)) {
+            html += `
+              <div class="filter-modal-card ${isAllActive ? 'active' : ''}" data-filter-type="menu" data-filter-value="all" onclick="handleFilterModalCardClick(this)">
+                <div>
+                  <div style="font-weight:700; font-size:0.95rem;">All Menus</div>
+                  <div style="font-size:0.78rem; color:var(--muted);">All delicious food and beverage items</div>
+                </div>
+                <span class="filter-modal-card-badge">${allMenuItems.length} items</span>
+              </div>
+            `;
+          }
+
+          if (!q || 'pure veg vegetarian'.includes(q)) {
+            html += `
+              <div class="filter-modal-card ${selectedCategory === 'veg' && selectedMenuItemId === 'all' ? 'active' : ''}" data-filter-type="menu" data-filter-value="veg" onclick="handleFilterModalCardClick(this)">
+                <div>
+                  <div style="font-weight:600; font-size:0.92rem; color:#16a34a;">🟢 Pure Veg</div>
+                  <div style="font-size:0.78rem; color:var(--muted);">Vegetarian dishes</div>
+                </div>
+                <span class="filter-modal-card-badge">${vegCount} items</span>
+              </div>
+            `;
+          }
+
+          if (!q || 'non-veg non veg'.includes(q)) {
+            html += `
+              <div class="filter-modal-card ${selectedCategory === 'non-veg' && selectedMenuItemId === 'all' ? 'active' : ''}" data-filter-type="menu" data-filter-value="non-veg" onclick="handleFilterModalCardClick(this)">
+                <div>
+                  <div style="font-weight:600; font-size:0.92rem; color:#dc2626;">🔴 Non-Veg</div>
+                  <div style="font-size:0.78rem; color:var(--muted);">Non-vegetarian dishes</div>
+                </div>
+                <span class="filter-modal-card-badge">${nonVegCount} items</span>
+              </div>
+            `;
+          }
+
+          const filteredDishes = allMenuItems.filter((m) => {
+            if (!q) return true;
+            const name = (m.name || '').toLowerCase();
+            const cat = (m.category || '').toLowerCase();
+            const desc = (m.description || '').toLowerCase();
+            return name.includes(q) || cat.includes(q) || desc.includes(q);
+          });
+
+          if (!filteredDishes.length && q) {
+            html += `<p style="color:var(--muted); text-align:center; padding:1.5rem 0;">No dishes match "${escapeHtml(query)}"</p>`;
+          } else {
+            filteredDishes.forEach((item) => {
+              const itemId = String(item.id || item._id);
+              const isActive = selectedMenuItemId === itemId;
+              const matchRest = allRestaurants.find((r) => String(r.id || r._id) === String(item.restaurantId));
+              const restName = matchRest?.name || item.restaurantName || '';
+
+              html += `
+                <div class="filter-modal-card ${isActive ? 'active' : ''}" data-filter-type="menu" data-filter-value="${escapeHtml(itemId)}" onclick="handleFilterModalCardClick(this)">
+                  <div style="flex:1; min-width:0;">
+                    <div style="display:flex; align-items:center; gap:0.4rem;">
+                      <span style="font-weight:600; font-size:0.92rem;">${escapeHtml(item.name)}</span>
+                      <span class="dietary-tag ${item.dietary === 'non-veg' ? 'dietary-non-veg' : 'dietary-veg'}">${item.dietary === 'non-veg' ? 'NON-VEG' : 'VEG'}</span>
+                    </div>
+                    <div style="font-size:0.76rem; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:0.2rem;">
+                      ${escapeHtml(item.category || 'Dish')}${restName ? ` • by ${escapeHtml(restName)}` : ''}
+                    </div>
+                  </div>
+                  <span class="filter-modal-card-badge">₹${item.price}</span>
+                </div>
+              `;
+            });
+          }
+        }
 
         container.innerHTML = html;
       }
 
+      function renderRestaurantPills() {
+        const container = document.getElementById('restaurant-pills');
+        if (!container) return;
+
+        // Calculate counts for each primary header
+        const totalItemsCount = allMenuItems.length;
+        const groceryCount = allMenuItems.filter(isGroceryItem).length;
+        const distinctCategories = getDistinctCategories();
+
+        // 1. Primary Headers: Restaurants, Menus, F-Category, Grocery
+        let headersHtml = `
+          <button class="filter-pill ${mainCustomerTab === 'all_restaurants' ? 'active' : ''}" onclick="selectMainCustomerTab('all_restaurants')">
+            🏪 Restaurants (${allRestaurants.length})
+          </button>
+          <button class="filter-pill ${mainCustomerTab === 'all_menus' ? 'active' : ''}" onclick="selectMainCustomerTab('all_menus')">
+            🍽️ Menus (${totalItemsCount})
+          </button>
+          <button class="filter-pill ${mainCustomerTab === 'category' ? 'active' : ''}" onclick="selectMainCustomerTab('category')">
+            📑 F-Category (${distinctCategories.length})
+          </button>
+          <button class="filter-pill ${mainCustomerTab === 'grocery' ? 'active' : ''}" onclick="selectMainCustomerTab('grocery')">
+            🛒 Grocery (${groceryCount})
+          </button>
+        `;
+        container.innerHTML = headersHtml;
+
+        // 2. Secondary Sub-Filter Pills based on selected primary tab
+        renderSubFilterPills();
+      }
+
+      function renderSubFilterPills() {
+        const subContainer = document.getElementById('sub-filter-pills');
+        if (!subContainer) return;
+
+        let subHtml = '';
+
+        if (mainCustomerTab === 'all_restaurants') {
+          // --- RESTAURANTS TAB ---
+          // Split pill: "All () ▼" (arrow opens modal popup) + stable last 5 restaurants
+          const isAllActive = currentSelectedRestaurantId === 'all';
+          const recentRests = getStablePillItems('restaurants', allRestaurants, (r) => r.id || r._id);
+
+          subHtml += `
+            <div class="split-filter-pill ${isAllActive ? 'active' : ''}">
+              <button type="button" class="split-filter-pill-action" onclick="selectRestaurantFilter('all')">
+                All (${allMenuItems.length})
+              </button>
+              <button type="button" class="split-filter-pill-caret" onclick="openFilterSelectionModal('all_restaurants')" title="Open all restaurants popup" aria-label="Open all restaurants popup">
+                ▼
+              </button>
+            </div>
+          `;
+
+          // Stable 5 visited restaurant pills
+          recentRests.forEach((rest) => {
+            const restId = String(rest.id || rest._id);
+            const count = allMenuItems.filter((m) => String(m.restaurantId) === restId).length;
+            const restDisplay = formatCleanName(rest.name || rest.displayName || 'Restaurant');
+            const isClosed = rest.isOpen === false || rest.isOnline === false;
+            const statusBadge = isClosed ? ' <span style="font-size:0.7em; color:#ef4444; font-weight:700;">[CLOSED]</span>' : '';
+            const isActive = currentSelectedRestaurantId === restId;
+            subHtml += `
+              <button class="filter-pill ${isActive ? 'active' : ''}" style="font-size:0.8rem; padding:0.35rem 0.8rem; ${isClosed ? 'opacity:0.85; border-color:#fca5a5;' : ''}" onclick="selectRestaurantFilter('${restId}')">
+                ${escapeHtml(restDisplay)}${statusBadge} (${count})
+              </button>
+            `;
+          });
+        } else if (mainCustomerTab === 'category') {
+          // --- F-CATEGORY TAB ---
+          const distinctCategories = getDistinctCategories();
+          const isAllActive = selectedCategory === 'all';
+          const recentCats = getStablePillItems('categories', distinctCategories, (c) => c);
+
+          subHtml += `
+            <div class="split-filter-pill ${isAllActive ? 'active' : ''}">
+              <button type="button" class="split-filter-pill-action" onclick="selectCategoryFilter('all')">
+                All Categories (${allMenuItems.length})
+              </button>
+              <button type="button" class="split-filter-pill-caret" onclick="openFilterSelectionModal('category')" title="Open all categories popup" aria-label="Open all categories popup">
+                ▼
+              </button>
+            </div>
+          `;
+
+          recentCats.forEach((cat) => {
+            const count = allMenuItems.filter((m) => (m.category || 'Main Course').toLowerCase() === cat.toLowerCase()).length;
+            const isActive = selectedCategory.toLowerCase() === cat.toLowerCase();
+            subHtml += `
+              <button class="filter-pill ${isActive ? 'active' : ''}" style="font-size:0.8rem; padding:0.35rem 0.8rem;" onclick="selectCategoryFilter('${escapeHtml(cat)}')">
+                ${escapeHtml(cat)} (${count})
+              </button>
+            `;
+          });
+        } else if (mainCustomerTab === 'grocery') {
+          // --- GROCERY TAB ---
+          const groceryItems = allMenuItems.filter(isGroceryItem);
+          const standardGroceryCategories = ['Spices', 'Dairy & Eggs', 'Staples', 'Snacks & Beverages', 'Fruits & Vegetables'];
+          const existingGroceryCategories = Array.from(new Set(groceryItems.map((m) => (m.category || '').trim()).filter(Boolean)));
+          const allGroceryCatsToDisplay = Array.from(new Set([...standardGroceryCategories, ...existingGroceryCategories]));
+
+          const isAllActive = selectedCategory === 'all';
+          const recentGroceries = getStablePillItems('groceries', allGroceryCatsToDisplay, (g) => g);
+
+          subHtml += `
+            <div class="split-filter-pill ${isAllActive ? 'active' : ''}">
+              <button type="button" class="split-filter-pill-action" onclick="selectGroceryFilter('all')">
+                All Grocery (${groceryItems.length})
+              </button>
+              <button type="button" class="split-filter-pill-caret" onclick="openFilterSelectionModal('grocery')" title="Open all grocery categories popup" aria-label="Open all grocery categories popup">
+                ▼
+              </button>
+            </div>
+          `;
+
+          recentGroceries.forEach((sc) => {
+            const count = groceryItems.filter((m) => (m.category || '').toLowerCase() === sc.toLowerCase()).length;
+            const isActive = selectedCategory.toLowerCase() === sc.toLowerCase();
+            subHtml += `
+              <button class="filter-pill ${isActive ? 'active' : ''}" style="font-size:0.8rem; padding:0.35rem 0.8rem;" onclick="selectGroceryFilter('${escapeHtml(sc)}')">
+                ${escapeHtml(sc)} (${count})
+              </button>
+            `;
+          });
+        } else if (mainCustomerTab === 'all_menus') {
+          // --- MENUS TAB ---
+          const isAllActive = selectedCategory === 'all' && selectedMenuItemId === 'all';
+          const vegCount = allMenuItems.filter((m) => m.dietary !== 'non-veg').length;
+          const nonVegCount = allMenuItems.filter((m) => m.dietary === 'non-veg').length;
+
+          const recentMenuItems = getStablePillItems('menus', allMenuItems, (m) => m.id || m._id);
+
+          subHtml += `
+            <div class="split-filter-pill ${isAllActive ? 'active' : ''}">
+              <button type="button" class="split-filter-pill-action" onclick="selectMenuItemFilter('all')">
+                All Menus (${allMenuItems.length})
+              </button>
+              <button type="button" class="split-filter-pill-caret" onclick="openFilterSelectionModal('all_menus')" title="Open all menus popup" aria-label="Open all menus popup">
+                ▼
+              </button>
+            </div>
+            <button class="filter-pill ${selectedCategory === 'veg' && selectedMenuItemId === 'all' ? 'active' : ''}" style="font-size:0.8rem; padding:0.35rem 0.8rem; border-color:#86efac; color:#16a34a;" onclick="selectMenuItemFilter('veg')">
+              🟢 Pure Veg (${vegCount})
+            </button>
+            <button class="filter-pill ${selectedCategory === 'non-veg' && selectedMenuItemId === 'all' ? 'active' : ''}" style="font-size:0.8rem; padding:0.35rem 0.8rem; border-color:#fca5a5; color:#dc2626;" onclick="selectMenuItemFilter('non-veg')">
+              🔴 Non-Veg (${nonVegCount})
+            </button>
+          `;
+
+          recentMenuItems.forEach((item) => {
+            const itemId = String(item.id || item._id);
+            const isActive = selectedMenuItemId === itemId;
+            subHtml += `
+              <button class="filter-pill ${isActive ? 'active' : ''}" style="font-size:0.8rem; padding:0.35rem 0.8rem;" onclick="selectMenuItemFilter('${itemId}')">
+                ${escapeHtml(item.name)} (₹${item.price})
+              </button>
+            `;
+          });
+        }
+
+        subContainer.innerHTML = subHtml;
+      }
+
+      function selectMainCustomerTab(tab) {
+        mainCustomerTab = tab;
+        selectedCategory = 'all';
+        currentSelectedRestaurantId = 'all';
+        selectedMenuItemId = 'all';
+        openDropdownTab = null;
+        renderRestaurantPills();
+        renderMenuItems();
+      }
+
+      function closeDropdownMenu() {
+        closeFilterModal();
+      }
+
       function selectRestaurantFilter(id) {
         currentSelectedRestaurantId = id;
+        if (id !== 'all') {
+          recordVisitedItem('restaurants', id);
+        }
+        closeFilterModal();
+        renderRestaurantPills();
+        renderMenuItems();
+      }
+
+      function selectCategoryFilter(cat) {
+        selectedCategory = cat;
+        if (cat !== 'all') {
+          recordVisitedItem('categories', cat);
+        }
+        closeFilterModal();
+        renderRestaurantPills();
+        renderMenuItems();
+      }
+
+      function selectGroceryFilter(cat) {
+        selectedCategory = cat;
+        if (cat !== 'all') {
+          recordVisitedItem('groceries', cat);
+        }
+        closeFilterModal();
+        renderRestaurantPills();
+        renderMenuItems();
+      }
+
+      function selectMenuItemFilter(val) {
+        if (val === 'all') {
+          selectedMenuItemId = 'all';
+          selectedCategory = 'all';
+        } else if (val === 'veg' || val === 'non-veg') {
+          selectedCategory = val;
+          selectedMenuItemId = 'all';
+        } else {
+          selectedMenuItemId = val;
+          selectedCategory = 'all';
+          recordVisitedItem('menus', val);
+        }
+        closeFilterModal();
         renderRestaurantPills();
         renderMenuItems();
       }
@@ -1379,9 +2182,32 @@
         const searchVal = (document.getElementById('dish-search')?.value || '').toLowerCase().trim();
 
         let filtered = allMenuItems;
-        if (currentSelectedRestaurantId !== 'all') {
-          filtered = filtered.filter((m) => String(m.restaurantId) === String(currentSelectedRestaurantId));
+
+        // 1. Primary tab filtering
+        if (mainCustomerTab === 'all_restaurants') {
+          if (currentSelectedRestaurantId !== 'all') {
+            filtered = filtered.filter((m) => String(m.restaurantId) === String(currentSelectedRestaurantId));
+          }
+        } else if (mainCustomerTab === 'all_menus') {
+          if (selectedMenuItemId !== 'all') {
+            filtered = filtered.filter((m) => String(m.id || m._id) === String(selectedMenuItemId));
+          } else if (selectedCategory === 'veg') {
+            filtered = filtered.filter((m) => m.dietary !== 'non-veg');
+          } else if (selectedCategory === 'non-veg') {
+            filtered = filtered.filter((m) => m.dietary === 'non-veg');
+          }
+        } else if (mainCustomerTab === 'category') {
+          if (selectedCategory !== 'all') {
+            filtered = filtered.filter((m) => (m.category || 'Main Course').toLowerCase() === selectedCategory.toLowerCase());
+          }
+        } else if (mainCustomerTab === 'grocery') {
+          filtered = filtered.filter(isGroceryItem);
+          if (selectedCategory !== 'all') {
+            filtered = filtered.filter((m) => (m.category || '').toLowerCase() === selectedCategory.toLowerCase());
+          }
         }
+
+        // 2. Live dish search input filtering
         if (searchVal) {
           filtered = filtered.filter((m) =>
             m.name.toLowerCase().includes(searchVal) ||
@@ -1391,7 +2217,10 @@
         }
 
         if (!filtered.length) {
-          grid.innerHTML = '<p style="color:var(--muted); padding:2rem; grid-column:1/-1;">No dishes match your selection.</p>';
+          const emptyMsg = mainCustomerTab === 'grocery'
+            ? 'No grocery items currently found. Explore our restaurant menus or search for other dishes!'
+            : 'No dishes match your selection.';
+          grid.innerHTML = `<p style="color:var(--muted); padding:2rem; grid-column:1/-1; text-align:center;">${emptyMsg}</p>`;
           return;
         }
 
@@ -1457,6 +2286,16 @@
           existing.quantity += 1;
         } else {
           cart.push({ itemId, name, price, quantity: 1, restaurantId });
+        }
+        if (restaurantId) recordVisitedItem('restaurants', restaurantId);
+        if (itemId) recordVisitedItem('menus', itemId);
+        const itemObj = allMenuItems.find((m) => String(m.id || m._id) === String(itemId));
+        if (itemObj && itemObj.category) {
+          if (isGroceryItem(itemObj)) {
+            recordVisitedItem('groceries', itemObj.category);
+          } else {
+            recordVisitedItem('categories', itemObj.category);
+          }
         }
         updateCartUI();
       }
@@ -1844,6 +2683,7 @@
         try {
           await apiFetch(`/api/customer/addresses/${addressId}/default`, { method: 'POST' });
           await fetchCustomerAddresses();
+          await fetchUserLocation();
           if (cart.length) {
             renderCart();
           }
@@ -1960,6 +2800,7 @@
           }
           cancelAddressEdit();
           await fetchCustomerAddresses();
+          await fetchUserLocation();
           if (cart.length) {
             renderCart();
           }
@@ -1973,6 +2814,7 @@
         try {
           await apiFetch(`/api/customer/addresses/${id}`, { method: 'DELETE' });
           await fetchCustomerAddresses();
+          await fetchUserLocation();
           if (cart.length) {
             renderCart();
           }
@@ -3282,6 +4124,7 @@
                             ${isBlocked ? 'Unblock' : 'Block'}
                           </button>
                           <button class="btn btn-outline btn-sm" onclick="editAdminUser('${u.id || u._id}', '${escapeHtml(cleanName)}', '${escapeHtml(u.email || '')}', '${escapeHtml(u.phone || '')}', '${u.role}', '${escapeHtml(u.restaurantAddress || '')}', '${escapeHtml(u.cuisine || '')}', '${escapeHtml(u.deliveryVehicle || '')}', '${escapeHtml(u.digipin || '')}', '${u.restaurantLocation?.lat || ''}', '${u.restaurantLocation?.lng || ''}')">Edit</button>
+                          <button class="btn btn-danger btn-sm" onclick="deleteAdminUser('${u.id || u._id}', '${escapeHtml(cleanName)}', '${targetRole}')">🗑 Delete</button>
                         </div>
                       </td>
                     </tr>
@@ -3323,6 +4166,20 @@
           refreshAdminViews();
         } catch (e) {
           alert(e.message);
+        }
+      }
+
+      async function deleteAdminUser(userId, name, targetRole) {
+        const roleLabel = targetRole === 'restaurant'
+          ? 'restaurant and all its associated menu items'
+          : `${targetRole} account`;
+        if (!confirm(`⚠️ Warning: Are you sure you want to permanently delete ${roleLabel} "${name}"? This CANNOT be undone.`)) return;
+        try {
+          const res = await apiFetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+          alert(res.message || 'Account deleted successfully.');
+          refreshAdminViews();
+        } catch (e) {
+          alert(`Error: ${e.message}`);
         }
       }
 
@@ -4259,6 +5116,7 @@
       // SETTINGS & PROFILE
       // =========================================================================
       function loadProfileSettings() {
+        populateSettingsUserIdBadge();
         document.getElementById('set-name').value = user.name || '';
         document.getElementById('set-role').value = role.toUpperCase();
         document.getElementById('set-email').value = user.email || '';

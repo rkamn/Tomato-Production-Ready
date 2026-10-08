@@ -21,8 +21,8 @@
           <div id="mini-avatar" class="avatar" aria-hidden="true">T</div>
           <div style="flex:1; min-width:0;">
             <strong id="mini-name">Loading...</strong>
-            <div style="display:flex; align-items:center; gap:0.45rem; margin-top:0.3rem; flex-wrap:wrap;">
-              <small id="mini-role">Role</small>
+            <div id="sidebar-user-block" class="sidebar-user-block"><small id="mini-role">Role</small><span id="sidebar-user-id-badge" class="sidebar-id-badge" title="User ID"><span id="sidebar-user-id-val"></span></span></div>
+            <div style="display:flex; align-items:center; gap:0.45rem; margin-top:0.35rem; flex-wrap:wrap;">
               <span id="profile-wallet-actions" style="display:inline-flex; align-items:center; gap:0.25rem; flex:0 0 auto; white-space:nowrap;">
                 <span id="profile-wallet-chip" style="display:none; align-items:center; gap:0.35rem; flex:0 0 auto; white-space:nowrap; background:#fef3c7; border:1px solid #facc15; color:#92400e; border-radius:8px; padding:0.22rem 0.55rem; font-size:0.74rem; font-weight:700; line-height:1.2;">
                   <span aria-hidden="true">💳</span>
@@ -68,6 +68,9 @@
           <!-- Populated dynamically per role -->
         </nav>
 
+        <!-- Gap of an empty panel below Profile Settings -->
+        <div class="sidebar-spacer" aria-hidden="true"></div>
+
         <button id="sign-out" class="sign-out" type="button">Sign out</button>
       </aside>
 
@@ -80,11 +83,14 @@
             <h1 id="welcome-heading">Welcome back</h1>
             <p id="welcome-copy" class="welcome">Keep things flowing smoothly.</p>
           </div>
-          <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
-            <div id="live-indicator" class="live-indicator-badge" title="Real-Time Server Sent Events">
-              <span class="live-dot" id="live-dot"></span> <span id="live-status-text">Live Sync</span>
+          <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.35rem;">
+            <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
+              <div id="live-indicator" class="live-indicator-badge" title="Real-Time Server Sent Events">
+                <span class="live-dot" id="live-dot"></span> <span id="live-status-text">Live Sync</span>
+              </div>
+              <time id="today-date" class="date-badge"></time>
             </div>
-            <time id="today-date" class="date-badge"></time>
+            <div id="user-location-badge" class="location-badge" title="User default saved address location">NA,000</div>
           </div>
         </header>
 
@@ -110,7 +116,7 @@
             </div>
             <div id="activity-feed" class="activity-feed-container"></div>
             <div id="notif-pagination-container" class="notif-pagination-bar" style="display:none;">
-              <div class="notif-pagination-info" id="notif-pagination-info">Showing 1–10 of 10</div>
+              <div class="notif-pagination-info" id="notif-pagination-info">Showing 1–5 of 5</div>
               <div class="notif-pagination-controls">
                 <button id="notif-prev-btn" class="btn btn-outline btn-sm" type="button" onclick="changeNotifPage(-1)" disabled>← Previous</button>
                 <div id="notif-page-numbers" class="notif-page-numbers"></div>
@@ -136,8 +142,11 @@
             </div>
 
             <div class="restaurant-select-bar" id="restaurant-pills">
-              <!-- Rendered via JS -->
+              <!-- Main headers (All Restaurants, All Menus, Category, Grocery) rendered via JS -->
             </div>
+
+            <!-- Contextual sub-filter pills (e.g. restaurant list, categories, grocery items) -->
+            <div class="restaurant-select-bar" id="sub-filter-pills" style="margin-top: -0.75rem; margin-bottom: 1.25rem;"></div>
 
             <div id="menu-items-grid" class="menu-grid">
               <!-- Rendered via JS -->
@@ -572,7 +581,10 @@
         <section id="settings-view" class="view-section">
           <div class="panel">
             <div class="panel-header">
-              <h2 class="panel-title">Account & Profile Settings</h2>
+              <h2 class="panel-title" style="display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap;">
+                <span>Account & Profile Settings</span>
+                <span id="settings-user-id-badge" class="settings-id-badge" title="User ID"><span id="settings-user-id-val"></span></span>
+              </h2>
             </div>
             <form id="profile-form" onsubmit="saveProfileSettings(event)">
               <div class="form-row">
@@ -833,6 +845,55 @@
         <div style="display:flex; justify-content:flex-end; gap:0.8rem; margin-top:1.2rem;">
           <button type="button" class="btn btn-secondary" onclick="closeModal('payment-gateway-modal')">Cancel</button>
           <button type="button" class="btn btn-primary" id="gateway-pay-btn" onclick="executePaymentAndOrder()">Authorize & Pay</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- =====================================================================
+         MODAL: CUSTOMER EXPLORE & ALL SELECTION POPUP
+         ===================================================================== -->
+    <div id="filter-selection-modal" class="modal-overlay" onclick="handleFilterModalBackdropClick(event)">
+      <div class="modal-box" style="max-width:580px; max-height:85vh; display:flex; flex-direction:column;">
+        <div class="modal-header" style="margin-bottom:0.8rem; padding-bottom:0.6rem;">
+          <h2 id="filter-modal-title" style="font-size:1.25rem; font-weight:700;">Select Restaurant</h2>
+          <button class="modal-close" onclick="closeFilterModal()">&times;</button>
+        </div>
+
+        <!-- Search on the top of popup -->
+        <div style="position:relative; margin-bottom:1rem;">
+          <input
+            id="filter-modal-search"
+            type="text"
+            placeholder="Search by name, cuisine, etc..."
+            style="width:100%; padding:0.65rem 1rem 0.65rem 2.2rem; font-size:0.9rem; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); box-sizing:border-box; outline:none;"
+            oninput="handleFilterModalSearch(this)"
+          />
+          <span style="position:absolute; left:0.75rem; top:50%; transform:translateY(-50%); color:var(--muted); font-size:0.95rem; pointer-events:none;">🔍</span>
+        </div>
+
+        <!-- Scrollable list of all items -->
+        <div id="filter-modal-items-container" style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:0.5rem; padding-right:0.25rem; max-height:400px;" onclick="handleFilterModalItemClick(event)">
+          <!-- Filled dynamically by renderFilterModalItems -->
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; align-items:center; margin-top:1rem; padding-top:0.6rem; border-top:1px solid var(--line);">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="closeFilterModal()">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- =====================================================================
+         MODAL: AUTO-DISMISS NOTICE POPUP
+         ===================================================================== -->
+    <div id="notice-auto-dismiss-modal" class="modal-overlay" onclick="handleNoticeModalBackdropClick(event)" style="z-index:999999;">
+      <div class="modal-box" style="max-width:420px; text-align:center; padding:2rem 1.6rem; border-radius:14px; position:relative; box-shadow:0 25px 65px rgba(0,0,0,0.3);">
+        <button type="button" class="modal-close" style="position:absolute; top:0.8rem; right:1rem;" onclick="closeNoticeModal()">&times;</button>
+        <div id="notice-modal-icon" style="font-size:3rem; margin-bottom:0.6rem; line-height:1;">📦</div>
+        <h3 id="notice-modal-title" style="font-size:1.25rem; font-weight:700; margin-bottom:0.4rem; color:var(--ink);">Notice</h3>
+        <p id="notice-modal-message" style="color:var(--muted); font-size:0.95rem; margin-bottom:1.2rem; line-height:1.45;"></p>
+        <div style="font-size:0.8rem; color:var(--muted); opacity:0.8; display:flex; align-items:center; justify-content:center; gap:0.4rem;">
+          <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--tomato); animation:pulse 1.2s infinite ease-in-out;"></span>
+          Closing automatically...
         </div>
       </div>
     </div>

@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import Address from '../../model/Address.js';
-import FoodItem from '../../model/FoodItem.js';
+import MenuItem, { FoodItem } from '../../model/MenuItem.js';
 import Notification from '../../model/Notification.js';
 import Order, { IOrder, OrderStatus } from '../../model/Order.js';
 import Restaurant, { IRestaurant } from '../../model/Restaurant.js';
@@ -39,12 +39,13 @@ const createRestaurantRouter = () => {
       const user = (req as AuthenticatedRequest).user;
       if (!user?.userId)
         return res.status(401).json({ message: 'Authentication required' });
+      await (Notification as any).cleanExpiredAndExcess(user.userId);
       const notifications = await Notification.find({
         userId: user.userId,
         role: 'restaurant',
       })
         .sort({ createdAt: -1 })
-        .limit(200);
+        .limit(15);
       return res.json({ notifications });
     } catch (error) {
       console.error('Restaurant notification fetch failed:', error);
@@ -114,11 +115,13 @@ const createRestaurantRouter = () => {
           'name restaurantId digipin email phone restaurantAddress restaurantLocation cuisine isApproved isBlocked isOpen isOnline',
         )
         .lean();
-      const displayName = profile ? profile.name : '';
+      const cleanName = profile && typeof profile.name === 'string' ? (profile.name.split('/')[0] ?? '').trim() : '';
+      const displayName = cleanName || (profile ? profile.name : '');
       return res.json({
         profile: profile
           ? {
               ...profile,
+              name: displayName,
               displayName,
               isOpen: profile.isOpen ?? profile.isOnline ?? true,
               isOnline: profile.isOnline ?? profile.isOpen ?? true,

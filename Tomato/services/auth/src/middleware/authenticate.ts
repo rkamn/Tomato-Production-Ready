@@ -20,6 +20,7 @@ export interface AuthenticatedRequest extends Request {
 		riderId?: string;
 		customerId?: string;
 		subadminId?: string;
+		adminId?: string;
 	};
 }
 
@@ -46,6 +47,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 		let riderId = '';
 		let customerId = '';
 		let subadminId = '';
+		let adminId = '';
 
 		try {
 			let dbUser: any = null;
@@ -56,14 +58,14 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 			} else if (uRole === 'customer') {
 				dbUser = await Customer.findById(uid).select('isBlocked isApproved name role customerId');
 			} else {
-				dbUser = await Employee.findById(uid).select('isBlocked isApproved name role permissions adminRoleTitle restaurantId riderId customerId subadminId');
+				dbUser = await Employee.findById(uid).select('isBlocked isApproved name role permissions adminRoleTitle restaurantId riderId customerId subadminId adminId');
 			}
 
 			if (!dbUser) {
 				dbUser = (await Customer.findById(uid).select('isBlocked isApproved name role customerId'))
 					|| (await Rider.findById(uid).select('isBlocked isApproved name role riderId'))
 					|| (await Restaurant.findById(uid).select('isBlocked isApproved name role restaurantId'))
-					|| (await Employee.findById(uid).select('isBlocked isApproved name role permissions adminRoleTitle restaurantId riderId customerId subadminId'));
+					|| (await Employee.findById(uid).select('isBlocked isApproved name role permissions adminRoleTitle restaurantId riderId customerId subadminId adminId'));
 			}
 			if (dbUser && dbUser.isBlocked) {
 				return res.status(403).json({ message: 'Your account has been blocked by administrator. Please contact support.' });
@@ -75,6 +77,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 				riderId = dbUser.riderId || '';
 				customerId = dbUser.customerId || '';
 				subadminId = dbUser.subadminId || '';
+				adminId = dbUser.adminId || '';
 			}
 		} catch {
 			// In case DB is temporarily slow or disconnected during unit tests
@@ -98,6 +101,9 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 		if (!subadminId && typeof (payload as any).subadminId === 'string') {
 			subadminId = (payload as any).subadminId;
 		}
+		if (!adminId && typeof (payload as any).adminId === 'string') {
+			adminId = (payload as any).adminId;
+		}
 
 		const authenticatedUser: NonNullable<AuthenticatedRequest['user']> = {
 			userId: uid,
@@ -108,6 +114,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 			riderId,
 			customerId,
 			subadminId,
+			adminId,
 		};
 		if (typeof payload.email === 'string') authenticatedUser.email = payload.email;
 		if (typeof payload.phone === 'string') authenticatedUser.phone = payload.phone;

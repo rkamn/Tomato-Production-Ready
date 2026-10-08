@@ -6,6 +6,7 @@ export interface IAddress extends Document {
   phone?: string;
   line1: string;
   line2?: string;
+  locality?: string;
   city: string;
   state?: string;
   postalCode?: string;
@@ -25,6 +26,7 @@ const addressSchema: Schema<IAddress> = new Schema(
     phone: { type: String, trim: true },
     line1: { type: String, required: true, trim: true },
     line2: { type: String, trim: true, default: '' },
+    locality: { type: String, trim: true, default: '' },
     city: { type: String, required: true, trim: true },
     state: { type: String, trim: true, default: '' },
     postalCode: { type: String, trim: true, default: '' },

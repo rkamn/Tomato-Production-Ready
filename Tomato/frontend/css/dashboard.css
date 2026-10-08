@@ -99,14 +99,41 @@
         font-size: 0.95rem;
         color: #fff;
       }
+      .sidebar-user-block {
+        display: flex;
+        align-items: center;
+        gap: 0.2rem;
+        margin-top: 0.35rem;
+        flex-wrap: nowrap;
+        white-space: nowrap;
+      }
       .profile-mini small {
-        display: inline-block;
-        margin-top: 0.2rem;
-        padding: 0.15rem 0.5rem;
+        display: inline-flex;
+        align-items: center;
+        margin: 0;
+        padding: 0.14rem 0.35rem;
         border-radius: 999px;
         background: rgba(255, 255, 255, 0.14);
         font-size: 0.72rem;
         color: #f7e6c4;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .sidebar-id-badge {
+        display: inline-flex;
+        align-items: center;
+        margin: 0;
+        padding: 0.14rem 0.35rem;
+        border-radius: 999px;
+        border: 1px solid var(--blue);
+        background: rgba(42, 111, 151, 0.22);
+        font-size: 0.72rem;
+        color: #93c5fd;
+        font-weight: 600;
+        line-height: 1.2;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
+        flex-shrink: 0;
       }
 
       /* Sidebar Live Open/Close & Online/Offline Duty Toggle Switch */
@@ -306,6 +333,20 @@
         letter-spacing: 0.02em;
         text-align: right;
         display: inline-block;
+      }
+      .settings-id-badge {
+        padding: 0.25rem 0.8rem;
+        border: 1px solid var(--blue);
+        border-radius: 999px;
+        background: var(--panel);
+        font-size: 0.85rem;
+        color: var(--blue);
+        font-weight: 600;
+        line-height: 1.25;
+        letter-spacing: 0.02em;
+        display: inline-flex;
+        align-items: center;
+        vertical-align: middle;
       }
 
       /* Status Banner for Pending/Blocked */

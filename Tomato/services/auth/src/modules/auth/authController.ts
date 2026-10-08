@@ -48,29 +48,36 @@ const getRegistrationPayload = (body: Request['body']) => {
 	return payload;
 };
 
+export const formatUserId = (id?: string): string => {
+	if (!id || typeof id !== 'string') return '';
+	const trimmed = id.trim();
+	if (trimmed.length <= 4) return trimmed.toLowerCase();
+	return trimmed.slice(0, 4).toLowerCase() + trimmed.slice(4);
+};
+
 export const generateRestaurantId = (): Promise<string> =>
-	generateIdFromCounter('restaurentId', 'REST', 1000, async (id: string) =>
-		Boolean(await Restaurant.exists({ restaurantId: id })),
+	generateIdFromCounter('restaurentId', 'rest', 1000, async (id: string) =>
+		Boolean(await Restaurant.exists({ restaurantId: { $in: [id, id.toUpperCase()] } })),
 	);
 
 export const generateRiderId = (): Promise<string> =>
-	generateIdFromCounter('riderId', 'RIDE', 1000, async (id: string) =>
-		Boolean(await Rider.exists({ riderId: id })),
+	generateIdFromCounter('riderId', 'ride', 1000, async (id: string) =>
+		Boolean(await Rider.exists({ riderId: { $in: [id, id.toUpperCase()] } })),
 	);
 
 export const generateCustomerId = (): Promise<string> =>
-	generateIdFromCounter('customerId', 'CUST', 1000, async (id: string) =>
-		Boolean(await Customer.exists({ customerId: id })),
+	generateIdFromCounter('customerId', 'cust', 1000, async (id: string) =>
+		Boolean(await Customer.exists({ customerId: { $in: [id, id.toUpperCase()] } })),
 	);
 
 export const generateSubAdminId = (): Promise<string> =>
-	generateIdFromCounter('subadminId', 'SUB', 1000, async (id: string) =>
-		Boolean(await Employee.exists({ subadminId: id })),
+	generateIdFromCounter('subadminId', 'sub', 1000, async (id: string) =>
+		Boolean(await Employee.exists({ subadminId: { $in: [id, id.toUpperCase()] } })),
 	);
 
 export const generateAdminId = (): Promise<string> =>
-	generateIdFromCounter('adminId', 'ADM', 1000, async (id: string) =>
-		Boolean(await Employee.exists({ adminId: id })),
+	generateIdFromCounter('adminId', 'adm', 1000, async (id: string) =>
+		Boolean(await Employee.exists({ adminId: { $in: [id, id.toUpperCase()] } })),
 	);
 
 export const createToken = (user: {
@@ -84,6 +91,7 @@ export const createToken = (user: {
 	riderId?: string;
 	customerId?: string;
 	subadminId?: string;
+	adminId?: string;
 }) => {
 	const jwtSecret = process.env.JWT_SECRET || 'tomato-local-development-secret';
 
@@ -97,10 +105,11 @@ export const createToken = (user: {
 			role: user.role,
 			permissions: user.permissions || [],
 			adminRoleTitle: user.adminRoleTitle || '',
-			restaurantId: user.restaurantId || '',
-			riderId: user.riderId || '',
-			customerId: user.customerId || '',
-			subadminId: user.subadminId || '',
+			restaurantId: formatUserId(user.restaurantId),
+			riderId: formatUserId(user.riderId),
+			customerId: formatUserId(user.customerId),
+			subadminId: formatUserId(user.subadminId),
+			adminId: formatUserId((user as any).adminId),
 		},
 		jwtSecret,
 		{ expiresIn: '12h' },
@@ -122,6 +131,7 @@ export const userResponse = (user: {
 	riderId?: string;
 	customerId?: string;
 	subadminId?: string;
+	adminId?: string;
 	digipin?: string;
 	restaurantAddress?: string;
 	restaurantLocation?: { lat: number; lng: number };
@@ -135,15 +145,25 @@ export const userResponse = (user: {
 	adminRoleTitle?: string;
 	createdBy?: string;
 }) => {
-	const customerId = user.customerId || (user.role === 'customer' ? `CUST-${String(user._id).slice(-4).toUpperCase()}` : '');
-	const subadminId = user.subadminId || (user.role === 'subadmin' ? `SUB-${String(user._id).slice(-4).toUpperCase()}` : '');
+	const rawCustomerId = user.customerId || (user.role === 'customer' ? `cust-${String(user._id).slice(-4).toLowerCase()}` : '');
+	const rawSubadminId = user.subadminId || (user.role === 'subadmin' ? `sub-${String(user._id).slice(-4).toLowerCase()}` : '');
+	const rawAdminId = (user as any).adminId || (user.role === 'admin' ? ((user as any).adminId || `adm-${String(user._id).slice(-4).toLowerCase()}`) : '');
+	const rawRestaurantId = user.restaurantId || (user.role === 'restaurant' ? `rest-${String(user._id).slice(-4).toLowerCase()}` : '');
+	const rawRiderId = user.riderId || (user.role === 'deliveryPartner' || (user.role as string) === 'rider' ? `ride-${String(user._id).slice(-4).toLowerCase()}` : '');
 
-	const displayName = user.name;
+	const customerId = formatUserId(rawCustomerId);
+	const subadminId = formatUserId(rawSubadminId);
+	const adminId = formatUserId(rawAdminId);
+	const restaurantId = formatUserId(rawRestaurantId);
+	const riderId = formatUserId(rawRiderId);
+
+	const cleanName = typeof user.name === 'string' ? (user.name.split('/')[0] ?? '').trim() : '';
+	const displayName = cleanName || 'Tomato User';
 
 	return {
 		id: user._id,
 		_id: user._id,
-		name: user.name,
+		name: cleanName || user.name,
 		displayName,
 		email: user.email,
 		phone: user.phone,
@@ -157,10 +177,11 @@ export const userResponse = (user: {
 				walletBalance: user.walletBalance ?? 0,
 				creditPoint: user.creditPoint ?? 0,
 			}),
-		restaurantId: user.restaurantId || '',
-		riderId: user.riderId || '',
+		restaurantId,
+		riderId,
 		customerId,
 		subadminId,
+		adminId,
 		digipin: user.digipin || '',
 		restaurantAddress: user.restaurantAddress || '',
 		restaurantLocation: user.restaurantLocation || { lat: 12.9716, lng: 77.5946 },

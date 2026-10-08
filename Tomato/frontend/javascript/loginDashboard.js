@@ -8,7 +8,16 @@
         window.location.href = '../index.html';
       }
 
+      function formatCleanName(str) {
+        if (!str) return '';
+        return String(str).split('/')[0].trim();
+      }
+
       const user = storedUser;
+      if (user) {
+        if (user.name) user.name = formatCleanName(user.name);
+        if (user.displayName) user.displayName = formatCleanName(user.displayName);
+      }
       const normalizeRole = (r) => {
         const val = String(r || 'customer').trim().toLowerCase();
         if (['deliverypartner', 'delivery_partner', 'delivery partner', 'rider'].includes(val)) return 'deliveryPartner';
@@ -861,14 +870,69 @@
 
       window.fetchUserLocation = fetchUserLocation;
 
+      function formatUserId(id) {
+        if (!id || typeof id !== 'string') return '';
+        const trimmed = id.trim();
+        if (trimmed.length <= 4) return trimmed.toLowerCase();
+        return trimmed.slice(0, 4).toLowerCase() + trimmed.slice(4);
+      }
+
+      window.formatUserId = formatUserId;
+
+      // Resolve global user/role identifier with first 4 characters lowercase
+      function getUserIdentifier() {
+        if (!user) return '';
+        let rawId = '';
+        if (role === 'customer') {
+          rawId = user.customerId || (user._id || user.id ? `cust-${String(user._id || user.id).slice(-4).toLowerCase()}` : '') || user.userId || user.id || user._id || '';
+        } else if (role === 'restaurant') {
+          rawId = user.restaurantId || (user._id || user.id ? `rest-${String(user._id || user.id).slice(-4).toLowerCase()}` : '') || user.userId || user.id || user._id || '';
+        } else if (role === 'deliveryPartner') {
+          rawId = user.riderId || (user._id || user.id ? `ride-${String(user._id || user.id).slice(-4).toLowerCase()}` : '') || user.userId || user.id || user._id || '';
+        } else if (role === 'subadmin') {
+          rawId = user.subadminId || (user._id || user.id ? `sub-${String(user._id || user.id).slice(-4).toLowerCase()}` : '') || user.userId || user.id || user._id || '';
+        } else if (role === 'admin') {
+          rawId = user.adminId || (user._id || user.id ? `adm-${String(user._id || user.id).slice(-4).toLowerCase()}` : '') || user.userId || user.id || user._id || 'adm-1001';
+        } else {
+          rawId = user.customerId || user.restaurantId || user.riderId || user.subadminId || user.adminId || user.userId || user.id || user._id || '';
+        }
+        return formatUserId(rawId);
+      }
+
+      function populateSettingsUserIdBadge() {
+        const uid = getUserIdentifier();
+
+        // 1. Settings view panel header badge
+        const valEl = document.getElementById('settings-user-id-val');
+        const badgeEl = document.getElementById('settings-user-id-badge');
+        if (valEl && badgeEl) {
+          if (uid) {
+            valEl.textContent = uid;
+            badgeEl.style.display = 'inline-flex';
+          } else {
+            badgeEl.style.display = 'none';
+          }
+        }
+
+        // 2. Left panel sidebar badge after typeOfUser
+        const sideValEl = document.getElementById('sidebar-user-id-val');
+        const sideBadgeEl = document.getElementById('sidebar-user-id-badge');
+        if (sideValEl && sideBadgeEl) {
+          if (uid) {
+            sideValEl.textContent = uid;
+            sideBadgeEl.style.display = 'inline-flex';
+          } else {
+            sideBadgeEl.style.display = 'none';
+          }
+        }
+      }
+
+      window.getUserIdentifier = getUserIdentifier;
+      window.populateSettingsUserIdBadge = populateSettingsUserIdBadge;
+
       // Initialize Dashboard
       function initDashboard() {
-        let partnerDisplay = user.displayName || user.name || 'Tomato User';
-        if (role === 'restaurant' && user.restaurantId && !partnerDisplay.includes(user.restaurantId)) {
-          partnerDisplay = `${user.name} / ${user.restaurantId}`;
-        } else if (role === 'deliveryPartner' && user.riderId && !partnerDisplay.includes(user.riderId)) {
-          partnerDisplay = `${user.name} / ${user.riderId}`;
-        }
+        const partnerDisplay = formatCleanName(user.displayName || user.name || 'Tomato User');
         document.getElementById('mini-name').textContent = partnerDisplay;
         const displayRole = role === 'deliveryPartner' ? 'Delivery Partner' : role === 'subadmin' ? (user.adminRoleTitle || 'Sub-Admin') : role.charAt(0).toUpperCase() + role.slice(1);
         document.getElementById('mini-role').textContent = displayRole;
@@ -901,6 +965,24 @@
 
         // Populate Location: <stateCode>,<City>,<locality>,<pincode>
         fetchUserLocation();
+
+        // Populate Profile Settings and Sidebar User ID badges globally
+        populateSettingsUserIdBadge();
+
+        // Sync fresh profile to ensure user IDs are completely up to date for all user roles
+        apiFetch('/api/auth/profile')
+          .then((data) => {
+            if (data?.user) {
+              if (data.user.name) data.user.name = formatCleanName(data.user.name);
+              if (data.user.displayName) data.user.displayName = formatCleanName(data.user.displayName);
+              Object.assign(user, data.user);
+              localStorage.setItem('tomatoUser', JSON.stringify(user));
+              const miniNameEl = document.getElementById('mini-name');
+              if (miniNameEl) miniNameEl.textContent = formatCleanName(user.displayName || user.name || 'Tomato User');
+              populateSettingsUserIdBadge();
+            }
+          })
+          .catch(() => {});
 
         // Initialize Duty Status Toggle for Restaurant & Rider
         initDutyStatusToggle();
@@ -5034,6 +5116,7 @@
       // SETTINGS & PROFILE
       // =========================================================================
       function loadProfileSettings() {
+        populateSettingsUserIdBadge();
         document.getElementById('set-name').value = user.name || '';
         document.getElementById('set-role').value = role.toUpperCase();
         document.getElementById('set-email').value = user.email || '';

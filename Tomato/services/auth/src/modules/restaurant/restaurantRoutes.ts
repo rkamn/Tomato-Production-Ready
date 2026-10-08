@@ -115,11 +115,13 @@ const createRestaurantRouter = () => {
           'name restaurantId digipin email phone restaurantAddress restaurantLocation cuisine isApproved isBlocked isOpen isOnline',
         )
         .lean();
-      const displayName = profile ? profile.name : '';
+      const cleanName = profile && typeof profile.name === 'string' ? (profile.name.split('/')[0] ?? '').trim() : '';
+      const displayName = cleanName || (profile ? profile.name : '');
       return res.json({
         profile: profile
           ? {
               ...profile,
+              name: displayName,
               displayName,
               isOpen: profile.isOpen ?? profile.isOnline ?? true,
               isOnline: profile.isOnline ?? profile.isOpen ?? true,

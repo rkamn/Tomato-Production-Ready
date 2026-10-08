@@ -283,6 +283,12 @@
               </div>
               <button class="btn btn-outline btn-sm" onclick="fetchRestaurantOrders()">Refresh</button>
             </div>
+            <div id="restaurant-orders-filter-bar" style="display:flex; align-items:center; gap:0.5rem; margin-bottom:1rem; flex-wrap:wrap; padding:0.25rem 0;">
+              <button id="rest-filter-all" class="btn btn-sm btn-outline active" onclick="setRestaurantOrdersFilter('all')">All Orders</button>
+              <button id="rest-filter-cooking" class="btn btn-sm btn-outline" onclick="setRestaurantOrdersFilter('cooking')">🍳 On Stove / Cooking</button>
+              <button id="rest-filter-incoming" class="btn btn-sm btn-outline" onclick="setRestaurantOrdersFilter('incoming')">🔔 New Incoming</button>
+              <span id="rest-filter-indicator" style="display:none; font-size:0.8rem; color:var(--tomato); font-weight:600; margin-left:auto;"></span>
+            </div>
             <div id="restaurant-orders-table"></div>
           </div>
         </section>
@@ -297,6 +303,44 @@
               <button class="btn btn-primary btn-sm" onclick="openAddMenuItemModal()">+ Add New Food Item</button>
             </div>
             <div id="restaurant-menu-table"></div>
+          </div>
+        </section>
+
+        <!-- =================================================================
+             6B. SHOP: SHOP ORDERS & PACKING
+             ================================================================= -->
+        <section id="shop-orders-view" class="view-section">
+          <div class="panel">
+            <div class="panel-header">
+              <div>
+                <h2 class="panel-title">Incoming Shop Orders</h2>
+                <p class="food-meta">Accept orders, pack items, update dispatch stage, and generate bills</p>
+              </div>
+              <button class="btn btn-outline btn-sm" onclick="fetchShopOrders()">Refresh</button>
+            </div>
+            <div id="shop-orders-filter-bar" style="display:flex; align-items:center; gap:0.5rem; margin-bottom:1rem; flex-wrap:wrap; padding:0.25rem 0;">
+              <button id="shop-filter-all" class="btn btn-sm btn-outline active" onclick="setShopOrdersFilter('all')">All Orders</button>
+              <button id="shop-filter-cooking" class="btn btn-sm btn-outline" onclick="setShopOrdersFilter('cooking')">📦 In Packing / Processing</button>
+              <button id="shop-filter-incoming" class="btn btn-sm btn-outline" onclick="setShopOrdersFilter('incoming')">🔔 New Incoming</button>
+              <span id="shop-filter-indicator" style="display:none; font-size:0.8rem; color:var(--tomato); font-weight:600; margin-left:auto;"></span>
+            </div>
+            <div id="shop-orders-table"></div>
+          </div>
+        </section>
+
+        <!-- =================================================================
+             6C. SHOP: INVENTORY & ITEM MANAGEMENT
+             ================================================================= -->
+        <section id="shop-items-view" class="view-section">
+          <div class="panel">
+            <div class="panel-header">
+              <div>
+                <h2 class="panel-title">Shop Inventory Management</h2>
+                <p class="food-meta">Add and manage grocery &amp; retail products, prices, stock and availability</p>
+              </div>
+              <button class="btn btn-primary btn-sm" onclick="openAddShopItemModal()">+ Add New Shop Item</button>
+            </div>
+            <div id="shop-items-table"></div>
           </div>
         </section>
 
@@ -450,6 +494,34 @@
             </div>
 
             <div id="admin-orders-table"></div>
+          </div>
+        </section>
+
+        <!-- =================================================================
+             10.5. ADMIN: SHOPS MANAGEMENT
+             ================================================================= -->
+        <section id="admin-shops-view" class="view-section">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Shop Partners</h2>
+              <div style="display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap;">
+                <div style="display:flex; align-items:center; gap:0.4rem;">
+                  <input
+                    type="text"
+                    id="admin-shops-search"
+                    placeholder="Search by shop ID, mobile, email, or name..."
+                    style="padding:0.45rem 0.85rem; border:1px solid var(--line); border-radius:6px; font-size:0.88rem; min-width:260px;"
+                    onkeydown="if(event.key === 'Enter') { event.preventDefault(); searchAdminUsers('shop'); }"
+                    oninput="handleAdminSearchInput('shop')"
+                  />
+                  <button class="btn btn-primary btn-sm" onclick="searchAdminUsers('shop')">🔍 Search</button>
+                  <button class="btn btn-outline btn-sm" id="admin-shops-clear-btn" style="display:none;" onclick="clearAdminSearch('shop')">✕ Clear</button>
+                </div>
+                <button class="btn btn-outline btn-sm" onclick="openAdminCreateUserModal('shop')">+ Add New Shop</button>
+              </div>
+            </div>
+            <div id="admin-shops-search-status" style="display:none; margin-bottom:1rem; font-size:0.88rem; color:var(--muted);"></div>
+            <div id="admin-shops-table"></div>
           </div>
         </section>
 
@@ -608,14 +680,14 @@
                 </div>
               </div>
 
-              <!-- Restaurant specific -->
+              <!-- Restaurant & Shop specific -->
               <div id="restaurant-settings-group" style="display:none;">
                 <div class="form-group">
-                  <label>Restaurant Address</label>
+                  <label id="set-restaurant-address-label">Restaurant Address</label>
                   <input id="set-restaurant-address" type="text" placeholder="12 Indiranagar 100ft Road, Bengaluru" />
                 </div>
                 <div class="form-group">
-                  <label>Cuisines Served</label>
+                  <label id="set-cuisine-label">Cuisines Served</label>
                   <input id="set-cuisine" type="text" placeholder="North Indian, Italian, Desserts" />
                 </div>
               </div>
@@ -977,6 +1049,59 @@
     </div>
 
     <!-- =====================================================================
+         MODAL 3B: SHOP ADD / EDIT INVENTORY ITEM
+         ===================================================================== -->
+    <div id="shop-item-modal" class="modal-overlay">
+      <div class="modal-box">
+        <div class="modal-header">
+          <h2 id="shop-modal-title" style="font-size:1.3rem;">Add Shop Item</h2>
+          <button class="modal-close" onclick="closeModal('shop-item-modal')">&times;</button>
+        </div>
+
+        <form id="shop-item-form" onsubmit="saveShopItem(event)">
+          <input type="hidden" id="shop-item-id" />
+          <div class="form-group">
+            <label>Item / Product Name</label>
+            <input id="si-name" type="text" placeholder="Organic Brown Rice 1kg" required />
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Category</label>
+              <input id="si-category" type="text" placeholder="Groceries, Dairy, Beverages, Snacks" required />
+            </div>
+            <div class="form-group">
+              <label>Unit / Pack Size</label>
+              <input id="si-unit" type="text" placeholder="1 kg, 500g, 1 litre, 1 pack" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Price (₹)</label>
+              <input id="si-price" type="number" min="0" step="0.5" placeholder="120" required />
+            </div>
+            <div class="form-group">
+              <label>Quantity / Stock Available</label>
+              <input id="si-quantity" type="number" min="0" placeholder="50" required />
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Description</label>
+            <textarea id="si-desc" rows="2" placeholder="Product details, ingredients, expiry or pack information..."></textarea>
+          </div>
+          <div class="form-group" style="display:flex; align-items:center; gap:0.5rem;">
+            <input type="checkbox" id="si-active" checked />
+            <label for="si-active" style="text-transform:none; margin:0;">In Stock &amp; Available in Shop</label>
+          </div>
+
+          <div style="display:flex; justify-content:flex-end; gap:0.8rem; margin-top:1.2rem;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('shop-item-modal')">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save Shop Item</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- =====================================================================
          MODAL 4: ADMIN ADD / EDIT USER OR PARTNER
          ===================================================================== -->
     <div id="admin-user-modal" class="modal-overlay">
@@ -992,6 +1117,7 @@
             <label>Role</label>
             <select id="adm-role" required onchange="toggleAdminUserFields()">
               <option value="restaurant">Restaurant Partner</option>
+              <option value="shop">Shop Partner</option>
               <option value="deliveryPartner">Delivery Partner (Rider)</option>
               <option value="customer">Customer</option>
               <option value="admin">Administrator</option>
@@ -1018,16 +1144,16 @@
 
           <div id="adm-restaurant-fields">
             <div class="form-group">
-              <label>Restaurant Address <span style="color:var(--tomato);">*</span></label>
+              <label id="adm-rest-address-label">Restaurant Address <span style="color:var(--tomato);">*</span></label>
               <input id="adm-restaurant-address" type="text" placeholder="12 MG Road, Bengaluru" />
             </div>
             <div class="form-row">
               <div class="form-group">
-                <label>Restaurant DIGIPIN <span style="color:var(--tomato);">*</span></label>
+                <label id="adm-rest-digipin-label">Restaurant DIGIPIN <span style="color:var(--tomato);">*</span></label>
                 <input id="adm-restaurant-digipin" type="text" placeholder="e.g. 560001-K01 or DGP-1297-7759" />
               </div>
               <div class="form-group">
-                <label>Cuisine</label>
+                <label id="adm-cuisine-label">Cuisine</label>
                 <input id="adm-cuisine" type="text" placeholder="North Indian, Chinese" />
               </div>
             </div>
@@ -1182,6 +1308,10 @@
                 <span>📦 <strong>Manage Orders</strong></span>
               </label>
               <label style="display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
+                <input type="checkbox" id="subadm-perm-shops_manage" value="shops_manage" />
+                <span>🏬 <strong>Manage Shops</strong></span>
+              </label>
+              <label style="display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
                 <input type="checkbox" id="subadm-perm-restaurants_manage" value="restaurants_manage" />
                 <span>🏪 <strong>Manage Restaurants</strong></span>
               </label>
@@ -1215,7 +1345,7 @@
       <div class="modal-box" style="max-width:580px;">
         <div class="modal-header">
           <div>
-            <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--blue); font-weight:700;">⚙️ RBAC Configuration</span>
+            <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--tomato); font-weight:700;">⚙️ RBAC Configuration</span>
             <h2 style="font-size:1.35rem; margin-top:0.2rem;">Edit Sub-Admin Permissions</h2>
           </div>
           <button class="modal-close" onclick="closeModal('admin-edit-subadmin-modal')">&times;</button>
@@ -1260,6 +1390,10 @@
               <label style="display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
                 <input type="checkbox" id="edit-subadm-perm-orders_manage" value="orders_manage" />
                 <span>📦 <strong>Manage Orders</strong></span>
+              </label>
+              <label style="display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
+                <input type="checkbox" id="edit-subadm-perm-shops_manage" value="shops_manage" />
+                <span>🏬 <strong>Manage Shops</strong></span>
               </label>
               <label style="display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
                 <input type="checkbox" id="edit-subadm-perm-restaurants_manage" value="restaurants_manage" />

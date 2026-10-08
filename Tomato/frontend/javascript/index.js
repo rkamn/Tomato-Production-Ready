@@ -77,10 +77,32 @@
         loginMode.setAttribute('aria-selected', String(!isRegistering));
         registerMode.setAttribute('aria-selected', String(isRegistering));
 
+        updateRoleFieldsVisibility();
+      }
+
+      function updateRoleFieldsVisibility() {
+        const isRegistering = mode === 'register';
         const restRegFields = document.getElementById('restaurant-reg-fields');
         const riderRegFields = document.getElementById('rider-reg-fields');
-        if (restRegFields) restRegFields.classList.toggle('hidden', !(isRegistering && selectedRole === 'restaurant'));
-        if (riderRegFields) riderRegFields.classList.toggle('hidden', !(isRegistering && selectedRole === 'deliveryPartner'));
+        const addrLabel = document.querySelector('label[for="restaurant-address"]');
+        const digipinLabel = document.querySelector('label[for="restaurant-digipin"]');
+        const restNote = document.getElementById('rest-helper-note');
+
+        if (restRegFields) {
+          restRegFields.classList.toggle('hidden', !(isRegistering && (selectedRole === 'restaurant' || selectedRole === 'shop')));
+          if (selectedRole === 'shop') {
+            if (addrLabel) addrLabel.textContent = 'Shop Address (Pickup Point)';
+            if (digipinLabel) digipinLabel.innerHTML = 'Shop Location / DIGIPIN <span style="color:var(--tomato);">*Required</span>';
+            if (restNote) restNote.innerHTML = 'Used for order pickup by delivery riders. Each shop will receive a unique <strong>&lt;name&gt;/shopId</strong>.';
+          } else {
+            if (addrLabel) addrLabel.textContent = 'Restaurant Address (Pickup Point)';
+            if (digipinLabel) digipinLabel.innerHTML = 'Restaurant Location / DIGIPIN <span style="color:var(--tomato);">*Required</span>';
+            if (restNote) restNote.innerHTML = 'Used for order pickup by delivery riders. Each restaurant will receive a unique <strong>&lt;name&gt;/restaurantId</strong>.';
+          }
+        }
+        if (riderRegFields) {
+          riderRegFields.classList.toggle('hidden', !(isRegistering && selectedRole === 'deliveryPartner'));
+        }
       }
 
       function detectRestaurantGPS() {
@@ -136,11 +158,7 @@
           message.textContent = `${option.dataset.label} account selected.`;
           message.className = 'message';
 
-          const isRegistering = mode === 'register';
-          const restRegFields = document.getElementById('restaurant-reg-fields');
-          const riderRegFields = document.getElementById('rider-reg-fields');
-          if (restRegFields) restRegFields.classList.toggle('hidden', !(isRegistering && selectedRole === 'restaurant'));
-          if (riderRegFields) riderRegFields.classList.toggle('hidden', !(isRegistering && selectedRole === 'deliveryPartner'));
+          updateRoleFieldsVisibility();
         }),
       );
 
@@ -278,8 +296,13 @@
           };
 
           if (mode === 'register') {
-            if (selectedRole === 'restaurant') {
-              payload.restaurantAddress = document.getElementById('restaurant-address')?.value?.trim() || '';
+            if (selectedRole === 'restaurant' || selectedRole === 'shop') {
+              const addr = document.getElementById('restaurant-address')?.value?.trim() || '';
+              if (selectedRole === 'shop') {
+                payload.shopAddress = addr;
+              } else {
+                payload.restaurantAddress = addr;
+              }
               payload.digipin = document.getElementById('restaurant-digipin')?.value?.trim() || '';
               const latVal = document.getElementById('restaurant-lat')?.value;
               const lngVal = document.getElementById('restaurant-lng')?.value;

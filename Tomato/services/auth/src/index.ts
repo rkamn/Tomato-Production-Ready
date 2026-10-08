@@ -13,6 +13,7 @@ import {
   adminRoutes,
   customerRoutes,
   restaurantRoutes,
+  shopRoutes,
   riderRoutes,
 } from './modules/index.js';
 
@@ -70,6 +71,7 @@ app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 app.use('/api/auth', authRoute(upload));
 app.use('/api/customer', customerRoutes);
 app.use('/api/restaurant', restaurantRoutes);
+app.use('/api/shop', shopRoutes);
 app.use('/api/rider', riderRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/notifications', notificationRoutes);

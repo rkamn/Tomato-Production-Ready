@@ -602,6 +602,11 @@
       .btn-outline:hover {
         background: rgba(0, 0, 0, 0.03);
       }
+      .btn-outline.active {
+        background: var(--ink);
+        color: #fff;
+        border-color: var(--ink);
+      }
       .btn-sm {
         padding: 0.4rem 0.8rem;
         font-size: 0.78rem;

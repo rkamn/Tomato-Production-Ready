@@ -6,6 +6,7 @@ import Notification from '../../model/Notification.js';
 import Order, { IOrder, OrderStatus } from '../../model/Order.js';
 import Employee, { IEmployee, USER_ROLES, UserRole } from '../../model/Employee.js';
 import Restaurant, { IRestaurant } from '../../model/Restaurant.js';
+import Shop, { IShop } from '../../model/Shop.js';
 import Customer, { ICustomer } from '../../model/Customer.js';
 import Rider, { IRider } from '../../model/Rider.js';
 import WalletCreditTrack from '../../model/WalletCreditTrack.js';
@@ -19,6 +20,7 @@ import {
   hashPassword,
   userResponse,
   generateRestaurantId,
+  generateShopId,
   generateRiderId,
   generateCustomerId,
   generateSubAdminId,
@@ -108,6 +110,7 @@ const createAdminRouter = () => {
           cancelledOrders,
           customersCount,
           restaurants,
+          shops,
           riders,
           orders,
         ] = await Promise.all([
@@ -127,6 +130,7 @@ const createAdminRouter = () => {
           Order.countDocuments({ status: 'cancelled' }),
           Customer.countDocuments(),
           Restaurant.find().lean(),
+          Shop.find().lean(),
           Rider.find().lean(),
           Order.find().sort({ createdAt: -1 }).limit(200).lean(),
         ]);
@@ -155,6 +159,9 @@ const createAdminRouter = () => {
 
         const pendingRestaurants = restaurants.filter(
           (r) => r.isApproved === false,
+        ).length;
+        const pendingShops = shops.filter(
+          (s) => s.isApproved === false,
         ).length;
         const pendingRiders = riders.filter(
           (r) => r.isApproved === false,
@@ -205,6 +212,8 @@ const createAdminRouter = () => {
             totalCustomers: customersCount,
             totalRestaurants: restaurants.length,
             pendingRestaurants,
+            totalShops: shops.length,
+            pendingShops,
             totalRiders: riders.length,
             pendingRiders,
           },
@@ -682,6 +691,13 @@ const createAdminRouter = () => {
               message: 'Access denied. Requires restaurants_manage permission.',
             });
         }
+        if (role === 'shop' && !perms.includes('shops_manage') && !perms.includes('restaurants_manage')) {
+          return res
+            .status(403)
+            .json({
+              message: 'Access denied. Requires shops_manage or restaurants_manage permission.',
+            });
+        }
         if (role === 'deliveryPartner' && !perms.includes('riders_manage')) {
           return res
             .status(403)
@@ -733,6 +749,36 @@ const createAdminRouter = () => {
         }
         const restaurants = await Restaurant.find(restFilter).sort({ createdAt: -1 });
         return res.json(paginateList(restaurants.map((r) => userResponse(r as any))));
+      }
+
+      if (role === 'shop') {
+        const shopFilter: Record<string, unknown> = {};
+        if (typeof search === 'string' && search.trim()) {
+          const term = search.trim();
+          const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const orConditions: any[] = [
+            { name: { $regex: escaped, $options: 'i' } },
+            { email: { $regex: escaped, $options: 'i' } },
+            { phone: { $regex: escaped, $options: 'i' } },
+            { shopId: { $regex: escaped, $options: 'i' } },
+            { digipin: { $regex: escaped, $options: 'i' } },
+            {
+              $expr: {
+                $regexMatch: {
+                  input: { $toString: '$_id' },
+                  regex: escaped,
+                  options: 'i',
+                },
+              },
+            },
+          ];
+          if (mongoose.isValidObjectId(term)) {
+            orConditions.push({ _id: new mongoose.Types.ObjectId(term) });
+          }
+          shopFilter.$or = orConditions;
+        }
+        const shops = await Shop.find(shopFilter).sort({ createdAt: -1 });
+        return res.json(paginateList(shops.map((s) => userResponse(s as any))));
       }
 
       if (role === 'customer') {
@@ -827,6 +873,7 @@ const createAdminRouter = () => {
 
       if (!role) {
         const restFilter: Record<string, unknown> = {};
+        const shopFilter: Record<string, unknown> = {};
         const riderFilter: Record<string, unknown> = {};
         const custFilter: Record<string, unknown> = {};
 
@@ -856,6 +903,11 @@ const createAdminRouter = () => {
             { restaurantId: { $regex: escaped, $options: 'i' } },
             { digipin: { $regex: escaped, $options: 'i' } },
           ];
+          shopFilter.$or = [
+            ...commonOr,
+            { shopId: { $regex: escaped, $options: 'i' } },
+            { digipin: { $regex: escaped, $options: 'i' } },
+          ];
           riderFilter.$or = [
             ...commonOr,
             { riderId: { $regex: escaped, $options: 'i' } },
@@ -866,9 +918,10 @@ const createAdminRouter = () => {
           ];
         }
 
-        const [employees, restaurants, riders, customers] = await Promise.all([
+        const [employees, restaurants, shops, riders, customers] = await Promise.all([
           Employee.find(filter).sort({ createdAt: -1 }),
           Restaurant.find(restFilter).sort({ createdAt: -1 }),
+          Shop.find(shopFilter).sort({ createdAt: -1 }),
           Rider.find(riderFilter).sort({ createdAt: -1 }),
           Customer.find(custFilter).sort({ createdAt: -1 }),
         ]);
@@ -876,6 +929,7 @@ const createAdminRouter = () => {
         const combined = [
           ...employees.map((u) => userResponse(u as any)),
           ...restaurants.map((r) => userResponse(r as any)),
+          ...shops.map((s) => userResponse(s as any)),
           ...riders.map((r) => userResponse(r as any)),
           ...customers.map((c) => userResponse(c as any)),
         ];
@@ -931,11 +985,13 @@ const createAdminRouter = () => {
       const [
         existingEmployee,
         existingRestaurant,
+        existingShop,
         existingRider,
         existingCustomer,
       ] = await Promise.all([
         Employee.findOne(duplicateQuery),
         Restaurant.findOne(duplicateQuery),
+        Shop.findOne(duplicateQuery),
         Rider.findOne(duplicateQuery),
         Customer.findOne(duplicateQuery),
       ]);
@@ -943,6 +999,7 @@ const createAdminRouter = () => {
       if (
         existingEmployee ||
         existingRestaurant ||
+        existingShop ||
         existingRider ||
         existingCustomer
       ) {
@@ -995,6 +1052,55 @@ const createAdminRouter = () => {
         return res.status(201).json({
           message: 'Restaurant created successfully',
           user: userResponse(restaurant as any),
+        });
+      }
+
+      if (role === 'shop') {
+        const shopId = await generateShopId();
+        let digipin =
+          typeof req.body?.digipin === 'string'
+            ? req.body.digipin.trim().toUpperCase()
+            : '';
+        let shopLocation: { lat: number; lng: number } = {
+          lat: 12.9716,
+          lng: 77.5946,
+        };
+        const rawLat = req.body?.shopLocation?.lat ?? req.body?.restaurantLocation?.lat ?? req.body?.lat;
+        const rawLng = req.body?.shopLocation?.lng ?? req.body?.restaurantLocation?.lng ?? req.body?.lng;
+        if (
+          rawLat !== undefined &&
+          rawLng !== undefined &&
+          !isNaN(Number(rawLat)) &&
+          !isNaN(Number(rawLng))
+        ) {
+          shopLocation = { lat: Number(rawLat), lng: Number(rawLng) };
+        }
+        if (!digipin) {
+          digipin = `DGP-${Math.round(shopLocation.lat * 100)}-${Math.round(shopLocation.lng * 100)}`;
+        }
+        const sAddress = req.body?.shopAddress || req.body?.restaurantAddress || '';
+        const sCategory = req.body?.category || req.body?.cuisine || 'Retail, Supermarket & Groceries';
+
+        const shop = await Shop.create({
+          name: name.trim(),
+          email: email ? email.trim().toLowerCase() : undefined,
+          phone: phone ? phone.trim() : undefined,
+          passwordHash: await hashPassword(password),
+          role: 'shop',
+          isApproved: true,
+          isBlocked: false,
+          shopId,
+          digipin,
+          shopAddress: sAddress.trim(),
+          shopLocation,
+          category: sCategory.trim(),
+          isOpen: true,
+          isOnline: true,
+        });
+
+        return res.status(201).json({
+          message: 'Shop created successfully',
+          user: userResponse(shop as any),
         });
       }
 
@@ -1195,6 +1301,23 @@ const createAdminRouter = () => {
         { new: true, runValidators: true },
       );
       if (!user) {
+        const shopUpdates: Record<string, unknown> = { ...updates };
+        if (req.body.shopAddress !== undefined || req.body.restaurantAddress !== undefined) {
+          shopUpdates.shopAddress = (req.body.shopAddress || req.body.restaurantAddress || '').trim();
+        }
+        if (req.body.category !== undefined || req.body.cuisine !== undefined) {
+          shopUpdates.category = (req.body.category || req.body.cuisine || '').trim();
+        }
+        if (updates.restaurantLocation) {
+          shopUpdates.shopLocation = updates.restaurantLocation;
+        }
+        user = await Shop.findByIdAndUpdate(
+          userId,
+          { $set: shopUpdates },
+          { new: true, runValidators: true },
+        );
+      }
+      if (!user) {
         user = await Rider.findByIdAndUpdate(
           userId,
           { $set: updates },
@@ -1306,7 +1429,7 @@ const createAdminRouter = () => {
     },
   );
 
-  // Approve rider or restaurant
+  // Approve rider or restaurant or shop
   router.post('/users/:userId/approve', async (req: Request, res: Response) => {
     try {
       const userId = String(req.params.userId || '');
@@ -1319,6 +1442,13 @@ const createAdminRouter = () => {
         { $set: { isApproved: true } },
         { new: true },
       );
+      if (!user) {
+        user = await Shop.findByIdAndUpdate(
+          userId,
+          { $set: { isApproved: true } },
+          { new: true },
+        );
+      }
       if (!user) {
         user = await Rider.findByIdAndUpdate(
           userId,
@@ -1361,7 +1491,7 @@ const createAdminRouter = () => {
     }
   });
 
-  // Reject rider or restaurant
+  // Reject rider or restaurant or shop
   router.post('/users/:userId/reject', async (req: Request, res: Response) => {
     try {
       const userId = String(req.params.userId || '');
@@ -1374,6 +1504,13 @@ const createAdminRouter = () => {
         { $set: { isApproved: false } },
         { new: true },
       );
+      if (!user) {
+        user = await Shop.findByIdAndUpdate(
+          userId,
+          { $set: { isApproved: false } },
+          { new: true },
+        );
+      }
       if (!user) {
         user = await Rider.findByIdAndUpdate(
           userId,
@@ -1407,7 +1544,7 @@ const createAdminRouter = () => {
     }
   });
 
-  // Block any rider, restaurant, or customer
+  // Block any rider, restaurant, shop, or customer
   router.post('/users/:userId/block', async (req: Request, res: Response) => {
     try {
       const userId = String(req.params.userId || '');
@@ -1436,6 +1573,13 @@ const createAdminRouter = () => {
         { $set: { isBlocked: true } },
         { new: true },
       );
+      if (!user) {
+        user = await Shop.findByIdAndUpdate(
+          userId,
+          { $set: { isBlocked: true } },
+          { new: true },
+        );
+      }
       if (!user) {
         user = await Rider.findByIdAndUpdate(
           userId,
@@ -1508,6 +1652,13 @@ const createAdminRouter = () => {
         { new: true },
       );
       if (!user) {
+        user = await Shop.findByIdAndUpdate(
+          userId,
+          { $set: { isBlocked: false } },
+          { new: true },
+        );
+      }
+      if (!user) {
         user = await Rider.findByIdAndUpdate(
           userId,
           { $set: { isBlocked: false } },
@@ -1548,7 +1699,7 @@ const createAdminRouter = () => {
     }
   });
 
-  // Delete any partner, customer, or employee account permanently (with cascade menu item deletion for restaurants)
+  // Delete any partner, customer, or employee account permanently (with cascade menu item deletion for restaurants and shops)
   router.delete('/users/:userId', async (req: Request, res: Response) => {
     try {
       const userId = String(req.params.userId || '');
@@ -1581,6 +1732,17 @@ const createAdminRouter = () => {
         deletedName = deletedDoc.name;
         const menuResult = await FoodItem.deleteMany({ restaurantId: deletedDoc._id });
         console.log(`Cascade deleted ${menuResult.deletedCount} menu items for restaurant ${deletedDoc.name} (${deletedDoc._id})`);
+      }
+
+      // 1.5. Try deleting Shop and cascade delete all its associated items
+      if (!deletedDoc) {
+        deletedDoc = await Shop.findByIdAndDelete(userId);
+        if (deletedDoc) {
+          deletedType = 'Shop';
+          deletedName = deletedDoc.name;
+          const menuResult = await FoodItem.deleteMany({ restaurantId: deletedDoc._id });
+          console.log(`Cascade deleted ${menuResult.deletedCount} items for shop ${deletedDoc.name} (${deletedDoc._id})`);
+        }
       }
 
       // 2. Try deleting Rider
@@ -1727,6 +1889,7 @@ const createAdminRouter = () => {
         const allowedPermissions = [
           'dashboard_view',
           'orders_manage',
+          'shops_manage',
           'restaurants_manage',
           'riders_manage',
           'customers_manage',
@@ -1820,6 +1983,7 @@ const createAdminRouter = () => {
         const allowedPermissions = [
           'dashboard_view',
           'orders_manage',
+          'shops_manage',
           'restaurants_manage',
           'riders_manage',
           'customers_manage',

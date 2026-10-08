@@ -4,6 +4,7 @@ import Employee, { UserRole } from '../model/Employee.js';
 import Restaurant from '../model/Restaurant.js';
 import Customer from '../model/Customer.js';
 import Rider from '../model/Rider.js';
+import Shop from '../model/Shop.js';
 
 export interface AuthenticatedRequest extends Request {
 	user?: {
@@ -21,6 +22,7 @@ export interface AuthenticatedRequest extends Request {
 		customerId?: string;
 		subadminId?: string;
 		adminId?: string;
+		shopId?: string;
 	};
 }
 
@@ -48,11 +50,14 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 		let customerId = '';
 		let subadminId = '';
 		let adminId = '';
+		let shopId = '';
 
 		try {
 			let dbUser: any = null;
 			if (uRole === 'restaurant') {
 				dbUser = await Restaurant.findById(uid).select('isBlocked isApproved name role restaurantId');
+			} else if (uRole === 'shop') {
+				dbUser = await Shop.findById(uid).select('isBlocked isApproved name role shopId');
 			} else if (uRole === 'deliveryPartner' || uRole === 'rider') {
 				dbUser = await Rider.findById(uid).select('isBlocked isApproved name role riderId');
 			} else if (uRole === 'customer') {
@@ -63,6 +68,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 
 			if (!dbUser) {
 				dbUser = (await Customer.findById(uid).select('isBlocked isApproved name role customerId'))
+					|| (await Shop.findById(uid).select('isBlocked isApproved name role shopId'))
 					|| (await Rider.findById(uid).select('isBlocked isApproved name role riderId'))
 					|| (await Restaurant.findById(uid).select('isBlocked isApproved name role restaurantId'))
 					|| (await Employee.findById(uid).select('isBlocked isApproved name role permissions adminRoleTitle restaurantId riderId customerId subadminId adminId'));
@@ -74,6 +80,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 				permissions = Array.isArray(dbUser.permissions) ? dbUser.permissions : [];
 				adminRoleTitle = dbUser.adminRoleTitle || '';
 				restaurantId = dbUser.restaurantId || '';
+				shopId = dbUser.shopId || '';
 				riderId = dbUser.riderId || '';
 				customerId = dbUser.customerId || '';
 				subadminId = dbUser.subadminId || '';
@@ -91,6 +98,9 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 		}
 		if (!restaurantId && typeof (payload as any).restaurantId === 'string') {
 			restaurantId = (payload as any).restaurantId;
+		}
+		if (!shopId && typeof (payload as any).shopId === 'string') {
+			shopId = (payload as any).shopId;
 		}
 		if (!riderId && typeof (payload as any).riderId === 'string') {
 			riderId = (payload as any).riderId;
@@ -111,6 +121,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 			permissions,
 			adminRoleTitle,
 			restaurantId,
+			shopId,
 			riderId,
 			customerId,
 			subadminId,

@@ -8,7 +8,7 @@ export const NOTIFICATION_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days (604,800 sec
 
 export interface INotification extends Document {
   userId: string;
-  role: 'customer' | 'restaurant' | 'deliveryPartner' | 'admin' | 'subadmin';
+  role: 'customer' | 'restaurant' | 'shop' | 'deliveryPartner' | 'admin' | 'subadmin';
   title: string;
   message: string;
   type: NotificationType;
@@ -26,7 +26,7 @@ export interface INotificationModel extends Model<INotification> {
 const schema: Schema<INotification, INotificationModel> = new Schema(
   {
     userId: { type: String, required: true, index: true },
-    role: { type: String, enum: ['customer', 'restaurant', 'deliveryPartner', 'admin', 'subadmin'], required: true },
+    role: { type: String, enum: ['customer', 'restaurant', 'shop', 'deliveryPartner', 'admin', 'subadmin'], required: true },
     title: { type: String, required: true, trim: true },
     message: { type: String, required: true, trim: true },
     type: { type: String, enum: NOTIFICATION_TYPES, default: 'service' },

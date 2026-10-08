@@ -22,6 +22,7 @@
         const val = String(r || 'customer').trim().toLowerCase();
         if (['deliverypartner', 'delivery_partner', 'delivery partner', 'rider'].includes(val)) return 'deliveryPartner';
         if (['restaurant', 'restaurent'].includes(val)) return 'restaurant';
+        if (['shop', 'store'].includes(val)) return 'shop';
         if (['admin', 'subadmin'].includes(val)) return val;
         return 'customer';
       };
@@ -601,6 +602,10 @@
               toastType = 'warning';
               actionLabel = '🔔 Open Kitchen Orders';
               onAction = () => switchView('restaurant-orders');
+            } else if (role === 'shop') {
+              toastType = 'warning';
+              actionLabel = '🛍️ Open Shop Orders';
+              onAction = () => switchView('shop-orders');
             } else if (role === 'customer') {
               toastType = 'success';
               actionLabel = '📦 Track My Order';
@@ -677,25 +682,27 @@
       function refreshActiveViewData() {
         if (activeView === 'customer-orders') fetchCustomerOrders();
         if (activeView === 'restaurant-orders') fetchRestaurantOrders();
+        if (activeView === 'shop-orders') fetchShopOrders();
+        if (activeView === 'shop-items') fetchShopItems();
         if (activeView === 'rider-available') fetchAvailableRiderOrders();
         if (activeView === 'rider-active') fetchActiveRiderOrders();
         if (activeView === 'admin-orders') fetchAdminOrders();
       }
 
       // =========================================================================
-      // SIDEBAR LIVE DUTY STATUS (RESTAURANT OPEN/CLOSE & RIDER ONLINE/OFFLINE)
+      // SIDEBAR LIVE DUTY STATUS (RESTAURANT/SHOP OPEN/CLOSE & RIDER ONLINE/OFFLINE)
       // =========================================================================
       let isDutyActive = true;
 
       function initDutyStatusToggle() {
-        if (role !== 'restaurant' && role !== 'deliveryPartner') return;
+        if (role !== 'restaurant' && role !== 'shop' && role !== 'deliveryPartner') return;
 
         const wrapper = document.getElementById('duty-toggle-wrapper');
         if (!wrapper) return;
         wrapper.style.display = 'inline-flex';
 
         // Initial state from stored user
-        if (role === 'restaurant') {
+        if (role === 'restaurant' || role === 'shop') {
           isDutyActive = user.isOpen !== undefined ? Boolean(user.isOpen) : (user.isOnline !== undefined ? Boolean(user.isOnline) : true);
         } else {
           isDutyActive = user.isOnline !== undefined ? Boolean(user.isOnline) : true;
@@ -704,10 +711,10 @@
         renderDutyToggleUI();
 
         // Fetch fresh state from server in background
-        const endpoint = role === 'restaurant' ? '/api/restaurant/status' : '/api/rider/status';
+        const endpoint = role === 'restaurant' ? '/api/restaurant/status' : role === 'shop' ? '/api/shop/status' : '/api/rider/status';
         apiFetch(endpoint)
           .then((res) => {
-            if (role === 'restaurant' && res && res.isOpen !== undefined) {
+            if ((role === 'restaurant' || role === 'shop') && res && res.isOpen !== undefined) {
               isDutyActive = Boolean(res.isOpen);
               user.isOpen = isDutyActive;
               user.isOnline = isDutyActive;
@@ -730,11 +737,11 @@
         btn.classList.toggle('is-closed', !isDutyActive);
         btn.setAttribute('aria-pressed', String(isDutyActive));
 
-        if (role === 'restaurant') {
+        if (role === 'restaurant' || role === 'shop') {
           label.textContent = isDutyActive ? 'Open' : 'Closed';
           btn.title = isDutyActive
-            ? 'Restaurant is OPEN & accepting orders. Click to close restaurant.'
-            : 'Restaurant is CLOSED. Customers cannot order. Click to open restaurant.';
+            ? (role === 'shop' ? 'Shop is OPEN & accepting orders. Click to close shop.' : 'Restaurant is OPEN & accepting orders. Click to close restaurant.')
+            : (role === 'shop' ? 'Shop is CLOSED. Customers cannot order. Click to open shop.' : 'Restaurant is CLOSED. Customers cannot order. Click to open restaurant.');
         } else if (role === 'deliveryPartner') {
           label.textContent = isDutyActive ? 'Online' : 'Offline';
           btn.title = isDutyActive
@@ -750,6 +757,8 @@
 
         if (role === 'restaurant' && !isDutyActive) {
           showStatusBanner('Your restaurant is currently CLOSED. You will not receive customer orders and cannot accept new orders until toggled to OPEN.', 'warning');
+        } else if (role === 'shop' && !isDutyActive) {
+          showStatusBanner('Your shop is currently CLOSED. You will not receive customer orders and cannot accept new orders until toggled to OPEN.', 'warning');
         } else if (role === 'deliveryPartner' && !isDutyActive) {
           showStatusBanner('You are currently OFFLINE. Toggle duty to ONLINE in the sidebar to view and accept delivery orders.', 'warning');
         } else {
@@ -765,8 +774,8 @@
         btn.disabled = true;
 
         try {
-          const endpoint = role === 'restaurant' ? '/api/restaurant/status' : '/api/rider/status';
-          const payload = role === 'restaurant'
+          const endpoint = role === 'restaurant' ? '/api/restaurant/status' : role === 'shop' ? '/api/shop/status' : '/api/rider/status';
+          const payload = (role === 'restaurant' || role === 'shop')
             ? { isOpen: nextState, isOnline: nextState }
             : { isOnline: nextState };
 
@@ -776,7 +785,7 @@
           });
 
           isDutyActive = nextState;
-          if (role === 'restaurant') {
+          if (role === 'restaurant' || role === 'shop') {
             user.isOpen = nextState;
             user.isOnline = nextState;
           } else {
@@ -786,13 +795,13 @@
 
           renderDutyToggleUI();
 
-          const toastTitle = role === 'restaurant'
-            ? (nextState ? 'Restaurant Opened 🟢' : 'Restaurant Closed 🔴')
+          const toastTitle = (role === 'restaurant' || role === 'shop')
+            ? (nextState ? (role === 'shop' ? 'Shop Opened 🟢' : 'Restaurant Opened 🟢') : (role === 'shop' ? 'Shop Closed 🔴' : 'Restaurant Closed 🔴'))
             : (nextState ? 'Rider Online 🟢' : 'Rider Offline 🔴');
 
           const toastMsg = res.message || (
-            role === 'restaurant'
-              ? (nextState ? 'Restaurant is live and ready to accept customer orders.' : 'Restaurant is closed. Customers cannot place new orders.')
+            (role === 'restaurant' || role === 'shop')
+              ? (nextState ? (role === 'shop' ? 'Shop is live and ready to accept customer orders.' : 'Restaurant is live and ready to accept customer orders.') : (role === 'shop' ? 'Shop is closed. Customers cannot place new orders.' : 'Restaurant is closed. Customers cannot place new orders.'))
               : (nextState ? 'Duty enabled. You are now available for incoming delivery orders.' : 'Duty disabled. You will not receive order requests.')
           );
 
@@ -804,6 +813,8 @@
 
           if (role === 'restaurant' && activeView === 'restaurant-orders') {
             fetchRestaurantOrders();
+          } else if (role === 'shop' && activeView === 'shop-orders') {
+            fetchShopOrders();
           } else if (role === 'deliveryPartner' && (activeView === 'rider-available' || activeView === 'rider-active')) {
             fetchAvailableRiderOrders();
           }
@@ -886,12 +897,13 @@
 
         // Fallback to user session data if addr is still missing
         if (!addr && user) {
-          if (role === 'restaurant' && user.restaurantAddress) {
-            const parsed = parseAddressStringToCityAndPincode(user.restaurantAddress);
+          if ((role === 'restaurant' || role === 'shop') && (user.shopAddress || user.restaurantAddress)) {
+            const addrStr = user.shopAddress || user.restaurantAddress;
+            const parsed = parseAddressStringToCityAndPincode(addrStr);
             addr = {
               city: parsed.city,
               postalCode: parsed.postalCode,
-              locality: user.restaurantAddress,
+              locality: addrStr,
               state: 'KA',
             };
           } else {
@@ -908,10 +920,10 @@
         let pincode = (addr?.postalCode || addr?.pincode || '').trim();
         const locality = (addr?.locality || addr?.line1 || addr?.line2 || '').trim();
 
-        // If city is NA or missing, resolve from restaurantAddress or platform default
+        // If city is NA or missing, resolve from shopAddress/restaurantAddress or platform default
         if (!city || city === 'NA') {
-          if (role === 'restaurant' && user?.restaurantAddress) {
-            const parsed = parseAddressStringToCityAndPincode(user.restaurantAddress);
+          if ((role === 'restaurant' || role === 'shop') && (user?.shopAddress || user?.restaurantAddress)) {
+            const parsed = parseAddressStringToCityAndPincode(user.shopAddress || user.restaurantAddress);
             city = parsed.city;
             if (!pincode || pincode === '000') pincode = parsed.postalCode;
           } else {
@@ -946,6 +958,8 @@
           rawId = user.customerId || (user._id || user.id ? `cust-${String(user._id || user.id).slice(-4).toLowerCase()}` : '') || user.userId || user.id || user._id || '';
         } else if (role === 'restaurant') {
           rawId = user.restaurantId || (user._id || user.id ? `rest-${String(user._id || user.id).slice(-4).toLowerCase()}` : '') || user.userId || user.id || user._id || '';
+        } else if (role === 'shop') {
+          rawId = user.shopId || (user._id || user.id ? `shop-${String(user._id || user.id).slice(-4).toLowerCase()}` : '') || user.userId || user.id || user._id || '';
         } else if (role === 'deliveryPartner') {
           rawId = user.riderId || (user._id || user.id ? `ride-${String(user._id || user.id).slice(-4).toLowerCase()}` : '') || user.userId || user.id || user._id || '';
         } else if (role === 'subadmin') {
@@ -1049,7 +1063,7 @@
         // Approval / blocked status verification
         if (user.isBlocked) {
           showStatusBanner('Your account has been restricted by the administrator. Please contact support.', 'danger');
-        } else if ((role === 'restaurant' || role === 'deliveryPartner') && user.isApproved === false) {
+        } else if ((role === 'restaurant' || role === 'shop' || role === 'deliveryPartner') && user.isApproved === false) {
           showStatusBanner('Your account is awaiting Admin approval. Some operations may be limited until verified.', 'warning');
         }
 
@@ -1088,6 +1102,7 @@
         const adminItems = [
           { id: 'overview', icon: '📊', label: 'Dashboard & KPIs' },
           ...(hasPerm('orders_manage') ? [{ id: 'admin-orders', icon: '📦', label: 'Platform Orders' }] : []),
+          ...(hasPerm('shops_manage') || hasPerm('restaurants_manage') ? [{ id: 'admin-shops', icon: '🏬', label: 'Shops' }] : []),
           ...(hasPerm('restaurants_manage') ? [{ id: 'admin-restaurants', icon: '🏪', label: 'Restaurants' }] : []),
           ...(hasPerm('riders_manage') ? [{ id: 'admin-riders', icon: '🚴', label: 'Riders' }] : []),
           ...(hasPerm('customers_manage') ? [{ id: 'admin-customers', icon: '👥', label: 'Customers' }] : []),
@@ -1109,6 +1124,12 @@
             { id: 'restaurant-orders', icon: '🔔', label: 'Kitchen Orders' },
             { id: 'restaurant-menu', icon: '📋', label: 'Menu Management' },
             { id: 'settings', icon: '⚙️', label: 'Restaurant Profile' },
+          ],
+          shop: [
+            { id: 'overview', icon: '🏠', label: 'Overview' },
+            { id: 'shop-orders', icon: '🛍️', label: 'Shop Orders' },
+            { id: 'shop-items', icon: '📋', label: 'Item Management' },
+            { id: 'settings', icon: '⚙️', label: 'Shop Profile' },
           ],
           deliveryPartner: [
             { id: 'overview', icon: '🏠', label: 'Shift Overview' },
@@ -1172,8 +1193,35 @@
       }
 
       // Switch View
-      function switchView(viewId) {
-        if (activeView === viewId) return;
+      function switchView(viewId, filter = null) {
+        if (viewId === 'restaurant-orders') {
+          currentRestaurantOrderFilter = filter || 'all';
+          if (typeof updateRestaurantFilterButtons === 'function') {
+            updateRestaurantFilterButtons();
+          }
+        } else if (viewId === 'shop-orders') {
+          currentShopOrderFilter = filter || 'all';
+          if (typeof updateShopFilterButtons === 'function') {
+            updateShopFilterButtons();
+          }
+        }
+
+        if (activeView === viewId) {
+          if (viewId === 'restaurant-orders') {
+            if (cachedRestaurantOrders && cachedRestaurantOrders.length) {
+              renderRestaurantOrdersTable(cachedRestaurantOrders);
+            } else {
+              fetchRestaurantOrders();
+            }
+          } else if (viewId === 'shop-orders') {
+            if (cachedShopOrders && cachedShopOrders.length) {
+              renderShopOrdersTable(cachedShopOrders);
+            } else {
+              fetchShopOrders();
+            }
+          }
+          return;
+        }
         activeView = viewId;
 
         // Nav active state
@@ -1201,6 +1249,10 @@
           fetchRestaurantOrders();
         } else if (viewId === 'restaurant-menu') {
           fetchRestaurantMenu();
+        } else if (viewId === 'shop-orders') {
+          fetchShopOrders();
+        } else if (viewId === 'shop-items') {
+          fetchShopItems();
         } else if (viewId === 'rider-available') {
           fetchAvailableRiderOrders();
         } else if (viewId === 'rider-active') {
@@ -1209,6 +1261,8 @@
           fetchRiderHistory();
         } else if (viewId === 'admin-orders') {
           fetchAdminOrders();
+        } else if (viewId === 'admin-shops') {
+          fetchAdminShops();
         } else if (viewId === 'admin-restaurants') {
           fetchAdminRestaurants();
         } else if (viewId === 'admin-riders') {
@@ -1318,12 +1372,42 @@
         fetchCustomerAddresses();
       }
 
+      function handleRestaurantNewIncomingCardClick() {
+        switchView('restaurant-orders', 'incoming');
+      }
+
+      function handleRestaurantMenuItemsCardClick() {
+        switchView('restaurant-menu');
+      }
+
+      function handleRestaurantCookingCardClick() {
+        switchView('restaurant-orders', 'cooking');
+      }
+
+      function handleShopNewIncomingCardClick() {
+        switchView('shop-orders', 'incoming');
+      }
+
+      function handleShopPackingCardClick() {
+        switchView('shop-orders', 'cooking');
+      }
+
+      function handleShopItemsCardClick() {
+        switchView('shop-items');
+      }
+
       window.showAutoDismissNotice = showAutoDismissNotice;
       window.closeNoticeModal = closeNoticeModal;
       window.handleNoticeModalBackdropClick = handleNoticeModalBackdropClick;
       window.handleActiveOrdersCardClick = handleActiveOrdersCardClick;
       window.handleTotalPlacedCardClick = handleTotalPlacedCardClick;
       window.handleSavedAddressesCardClick = handleSavedAddressesCardClick;
+      window.handleRestaurantNewIncomingCardClick = handleRestaurantNewIncomingCardClick;
+      window.handleRestaurantCookingCardClick = handleRestaurantCookingCardClick;
+      window.handleRestaurantMenuItemsCardClick = handleRestaurantMenuItemsCardClick;
+      window.handleShopNewIncomingCardClick = handleShopNewIncomingCardClick;
+      window.handleShopPackingCardClick = handleShopPackingCardClick;
+      window.handleShopItemsCardClick = handleShopItemsCardClick;
 
       // =========================================================================
       // OVERVIEW STATS & ACTIVITY
@@ -1388,9 +1472,58 @@
             const revenue = orders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
 
             statsEl.innerHTML = `
-              <div class="stat-card"><span class="stat-label">New Incoming</span><div class="stat-value" style="color:var(--tomato);">${newOrders}</div><span class="stat-note">Needs acceptance</span></div>
-              <div class="stat-card"><span class="stat-label">On Stove / Cooking</span><div class="stat-value">${preparingOrders}</div><span class="stat-note">Kitchen active</span></div>
-              <div class="stat-card"><span class="stat-label">Menu Items</span><div class="stat-value">${menuData.menu?.length || 0}</div><span class="stat-note">Dishes available</span></div>
+              <div class="stat-card clickable" onclick="handleRestaurantNewIncomingCardClick()" title="Click to view new incoming orders (Placed)">
+                <span class="stat-label">New Incoming</span>
+                <div class="stat-value" style="color:var(--tomato);">${newOrders}</div>
+                <span class="stat-note">Needs acceptance ↗</span>
+              </div>
+              <div class="stat-card clickable" onclick="handleRestaurantCookingCardClick()" title="Click to view orders on stove / cooking (Accepted, Preparing, Out for Delivery)">
+                <span class="stat-label">On Stove / Cooking</span>
+                <div class="stat-value">${preparingOrders}</div>
+                <span class="stat-note">Kitchen active ↗</span>
+              </div>
+              <div class="stat-card clickable" onclick="handleRestaurantMenuItemsCardClick()" title="Click to open Menu Management">
+                <span class="stat-label">Menu Items</span>
+                <div class="stat-value">${menuData.menu?.length || 0}</div>
+                <span class="stat-note">Dishes available ↗</span>
+              </div>
+              <div class="stat-card"><span class="stat-label">Sales Volume</span><div class="stat-value">₹${revenue.toFixed(0)}</div><span class="stat-note">Total generated</span></div>
+            `;
+          } catch (e) {
+            console.error(e);
+          }
+        } else if (role === 'shop') {
+          kickerEl.textContent = 'Shop Store Manager';
+          copyEl.textContent = 'Manage your shop inventory, accept incoming orders, pack items, and generate official bills.';
+          try {
+            const [ordersData, itemsData] = await Promise.all([
+              apiFetch('/api/shop/orders').catch(() => ({ orders: [] })),
+              apiFetch('/api/shop/items').catch(() => ({ items: [] })),
+            ]);
+            const orders = ordersData.orders || [];
+            const newOrders = orders.filter((o) => o.status === 'placed').length;
+            const packingOrders = orders.filter((o) => {
+              const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+              return st === 'accepted' || st === 'preparing' || st === 'out for delivery';
+            }).length;
+            const revenue = orders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+
+            statsEl.innerHTML = `
+              <div class="stat-card clickable" onclick="handleShopNewIncomingCardClick()" title="Click to view new incoming orders (Placed)">
+                <span class="stat-label">New Incoming</span>
+                <div class="stat-value" style="color:var(--tomato);">${newOrders}</div>
+                <span class="stat-note">Needs acceptance ↗</span>
+              </div>
+              <div class="stat-card clickable" onclick="handleShopPackingCardClick()" title="Click to view orders in packing / processing">
+                <span class="stat-label">In Packing / Processing</span>
+                <div class="stat-value">${packingOrders}</div>
+                <span class="stat-note">Store active ↗</span>
+              </div>
+              <div class="stat-card clickable" onclick="handleShopItemsCardClick()" title="Click to open Item Management">
+                <span class="stat-label">Shop Items</span>
+                <div class="stat-value">${itemsData.items?.length || 0}</div>
+                <span class="stat-note">Items in catalog ↗</span>
+              </div>
               <div class="stat-card"><span class="stat-label">Sales Volume</span><div class="stat-value">₹${revenue.toFixed(0)}</div><span class="stat-note">Total generated</span></div>
             `;
           } catch (e) {
@@ -1427,9 +1560,10 @@
             const todayRev = kpis.todayRevenue != null ? kpis.todayRevenue : kpis.totalRevenue;
             statsEl.innerHTML = `
               <div class="stat-card"><span class="stat-label">Platform GMV (Today)</span><div class="stat-value" style="color:var(--green);">₹${Number(todayRev || 0).toFixed(0)}</div><span class="stat-note">Lifetime: ₹${Number(kpis.totalRevenue || 0).toFixed(0)}</span></div>
-              <div class="stat-card"><span class="stat-label">Total Orders</span><div class="stat-value">${kpis.totalOrders || 0}</div><span class="stat-note">${kpis.activeOrders || 0} in progress</span></div>
-              <div class="stat-card"><span class="stat-label">Restaurants</span><div class="stat-value">${kpis.totalRestaurants || 0}</div><span class="stat-note">${kpis.pendingRestaurants || 0} pending review</span></div>
-              <div class="stat-card"><span class="stat-label">Delivery Fleet</span><div class="stat-value">${kpis.totalRiders || 0}</div><span class="stat-note">${kpis.pendingRiders || 0} pending review</span></div>
+              <div class="stat-card clickable" onclick="switchView('admin-orders')"><span class="stat-label">Total Orders</span><div class="stat-value">${kpis.totalOrders || 0}</div><span class="stat-note">${kpis.activeOrders || 0} in progress ↗</span></div>
+              <div class="stat-card clickable" onclick="switchView('admin-shops')"><span class="stat-label">Shops</span><div class="stat-value">${kpis.totalShops || 0}</div><span class="stat-note">${kpis.pendingShops || 0} pending review ↗</span></div>
+              <div class="stat-card clickable" onclick="switchView('admin-restaurants')"><span class="stat-label">Restaurants</span><div class="stat-value">${kpis.totalRestaurants || 0}</div><span class="stat-note">${kpis.pendingRestaurants || 0} pending review ↗</span></div>
+              <div class="stat-card clickable" onclick="switchView('admin-riders')"><span class="stat-label">Delivery Fleet</span><div class="stat-value">${kpis.totalRiders || 0}</div><span class="stat-note">${kpis.pendingRiders || 0} pending review ↗</span></div>
             `;
           } catch (e) {
             console.error(e);
@@ -2885,6 +3019,142 @@
       // =========================================================================
       // RESTAURANT: KITCHEN ORDERS & BILL GENERATION
       // =========================================================================
+      // RESTAURANT: KITCHEN ORDERS & BILL GENERATION
+      // =========================================================================
+      let currentRestaurantOrderFilter = 'all'; // 'all' | 'cooking' | 'incoming'
+      let cachedRestaurantOrders = [];
+
+      function setRestaurantOrdersFilter(filter) {
+        currentRestaurantOrderFilter = filter;
+        updateRestaurantFilterButtons();
+        if (cachedRestaurantOrders && cachedRestaurantOrders.length) {
+          renderRestaurantOrdersTable(cachedRestaurantOrders);
+        } else {
+          fetchRestaurantOrders();
+        }
+      }
+      window.setRestaurantOrdersFilter = setRestaurantOrdersFilter;
+
+      function updateRestaurantFilterButtons() {
+        const allBtn = document.getElementById('rest-filter-all');
+        const cookingBtn = document.getElementById('rest-filter-cooking');
+        const incomingBtn = document.getElementById('rest-filter-incoming');
+        const indicator = document.getElementById('rest-filter-indicator');
+
+        if (allBtn) allBtn.classList.toggle('active', currentRestaurantOrderFilter === 'all');
+        if (cookingBtn) cookingBtn.classList.toggle('active', currentRestaurantOrderFilter === 'cooking');
+        if (incomingBtn) incomingBtn.classList.toggle('active', currentRestaurantOrderFilter === 'incoming');
+
+        if (indicator) {
+          if (currentRestaurantOrderFilter === 'cooking') {
+            indicator.style.display = 'inline-block';
+            indicator.innerHTML = 'Filtered by: <strong>Accepted, Preparing, Out for Delivery</strong> <button class="btn btn-xs btn-outline" style="margin-left:0.4rem; padding:0.15rem 0.5rem; font-size:0.75rem;" onclick="setRestaurantOrdersFilter(\'all\')">Clear</button>';
+          } else if (currentRestaurantOrderFilter === 'incoming') {
+            indicator.style.display = 'inline-block';
+            indicator.innerHTML = 'Filtered by: <strong>Placed</strong> <button class="btn btn-xs btn-outline" style="margin-left:0.4rem; padding:0.15rem 0.5rem; font-size:0.75rem;" onclick="setRestaurantOrdersFilter(\'all\')">Clear</button>';
+          } else {
+            indicator.style.display = 'none';
+          }
+        }
+      }
+      window.updateRestaurantFilterButtons = updateRestaurantFilterButtons;
+
+      function renderRestaurantOrdersTable(orders) {
+        const container = document.getElementById('restaurant-orders-table');
+        if (!container) return;
+
+        updateRestaurantFilterButtons();
+
+        if (!orders.length) {
+          container.innerHTML = '<p style="color:var(--muted); padding:1rem 0;">No orders currently placed for your restaurant.</p>';
+          return;
+        }
+
+        let displayOrders = orders;
+        if (currentRestaurantOrderFilter === 'cooking') {
+          displayOrders = orders.filter((o) => {
+            const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+            return st === 'accepted' || st === 'preparing' || st === 'out for delivery';
+          });
+        } else if (currentRestaurantOrderFilter === 'incoming') {
+          displayOrders = orders.filter((o) => {
+            const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+            return st === 'placed';
+          });
+        }
+
+        if (!displayOrders.length) {
+          const emptyMsg = currentRestaurantOrderFilter === 'incoming'
+            ? 'No incoming orders with status "placed" found.'
+            : currentRestaurantOrderFilter === 'cooking'
+            ? 'No orders with status "accepted, preparing or out for delivery" found.'
+            : 'No orders found for the selected filter.';
+          const emptyIcon = currentRestaurantOrderFilter === 'incoming' ? '🔔' : '🍳';
+          container.innerHTML = `
+            <div style="padding:2rem 1rem; text-align:center; color:var(--muted); background:#fcfcfc; border-radius:8px; border:1px dashed var(--line); margin-top:0.5rem;">
+              <div style="font-size:2rem; margin-bottom:0.5rem;">${emptyIcon}</div>
+              <p style="margin:0 0 0.75rem 0; font-weight:600; color:var(--ink);">${emptyMsg}</p>
+              <button class="btn btn-primary btn-sm" onclick="setRestaurantOrdersFilter('all')">View All Kitchen Orders (${orders.length})</button>
+            </div>
+          `;
+          return;
+        }
+
+        container.innerHTML = `
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Order #</th>
+                  <th>Customer</th>
+                  <th>Dishes</th>
+                  <th>Total</th>
+                  <th>Payment</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${displayOrders.map((o) => `
+                  <tr>
+                    <td><strong>#${o.orderNumber}</strong><br><small style="color:var(--muted);">${new Date(o.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small></td>
+                    <td>
+                      <strong>${escapeHtml(o.customerName || 'Customer')}</strong><br>
+                      <small style="color:var(--muted);">${escapeHtml(o.deliveryAddress?.line1 || '')}, ${escapeHtml(o.deliveryAddress?.city || '')}</small>
+                      ${o.riderName ? `<br><small style="color:#0369a1; font-weight:600;">🚴 Rider: ${escapeHtml(o.riderName)}</small>` : ''}
+                    </td>
+                    <td>
+                      ${(o.items || []).map((i) => `<div>${escapeHtml(i.name)} <span style="color:var(--muted); font-size:0.75rem;">x${i.quantity}</span></div>`).join('')}
+                    </td>
+                    <td><strong style="color:var(--green);">₹${Number(o.totalAmount).toFixed(2)}</strong></td>
+                    <td><span class="badge ${o.paymentStatus === 'paid' ? 'badge-delivered' : 'badge-placed'}">${o.paymentMethod?.toUpperCase()} (${o.paymentStatus})</span></td>
+                    <td><span class="badge badge-${o.status}">${o.status.replace(/_/g, ' ')}</span></td>
+                    <td>
+                      <div style="display:flex; flex-direction:column; gap:0.35rem;">
+                        ${o.status === 'placed' ? `
+                          <button class="btn btn-success btn-sm" onclick="updateOrderStatus('${o._id}', 'accepted')">✓ Accept Order</button>
+                          <button class="btn btn-danger btn-sm" onclick="updateOrderStatus('${o._id}', 'cancelled')">✕ Decline</button>
+                        ` : ''}
+                        ${o.status === 'accepted' ? `
+                          <button class="btn btn-primary btn-sm" onclick="updateOrderStatus('${o._id}', 'preparing')">🍳 Mark Preparing</button>
+                        ` : ''}
+                        ${o.status === 'preparing' ? `
+                          <button class="btn btn-success btn-sm" onclick="updateOrderStatus('${o._id}', 'ready_for_pickup')">📦 Ready for Pickup</button>
+                        ` : ''}
+                        ${o.riderName ? `
+                          <button class="btn btn-outline btn-sm" style="background:#f0fdf4; border-color:#86efac; color:#15803d; font-weight:600;" onclick="openOrderLiveTrackingModal('${o._id}', 'restaurant')">📍 Track Rider</button>
+                        ` : ''}
+                        <button class="btn btn-outline btn-sm" onclick="viewOrderBill('${o._id}')">🧾 Generate Bill</button>
+                      </div>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+      }
+
       async function fetchRestaurantOrders() {
         const container = document.getElementById('restaurant-orders-table');
         if (!container) return;
@@ -2898,66 +3168,8 @@
 
         try {
           const data = await apiFetch('/api/restaurant/orders');
-          const orders = data.orders || [];
-
-          if (!orders.length) {
-            container.innerHTML = '<p style="color:var(--muted); padding:1rem 0;">No orders currently placed for your restaurant.</p>';
-            return;
-          }
-
-          container.innerHTML = `
-            <div class="table-wrapper">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Order #</th>
-                    <th>Customer</th>
-                    <th>Dishes</th>
-                    <th>Total</th>
-                    <th>Payment</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${orders.map((o) => `
-                    <tr>
-                      <td><strong>#${o.orderNumber}</strong><br><small style="color:var(--muted);">${new Date(o.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small></td>
-                      <td>
-                        <strong>${escapeHtml(o.customerName || 'Customer')}</strong><br>
-                        <small style="color:var(--muted);">${escapeHtml(o.deliveryAddress?.line1 || '')}, ${escapeHtml(o.deliveryAddress?.city || '')}</small>
-                        ${o.riderName ? `<br><small style="color:#0369a1; font-weight:600;">🚴 Rider: ${escapeHtml(o.riderName)}</small>` : ''}
-                      </td>
-                      <td>
-                        ${(o.items || []).map((i) => `<div>${escapeHtml(i.name)} <span style="color:var(--muted); font-size:0.75rem;">x${i.quantity}</span></div>`).join('')}
-                      </td>
-                      <td><strong style="color:var(--green);">₹${Number(o.totalAmount).toFixed(2)}</strong></td>
-                      <td><span class="badge ${o.paymentStatus === 'paid' ? 'badge-delivered' : 'badge-placed'}">${o.paymentMethod?.toUpperCase()} (${o.paymentStatus})</span></td>
-                      <td><span class="badge badge-${o.status}">${o.status.replace(/_/g, ' ')}</span></td>
-                      <td>
-                        <div style="display:flex; flex-direction:column; gap:0.35rem;">
-                          ${o.status === 'placed' ? `
-                            <button class="btn btn-success btn-sm" onclick="updateOrderStatus('${o._id}', 'accepted')">✓ Accept Order</button>
-                            <button class="btn btn-danger btn-sm" onclick="updateOrderStatus('${o._id}', 'cancelled')">✕ Decline</button>
-                          ` : ''}
-                          ${o.status === 'accepted' ? `
-                            <button class="btn btn-primary btn-sm" onclick="updateOrderStatus('${o._id}', 'preparing')">🍳 Mark Preparing</button>
-                          ` : ''}
-                          ${o.status === 'preparing' ? `
-                            <button class="btn btn-success btn-sm" onclick="updateOrderStatus('${o._id}', 'ready_for_pickup')">📦 Ready for Pickup</button>
-                          ` : ''}
-                          ${o.riderName ? `
-                            <button class="btn btn-outline btn-sm" style="background:#f0fdf4; border-color:#86efac; color:#15803d; font-weight:600;" onclick="openOrderLiveTrackingModal('${o._id}', 'restaurant')">📍 Track Rider</button>
-                          ` : ''}
-                          <button class="btn btn-outline btn-sm" onclick="viewOrderBill('${o._id}')">🧾 Generate Bill</button>
-                        </div>
-                      </td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-            </div>
-          `;
+          cachedRestaurantOrders = data.orders || [];
+          renderRestaurantOrdersTable(cachedRestaurantOrders);
         } catch (e) {
           if (!hasExisting) {
             container.innerHTML = `<p style="color:var(--tomato-dark); padding:1rem 0;">${e.message}</p>`;
@@ -2980,6 +3192,403 @@
           alert(`Status Update Failed: ${e.message}`);
         }
       }
+
+      // =========================================================================
+      // SHOP: ORDERS, PACKING & BILL GENERATION
+      // =========================================================================
+      let currentShopOrderFilter = 'all'; // 'all' | 'cooking' | 'incoming'
+      let cachedShopOrders = [];
+
+      function setShopOrdersFilter(filter) {
+        currentShopOrderFilter = filter;
+        updateShopFilterButtons();
+        if (cachedShopOrders && cachedShopOrders.length) {
+          renderShopOrdersTable(cachedShopOrders);
+        } else {
+          fetchShopOrders();
+        }
+      }
+      window.setShopOrdersFilter = setShopOrdersFilter;
+
+      function updateShopFilterButtons() {
+        const allBtn = document.getElementById('shop-filter-all');
+        const cookingBtn = document.getElementById('shop-filter-cooking');
+        const incomingBtn = document.getElementById('shop-filter-incoming');
+        const indicator = document.getElementById('shop-filter-indicator');
+
+        if (allBtn) allBtn.classList.toggle('active', currentShopOrderFilter === 'all');
+        if (cookingBtn) cookingBtn.classList.toggle('active', currentShopOrderFilter === 'cooking');
+        if (incomingBtn) incomingBtn.classList.toggle('active', currentShopOrderFilter === 'incoming');
+
+        if (indicator) {
+          if (currentShopOrderFilter === 'cooking') {
+            indicator.style.display = 'inline-block';
+            indicator.innerHTML = 'Filtered by: <strong>Accepted, Preparing / Packing, Out for Delivery</strong> <button class="btn btn-xs btn-outline" style="margin-left:0.4rem; padding:0.15rem 0.5rem; font-size:0.75rem;" onclick="setShopOrdersFilter(\'all\')">Clear</button>';
+          } else if (currentShopOrderFilter === 'incoming') {
+            indicator.style.display = 'inline-block';
+            indicator.innerHTML = 'Filtered by: <strong>Placed</strong> <button class="btn btn-xs btn-outline" style="margin-left:0.4rem; padding:0.15rem 0.5rem; font-size:0.75rem;" onclick="setShopOrdersFilter(\'all\')">Clear</button>';
+          } else {
+            indicator.style.display = 'none';
+          }
+        }
+      }
+      window.updateShopFilterButtons = updateShopFilterButtons;
+
+      function renderShopOrdersTable(orders) {
+        const container = document.getElementById('shop-orders-table');
+        if (!container) return;
+
+        updateShopFilterButtons();
+
+        if (!orders.length) {
+          container.innerHTML = '<p style="color:var(--muted); padding:1rem 0;">No shop orders currently placed for your shop.</p>';
+          return;
+        }
+
+        let displayOrders = orders;
+        if (currentShopOrderFilter === 'cooking') {
+          displayOrders = orders.filter((o) => {
+            const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+            return st === 'accepted' || st === 'preparing' || st === 'out for delivery';
+          });
+        } else if (currentShopOrderFilter === 'incoming') {
+          displayOrders = orders.filter((o) => {
+            const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+            return st === 'placed';
+          });
+        }
+
+        if (!displayOrders.length) {
+          const emptyMsg = currentShopOrderFilter === 'incoming'
+            ? 'No incoming shop orders with status "placed" found.'
+            : currentShopOrderFilter === 'cooking'
+            ? 'No shop orders with status "accepted, preparing or out for delivery" found.'
+            : 'No shop orders found for the selected filter.';
+          const emptyIcon = currentShopOrderFilter === 'incoming' ? '🔔' : '📦';
+          container.innerHTML = `
+            <div style="padding:2rem 1rem; text-align:center; color:var(--muted); background:#fcfcfc; border-radius:8px; border:1px dashed var(--line); margin-top:0.5rem;">
+              <div style="font-size:2rem; margin-bottom:0.5rem;">${emptyIcon}</div>
+              <p style="margin:0 0 0.75rem 0; font-weight:600; color:var(--ink);">${emptyMsg}</p>
+              <button class="btn btn-primary btn-sm" onclick="setShopOrdersFilter('all')">View All Shop Orders (${orders.length})</button>
+            </div>
+          `;
+          return;
+        }
+
+        container.innerHTML = `
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Order #</th>
+                  <th>Customer</th>
+                  <th>Products / Items</th>
+                  <th>Total</th>
+                  <th>Payment</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${displayOrders.map((o) => `
+                  <tr>
+                    <td><strong>#${o.orderNumber}</strong><br><small style="color:var(--muted);">${new Date(o.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small></td>
+                    <td>
+                      <strong>${escapeHtml(o.customerName || 'Customer')}</strong><br>
+                      <small style="color:var(--muted);">${escapeHtml(o.deliveryAddress?.line1 || '')}, ${escapeHtml(o.deliveryAddress?.city || '')}</small>
+                      ${o.riderName ? `<br><small style="color:#0369a1; font-weight:600;">🚴 Rider: ${escapeHtml(o.riderName)}</small>` : ''}
+                    </td>
+                    <td>
+                      ${(o.items || []).map((i) => `<div>${escapeHtml(i.name)} <span style="color:var(--muted); font-size:0.75rem;">x${i.quantity}</span></div>`).join('')}
+                    </td>
+                    <td><strong style="color:var(--green);">₹${Number(o.totalAmount).toFixed(2)}</strong></td>
+                    <td><span class="badge ${o.paymentStatus === 'paid' ? 'badge-delivered' : 'badge-placed'}">${o.paymentMethod?.toUpperCase()} (${o.paymentStatus})</span></td>
+                    <td><span class="badge badge-${o.status}">${o.status.replace(/_/g, ' ')}</span></td>
+                    <td>
+                      <div style="display:flex; flex-direction:column; gap:0.35rem;">
+                        ${o.status === 'placed' ? `
+                          <button class="btn btn-success btn-sm" onclick="updateShopOrderStatus('${o._id}', 'accepted')">✓ Accept Order</button>
+                          <button class="btn btn-danger btn-sm" onclick="updateShopOrderStatus('${o._id}', 'cancelled')">✕ Decline</button>
+                        ` : ''}
+                        ${o.status === 'accepted' ? `
+                          <button class="btn btn-primary btn-sm" onclick="updateShopOrderStatus('${o._id}', 'preparing')">📦 Mark Packing</button>
+                        ` : ''}
+                        ${o.status === 'preparing' ? `
+                          <button class="btn btn-success btn-sm" onclick="updateShopOrderStatus('${o._id}', 'ready_for_pickup')">✅ Ready for Pickup</button>
+                        ` : ''}
+                        ${o.riderName ? `
+                          <button class="btn btn-outline btn-sm" style="background:#f0fdf4; border-color:#86efac; color:#15803d; font-weight:600;" onclick="openOrderLiveTrackingModal('${o._id}', 'shop')">📍 Track Rider</button>
+                        ` : ''}
+                        <button class="btn btn-outline btn-sm" onclick="viewShopOrderBill('${o._id}')">🧾 Generate Bill</button>
+                      </div>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+      }
+      window.renderShopOrdersTable = renderShopOrdersTable;
+
+      async function fetchShopOrders() {
+        const container = document.getElementById('shop-orders-table');
+        if (!container) return;
+        const hasExisting = container.children.length > 0 && !container.querySelector('.skeleton-shimmer');
+        if (!hasExisting) {
+          container.innerHTML = renderTableSkeleton('shop orders');
+        } else {
+          container.style.opacity = '0.75';
+          container.style.transition = 'opacity 0.15s ease';
+        }
+
+        try {
+          const data = await apiFetch('/api/shop/orders');
+          cachedShopOrders = data.orders || [];
+          renderShopOrdersTable(cachedShopOrders);
+        } catch (e) {
+          if (!hasExisting) {
+            container.innerHTML = `<p style="color:var(--tomato-dark); padding:1rem 0;">${e.message}</p>`;
+          } else {
+            console.error('Fetch shop orders error:', e);
+          }
+        } finally {
+          container.style.opacity = '1';
+        }
+      }
+      window.fetchShopOrders = fetchShopOrders;
+
+      async function updateShopOrderStatus(orderId, nextStatus) {
+        try {
+          await apiFetch(`/api/shop/orders/${orderId}/status`, {
+            method: 'PUT',
+            body: JSON.stringify({ status: nextStatus }),
+          });
+          fetchShopOrders();
+        } catch (e) {
+          alert(`Shop Status Update Failed: ${e.message}`);
+        }
+      }
+      window.updateShopOrderStatus = updateShopOrderStatus;
+
+      async function viewShopOrderBill(orderId) {
+        try {
+          const data = await apiFetch(`/api/shop/orders/${orderId}/bill`);
+          const bill = data.bill;
+
+          const printArea = document.getElementById('bill-print-area');
+          printArea.innerHTML = `
+            <div class="bill-container">
+              <div class="bill-head">
+                <h2>${escapeHtml(bill.shop?.name || bill.restaurant?.name || 'Shop Partner')}</h2>
+                <div style="font-size:0.8rem;">${escapeHtml(bill.shop?.address || bill.restaurant?.address || '')}</div>
+                <div style="font-size:0.75rem;">Phone: ${escapeHtml(bill.shop?.phone || bill.restaurant?.phone || '')} | GSTIN: ${escapeHtml(bill.shop?.gstin || bill.restaurant?.gstin || '29AAAAA0000A1Z5')}</div>
+                <div style="margin-top:0.6rem; font-weight:700; font-size:1.1rem; letter-spacing:0.1em;">RETAIL SHOP TAX INVOICE</div>
+              </div>
+
+              <div class="bill-details">
+                <div>
+                  <div><strong>Invoice #:</strong> ${bill.invoiceNumber}</div>
+                  <div><strong>Order #:</strong> #${bill.orderNumber}</div>
+                  <div><strong>Date:</strong> ${new Date(bill.date).toLocaleString()}</div>
+                </div>
+                <div style="text-align:right;">
+                  <div><strong>Billed To:</strong> ${escapeHtml(bill.customer.name)}</div>
+                  <div><strong>Contact:</strong> ${escapeHtml(bill.customer.phone || 'N/A')}</div>
+                  <div><strong>Address:</strong> ${escapeHtml(bill.customer.address?.line1 || '')}, ${escapeHtml(bill.customer.address?.city || '')}</div>
+                </div>
+              </div>
+
+              <table class="bill-table">
+                <thead>
+                  <tr>
+                    <th>Item Description</th>
+                    <th style="text-align:center;">Qty</th>
+                    <th style="text-align:right;">Rate</th>
+                    <th style="text-align:right;">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${(bill.items || []).map((i) => `
+                    <tr>
+                      <td>${escapeHtml(i.name)}</td>
+                      <td style="text-align:center;">${i.quantity}</td>
+                      <td style="text-align:right;">₹${Number(i.price).toFixed(2)}</td>
+                      <td style="text-align:right;">₹${Number(i.totalPrice || i.price * i.quantity).toFixed(2)}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+
+              <div class="bill-totals">
+                <div><span>Subtotal:</span> <strong>₹${Number(bill.subtotal).toFixed(2)}</strong></div>
+                <div><span>CGST (2.5%):</span> <strong>₹${Number(bill.cgst).toFixed(2)}</strong></div>
+                <div><span>SGST (2.5%):</span> <strong>₹${Number(bill.sgst).toFixed(2)}</strong></div>
+                <div><span>Delivery & Packaging:</span> <strong>₹${Number(bill.deliveryFee).toFixed(2)}</strong></div>
+                <div style="border-top:1px solid #111; margin-top:0.4rem; padding-top:0.4rem; font-size:1.15rem;">
+                  <span>Grand Total:</span> <strong style="color:var(--green);">₹${Number(bill.totalAmount).toFixed(2)}</strong>
+                </div>
+              </div>
+
+              <div style="margin-top:1rem; padding:0.6rem; background:#f4f4f4; border-radius:6px; font-size:0.8rem; display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                  Payment Method: <strong>${(bill.paymentMethod || 'cod').toUpperCase()}</strong> (${bill.paymentStatus})
+                </div>
+                <div>Status: <span class="badge badge-${bill.orderStatus}">${(bill.orderStatus || '').replace(/_/g, ' ')}</span></div>
+              </div>
+
+              <div class="bill-footer">
+                Thank you for shopping with ${escapeHtml(bill.shop?.name || bill.restaurant?.name || 'Shop Partner')} via Tomato!<br />
+                This is a computer-generated tax invoice.
+              </div>
+            </div>
+          `;
+
+          openModal('bill-modal');
+        } catch (e) {
+          alert(`Shop Bill Generation Failed: ${e.message}`);
+        }
+      }
+      window.viewShopOrderBill = viewShopOrderBill;
+
+      // =========================================================================
+      // SHOP: INVENTORY & ITEM MANAGEMENT
+      // =========================================================================
+      async function fetchShopItems() {
+        const container = document.getElementById('shop-items-table');
+        if (!container) return;
+        const hasExisting = container.children.length > 0 && !container.querySelector('.skeleton-shimmer');
+        if (!hasExisting) {
+          container.innerHTML = renderTableSkeleton('shop items');
+        } else {
+          container.style.opacity = '0.75';
+          container.style.transition = 'opacity 0.15s ease';
+        }
+
+        try {
+          const data = await apiFetch('/api/shop/items');
+          const items = data.items || [];
+
+          if (!items.length) {
+            container.innerHTML = '<p style="color:var(--muted); padding:1rem 0;">No items added to shop inventory yet. Click "+ Add New Shop Item" above.</p>';
+            return;
+          }
+
+          container.innerHTML = `
+            <div class="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Product / Item Name</th>
+                    <th>Category</th>
+                    <th>Unit / Pack</th>
+                    <th>Price</th>
+                    <th>Stock in Hand</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${items.map((it) => `
+                    <tr>
+                      <td>
+                        <strong>${escapeHtml(it.name)}</strong>
+                        ${it.description ? `<br><small style="color:var(--muted);">${escapeHtml(it.description)}</small>` : ''}
+                      </td>
+                      <td>${escapeHtml(it.category || 'General')}</td>
+                      <td>${escapeHtml(it.unit || '1 unit')}</td>
+                      <td><strong style="color:var(--green);">₹${Number(it.price).toFixed(2)}</strong></td>
+                      <td>${it.quantity} in stock</td>
+                      <td><span class="badge ${it.isActive ? 'badge-delivered' : 'badge-cancelled'}">${it.isActive ? 'Active' : 'Hidden'}</span></td>
+                      <td>
+                        <div style="display:flex; gap:0.4rem;">
+                          <button class="btn btn-outline btn-sm" onclick="editShopItem('${it._id}', '${escapeHtml(it.name)}', '${escapeHtml(it.category || '')}', '${escapeHtml(it.unit || '')}', '${escapeHtml(it.description || '')}', ${it.price}, ${it.quantity}, ${Boolean(it.isActive)})">Edit</button>
+                          <button class="btn btn-danger btn-sm" onclick="deleteShopItem('${it._id}')">Delete</button>
+                        </div>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          `;
+        } catch (e) {
+          if (!hasExisting) {
+            container.innerHTML = `<p style="color:var(--tomato-dark); padding:1rem 0;">${e.message}</p>`;
+          } else {
+            console.error('Fetch shop items error:', e);
+          }
+        } finally {
+          container.style.opacity = '1';
+        }
+      }
+      window.fetchShopItems = fetchShopItems;
+
+      function openAddShopItemModal() {
+        document.getElementById('shop-modal-title').textContent = 'Add Shop Item';
+        document.getElementById('shop-item-id').value = '';
+        document.getElementById('si-name').value = '';
+        document.getElementById('si-category').value = 'Groceries';
+        document.getElementById('si-unit').value = '1 pack';
+        document.getElementById('si-price').value = '';
+        document.getElementById('si-quantity').value = '50';
+        document.getElementById('si-desc').value = '';
+        document.getElementById('si-active').checked = true;
+        openModal('shop-item-modal');
+      }
+      window.openAddShopItemModal = openAddShopItemModal;
+
+      function editShopItem(id, name, category, unit, desc, price, qty, isActive) {
+        document.getElementById('shop-modal-title').textContent = 'Edit Shop Item';
+        document.getElementById('shop-item-id').value = id;
+        document.getElementById('si-name').value = name;
+        document.getElementById('si-category').value = category;
+        document.getElementById('si-unit').value = unit || '1 pack';
+        document.getElementById('si-price').value = price;
+        document.getElementById('si-quantity').value = qty;
+        document.getElementById('si-desc').value = desc;
+        document.getElementById('si-active').checked = isActive;
+        openModal('shop-item-modal');
+      }
+      window.editShopItem = editShopItem;
+
+      async function saveShopItem(e) {
+        e.preventDefault();
+        const id = document.getElementById('shop-item-id').value;
+        const payload = {
+          name: document.getElementById('si-name').value.trim(),
+          category: document.getElementById('si-category').value.trim(),
+          unit: document.getElementById('si-unit').value.trim(),
+          price: Number(document.getElementById('si-price').value),
+          quantity: Number(document.getElementById('si-quantity').value),
+          description: document.getElementById('si-desc').value.trim(),
+          isActive: document.getElementById('si-active').checked,
+        };
+
+        try {
+          if (id) {
+            await apiFetch(`/api/shop/items/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+          } else {
+            await apiFetch('/api/shop/items', { method: 'POST', body: JSON.stringify(payload) });
+          }
+          closeModal('shop-item-modal');
+          fetchShopItems();
+        } catch (err) {
+          alert(`Error saving shop item: ${err.message}`);
+        }
+      }
+      window.saveShopItem = saveShopItem;
+
+      async function deleteShopItem(id) {
+        if (!confirm('Are you sure you want to delete this shop item?')) return;
+        try {
+          await apiFetch(`/api/shop/items/${id}`, { method: 'DELETE' });
+          fetchShopItems();
+        } catch (e) {
+          alert(e.message);
+        }
+      }
+      window.deleteShopItem = deleteShopItem;
 
       // Generate & View Bill (Usable by Restaurant, Customer, and Admin)
       async function viewOrderBill(orderId) {
@@ -3870,16 +4479,19 @@
       }
 
       const adminUsersData = {
+        shop: [],
         restaurant: [],
         deliveryPartner: [],
         customer: [],
       };
       const adminSearchQueries = {
+        shop: '',
         restaurant: '',
         deliveryPartner: '',
         customer: '',
       };
       const adminUsersPagination = {
+        shop: { currentPage: 1, totalPages: 1, totalItems: 0, pageSize: 10, hasNextPage: false, hasPrevPage: false },
         restaurant: { currentPage: 1, totalPages: 1, totalItems: 0, pageSize: 10, hasNextPage: false, hasPrevPage: false },
         deliveryPartner: { currentPage: 1, totalPages: 1, totalItems: 0, pageSize: 10, hasNextPage: false, hasPrevPage: false },
         customer: { currentPage: 1, totalPages: 1, totalItems: 0, pageSize: 10, hasNextPage: false, hasPrevPage: false },
@@ -3887,6 +4499,7 @@
       let adminSearchDebounceTimer = null;
 
       function getAdminRoleDomPrefix(role) {
+        if (role === 'shop') return 'admin-shops';
         if (role === 'restaurant') return 'admin-restaurants';
         if (role === 'deliveryPartner') return 'admin-riders';
         if (role === 'customer') return 'admin-customers';
@@ -3973,6 +4586,13 @@
         }
       }
 
+      function fetchAdminShops(page, force = false) {
+        const query = document.getElementById('admin-shops-search')?.value?.trim() || '';
+        const targetPage = page || adminUsersPagination.shop.currentPage || 1;
+        return fetchAdminUsers('shop', query, targetPage, force);
+      }
+      window.fetchAdminShops = fetchAdminShops;
+
       function fetchAdminRestaurants(page, force = false) {
         const query = document.getElementById('admin-restaurants-search')?.value?.trim() || '';
         const targetPage = page || adminUsersPagination.restaurant.currentPage || 1;
@@ -4027,7 +4647,7 @@
       function renderAdminUserPaginationControls(targetRole, pagination) {
         if (!pagination || pagination.totalPages <= 1) {
           if (pagination && pagination.totalItems > 0) {
-            const roleLabel = targetRole === 'deliveryPartner' ? 'riders' : targetRole === 'restaurant' ? 'restaurants' : 'customers';
+            const roleLabel = targetRole === 'deliveryPartner' ? 'riders' : targetRole === 'restaurant' ? 'restaurants' : targetRole === 'shop' ? 'shops' : 'customers';
             return `
               <div style="margin-top:0.75rem; padding-top:0.6rem; border-top:1px solid var(--line); font-size:0.83rem; color:var(--muted); text-align:right;">
                 Total: <strong>${pagination.totalItems}</strong> ${roleLabel} (All on 1 page)
@@ -4039,7 +4659,7 @@
 
         const startItem = pagination.totalItems === 0 ? 0 : (pagination.currentPage - 1) * pagination.pageSize + 1;
         const endItem = Math.min(pagination.currentPage * pagination.pageSize, pagination.totalItems);
-        const roleLabel = targetRole === 'deliveryPartner' ? 'riders' : targetRole === 'restaurant' ? 'restaurants' : 'customers';
+        const roleLabel = targetRole === 'deliveryPartner' ? 'riders' : targetRole === 'restaurant' ? 'restaurants' : targetRole === 'shop' ? 'shops' : 'customers';
 
         const totalPages = pagination.totalPages;
         const current = pagination.currentPage;
@@ -4081,7 +4701,7 @@
       }
 
       function renderPartnerManagementTable(usersList, targetRole, searchQuery = '', pagination = null) {
-        const roleLabel = targetRole === 'deliveryPartner' ? 'delivery partners' : targetRole + 's';
+        const roleLabel = targetRole === 'deliveryPartner' ? 'delivery partners' : targetRole === 'shop' ? 'shops' : targetRole + 's';
         if (!usersList.length) {
           if (searchQuery) {
             return `
@@ -4102,6 +4722,7 @@
                   <th>Name / Business</th>
                   <th>Contact (Mobile & Email)</th>
                   ${targetRole === 'restaurant' ? '<th>Address & Cuisine</th>' : ''}
+                  ${targetRole === 'shop' ? '<th>Address & Category</th>' : ''}
                   ${targetRole === 'deliveryPartner' ? '<th>Vehicle</th>' : ''}
                   <th>Approval</th>
                   <th>Account Status</th>
@@ -4122,6 +4743,15 @@
                       <div style="margin-top:3px; display:flex; gap:0.35rem; align-items:center; flex-wrap:wrap;">
                         <span class="badge" style="background:#e0f2fe; color:#0369a1; font-weight:700; font-size:0.75rem;">📍 DIGIPIN: ${escapeHtml(u.digipin || 'Not Set')}</span>
                         <span class="badge" style="background:#f1f5f9; color:#475569; font-size:0.72rem; font-family:monospace;" title="MongoDB ID: ${escapeHtml(String(u.id || u._id))}">ID: ${escapeHtml(rId)}</span>
+                      </div>
+                    `;
+                  } else if (targetRole === 'shop') {
+                    const sId = u.shopId || String(u.id || u._id);
+                    nameCellHtml = `
+                      <div><strong style="font-size:0.95rem;">${escapeHtml(cleanName)}</strong></div>
+                      <div style="margin-top:3px; display:flex; gap:0.35rem; align-items:center; flex-wrap:wrap;">
+                        <span class="badge" style="background:#e0f2fe; color:#0369a1; font-weight:700; font-size:0.75rem;">📍 DIGIPIN: ${escapeHtml(u.digipin || 'Not Set')}</span>
+                        <span class="badge" style="background:#f1f5f9; color:#475569; font-size:0.72rem; font-family:monospace;" title="MongoDB ID: ${escapeHtml(String(u.id || u._id))}">ID: ${escapeHtml(sId)}</span>
                       </div>
                     `;
                   } else if (targetRole === 'deliveryPartner') {
@@ -4156,6 +4786,7 @@
                         ${u.email ? `<div style="margin-top:2px;">✉️ <a href="mailto:${escapeHtml(u.email)}" style="color:var(--ink);">${escapeHtml(u.email)}</a></div>` : '<div style="color:var(--muted); font-size:0.8rem;">No email</div>'}
                       </td>
                       ${targetRole === 'restaurant' ? `<td><small>${escapeHtml(u.restaurantAddress || 'Bengaluru')}</small><br><span class="badge badge-ready">${escapeHtml(u.cuisine || 'Multi-cuisine')}</span></td>` : ''}
+                      ${targetRole === 'shop' ? `<td><small>${escapeHtml(u.shopAddress || u.restaurantAddress || 'Bengaluru')}</small><br><span class="badge badge-ready">${escapeHtml(u.category || 'Retail & Groceries')}</span></td>` : ''}
                       ${targetRole === 'deliveryPartner' ? `<td><span class="badge badge-accepted">${escapeHtml(u.deliveryVehicle || 'Bike')}</span></td>` : ''}
                       <td>
                         <span class="badge ${isPending ? 'badge-pending' : 'badge-approved'}">
@@ -4170,7 +4801,7 @@
                       <td>
                         <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
                           ${role === 'admin' ? `
-                            <button type="button" class="btn btn-outline btn-sm" style="background:#fef3c7; border-color:#facc15; color:#92400e; font-weight:600;" onclick="openAdminCreditTransferModal('${escapeHtml(targetRole === 'customer' ? u.customerId || String(u.id || u._id) : targetRole === 'deliveryPartner' ? u.riderId || String(u.id || u._id) : u.restaurantId || String(u.id || u._id))}')">💳 Add Credits</button>
+                            <button type="button" class="btn btn-outline btn-sm" style="background:#fef3c7; border-color:#facc15; color:#92400e; font-weight:600;" onclick="openAdminCreditTransferModal('${escapeHtml(targetRole === 'customer' ? u.customerId || String(u.id || u._id) : targetRole === 'deliveryPartner' ? u.riderId || String(u.id || u._id) : targetRole === 'shop' ? u.shopId || String(u.id || u._id) : u.restaurantId || String(u.id || u._id))}')">💳 Add Credits</button>
                           ` : ''}
                           ${targetRole === 'deliveryPartner' ? `
                             <button class="btn btn-outline btn-sm" style="background:#f0fdf4; border-color:#86efac; color:#15803d; font-weight:600;" onclick="openAdminFleetTrackerModal()">📍 Live Radar</button>
@@ -4182,7 +4813,7 @@
                           <button class="btn ${isBlocked ? 'btn-success' : 'btn-danger'} btn-sm" onclick="toggleBlockUser('${u.id || u._id}', ${isBlocked})">
                             ${isBlocked ? 'Unblock' : 'Block'}
                           </button>
-                          <button class="btn btn-outline btn-sm" onclick="editAdminUser('${u.id || u._id}', '${escapeHtml(cleanName)}', '${escapeHtml(u.email || '')}', '${escapeHtml(u.phone || '')}', '${u.role}', '${escapeHtml(u.restaurantAddress || '')}', '${escapeHtml(u.cuisine || '')}', '${escapeHtml(u.deliveryVehicle || '')}', '${escapeHtml(u.digipin || '')}', '${u.restaurantLocation?.lat || ''}', '${u.restaurantLocation?.lng || ''}')">Edit</button>
+                          <button class="btn btn-outline btn-sm" onclick="editAdminUser('${u.id || u._id}', '${escapeHtml(cleanName)}', '${escapeHtml(u.email || '')}', '${escapeHtml(u.phone || '')}', '${u.role}', '${escapeHtml(u.shopAddress || u.restaurantAddress || '')}', '${escapeHtml(u.category || u.cuisine || '')}', '${escapeHtml(u.deliveryVehicle || '')}', '${escapeHtml(u.digipin || '')}', '${u.shopLocation?.lat || u.restaurantLocation?.lat || ''}', '${u.shopLocation?.lng || u.restaurantLocation?.lng || ''}')">Edit</button>
                           <button class="btn btn-danger btn-sm" onclick="deleteAdminUser('${u.id || u._id}', '${escapeHtml(cleanName)}', '${targetRole}')">🗑 Delete</button>
                         </div>
                       </td>
@@ -4231,6 +4862,8 @@
       async function deleteAdminUser(userId, name, targetRole) {
         const roleLabel = targetRole === 'restaurant'
           ? 'restaurant and all its associated menu items'
+          : targetRole === 'shop'
+          ? 'shop and all its associated items'
           : `${targetRole} account`;
         if (!confirm(`⚠️ Warning: Are you sure you want to permanently delete ${roleLabel} "${name}"? This CANNOT be undone.`)) return;
         try {
@@ -4371,7 +5004,8 @@
       }
 
       function refreshAdminViews() {
-        if (activeView === 'admin-restaurants') fetchAdminRestaurants(null, true);
+        if (activeView === 'admin-shops') fetchAdminShops(null, true);
+        else if (activeView === 'admin-restaurants') fetchAdminRestaurants(null, true);
         else if (activeView === 'admin-riders') fetchAdminRiders(null, true);
         else if (activeView === 'admin-customers') fetchAdminCustomers(null, true);
         else loadRoleOverview();
@@ -4405,7 +5039,8 @@
 
       // Admin Add / Edit User Modal
       function openAdminCreateUserModal(defaultRole = 'restaurant') {
-        document.getElementById('admin-user-modal-title').textContent = 'Add New Partner / User';
+        const roleLabel = defaultRole === 'shop' ? 'Shop Partner' : defaultRole === 'restaurant' ? 'Restaurant Partner' : defaultRole === 'deliveryPartner' ? 'Delivery Partner' : 'User';
+        document.getElementById('admin-user-modal-title').textContent = `Add New ${roleLabel}`;
         document.getElementById('adm-user-id').value = '';
         document.getElementById('adm-role').value = defaultRole;
         document.getElementById('adm-name').value = '';
@@ -4451,7 +5086,15 @@
         const r = document.getElementById('adm-role')?.value;
         const restFields = document.getElementById('adm-restaurant-fields');
         const riderFields = document.getElementById('adm-rider-fields');
-        if (restFields) restFields.style.display = r === 'restaurant' ? 'block' : 'none';
+        if (restFields) {
+          restFields.style.display = (r === 'restaurant' || r === 'shop') ? 'block' : 'none';
+          const addrLabel = document.getElementById('adm-rest-address-label');
+          if (addrLabel) addrLabel.innerHTML = (r === 'shop' ? 'Shop Address' : 'Restaurant Address') + ' <span style="color:var(--tomato);">*</span>';
+          const digipinLabel = document.getElementById('adm-rest-digipin-label');
+          if (digipinLabel) digipinLabel.innerHTML = (r === 'shop' ? 'Shop DIGIPIN' : 'Restaurant DIGIPIN') + ' <span style="color:var(--tomato);">*</span>';
+          const catLabel = document.getElementById('adm-cuisine-label');
+          if (catLabel) catLabel.textContent = r === 'shop' ? 'Shop Category / Speciality' : 'Cuisine';
+        }
         if (riderFields) riderFields.style.display = r === 'deliveryPartner' ? 'block' : 'none';
       }
 
@@ -4463,8 +5106,8 @@
         const latVal = document.getElementById('adm-restaurant-lat')?.value;
         const lngVal = document.getElementById('adm-restaurant-lng')?.value;
 
-        if (targetRole === 'restaurant' && !digipinVal && (!latVal || !lngVal)) {
-          alert('Restaurant location requirement: Please provide either a valid DIGIPIN or click "Detect Device GPS Pin" to set pickup coordinates.');
+        if ((targetRole === 'restaurant' || targetRole === 'shop') && !digipinVal && (!latVal || !lngVal)) {
+          alert('Location requirement: Please provide either a valid DIGIPIN or click "Detect Device GPS Pin" to set pickup coordinates.');
           return;
         }
 
@@ -4475,7 +5118,9 @@
           phone: document.getElementById('adm-phone').value.trim() || undefined,
           password: document.getElementById('adm-password').value,
           restaurantAddress: document.getElementById('adm-restaurant-address').value.trim(),
+          shopAddress: document.getElementById('adm-restaurant-address').value.trim(),
           cuisine: document.getElementById('adm-cuisine').value.trim(),
+          category: document.getElementById('adm-cuisine').value.trim(),
           deliveryVehicle: document.getElementById('adm-vehicle').value.trim(),
           digipin: digipinVal || undefined,
           lat: latVal ? Number(latVal) : undefined,
@@ -4508,6 +5153,7 @@
       const RBAC_PERMISSIONS_MAP = {
         dashboard_view: { label: 'Analytics', icon: '📊', color: '#0284c7' },
         orders_manage: { label: 'Orders', icon: '📦', color: '#d94b35' },
+        shops_manage: { label: 'Shops', icon: '🏬', color: '#059669' },
         restaurants_manage: { label: 'Restaurants', icon: '🏪', color: '#16a34a' },
         riders_manage: { label: 'Riders Fleet', icon: '🚴', color: '#ea580c' },
         customers_manage: { label: 'Customers', icon: '👥', color: '#9333ea' },
@@ -4516,9 +5162,9 @@
 
       const RBAC_PRESETS = {
         operations_lead: ['dashboard_view', 'orders_manage', 'riders_manage'],
-        restaurant_lead: ['orders_manage', 'restaurants_manage'],
+        restaurant_lead: ['orders_manage', 'restaurants_manage', 'shops_manage'],
         support_lead: ['orders_manage', 'customers_manage', 'riders_manage'],
-        full_admin: ['dashboard_view', 'orders_manage', 'restaurants_manage', 'riders_manage', 'customers_manage', 'subadmins_manage'],
+        full_admin: ['dashboard_view', 'orders_manage', 'shops_manage', 'restaurants_manage', 'riders_manage', 'customers_manage', 'subadmins_manage'],
       };
 
       function applySubAdminPreset(preset, prefix) {
@@ -5184,10 +5830,14 @@
         const restGroup = document.getElementById('restaurant-settings-group');
         const riderGroup = document.getElementById('rider-settings-group');
 
-        if (role === 'restaurant') {
+        if (role === 'restaurant' || role === 'shop') {
           restGroup.style.display = 'block';
-          document.getElementById('set-restaurant-address').value = user.restaurantAddress || '';
-          document.getElementById('set-cuisine').value = user.cuisine || '';
+          const addrLabel = document.getElementById('set-restaurant-address-label');
+          if (addrLabel) addrLabel.textContent = role === 'shop' ? 'Shop Address' : 'Restaurant Address';
+          const cuisineLabel = document.getElementById('set-cuisine-label');
+          if (cuisineLabel) cuisineLabel.textContent = role === 'shop' ? 'Shop Category / Speciality' : 'Cuisines Served';
+          document.getElementById('set-restaurant-address').value = user.shopAddress || user.restaurantAddress || '';
+          document.getElementById('set-cuisine').value = user.category || user.cuisine || '';
         } else {
           restGroup.style.display = 'none';
         }
@@ -5217,6 +5867,10 @@
         if (role === 'restaurant') {
           formData.append('restaurantAddress', document.getElementById('set-restaurant-address').value.trim());
           formData.append('cuisine', document.getElementById('set-cuisine').value.trim());
+        }
+        if (role === 'shop') {
+          formData.append('shopAddress', document.getElementById('set-restaurant-address').value.trim());
+          formData.append('category', document.getElementById('set-cuisine').value.trim());
         }
         if (role === 'deliveryPartner') {
           formData.append('deliveryVehicle', document.getElementById('set-vehicle').value.trim());
@@ -5295,6 +5949,7 @@
 
         let endpoint = `/api/customer/orders/${orderId}/live-tracking`;
         if (vRole === 'restaurant') endpoint = `/api/restaurant/orders/${orderId}/live-tracking`;
+        else if (vRole === 'shop') endpoint = `/api/shop/orders/${orderId}/live-tracking`;
         else if (vRole === 'deliveryPartner' || vRole === 'rider') endpoint = `/api/rider/orders/${orderId}/live-tracking`;
         else if (vRole === 'admin' || vRole === 'subadmin') endpoint = `/api/admin/orders/${orderId}/live-tracking`;
 

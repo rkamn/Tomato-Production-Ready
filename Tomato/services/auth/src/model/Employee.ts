@@ -6,6 +6,7 @@ export type EmployeeRole = (typeof EMPLOYEE_ROLES)[number];
 export const USER_ROLES = [
   'customer',
   'restaurant',
+  'shop',
   'deliveryPartner',
   'admin',
   'subadmin',

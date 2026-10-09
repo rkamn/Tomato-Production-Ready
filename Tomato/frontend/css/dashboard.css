@@ -1677,4 +1677,14 @@
         color: var(--tomato, #ff4c3b) !important;
       }
 
+      /* Support & Help Desk cards */
+      .support-channel-card {
+        transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+      }
+      .support-channel-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06) !important;
+        border-color: #cbd5e1 !important;
+      }
+
 

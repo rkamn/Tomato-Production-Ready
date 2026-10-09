@@ -15,7 +15,9 @@ import {
   restaurantRoutes,
   shopRoutes,
   riderRoutes,
+  supportRoutes,
 } from './modules/index.js';
+import { cleanupExpiredClosedComplaints } from './model/index.js';
 
 import { upload, uploadDir } from './middleware/upload.js';
 
@@ -41,6 +43,7 @@ app.use('/api/restaurant', restaurantRoutes);
 app.use('/api/shop', shopRoutes);
 app.use('/api/rider', riderRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/support', supportRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/frontend', express.static(frontendDir));
 app.use(express.static(frontendDir));
@@ -49,6 +52,17 @@ app.use((_req, res) => res.status(404).json({ message: 'Route not found.' }));
 const startServer = async () => {
   try {
     await connectDB();
+
+    // Auto-delete closed complaints inactive for > 1 week on server startup
+    await cleanupExpiredClosedComplaints();
+
+    // Recurring 1-hour interval for automatic deletion of expired closed tickets
+    setInterval(() => {
+      cleanupExpiredClosedComplaints().catch((err) =>
+        console.error('[Complaint Cleanup Interval Error]:', err)
+      );
+    }, 60 * 60 * 1000);
+
     app.listen(PORT, () => {
       console.log(`Auth service running on port ${PORT}`);
     });

@@ -17,6 +17,12 @@ import Counter, { ICounter, getNextCounterValue, generateIdFromCounter } from '.
 import Shop, { IShop } from './Shop.js';
 import ShopOrder, { IShopOrder } from './ShopOrder.js';
 import Review, { IReview } from './Review.js';
+import Complaint, {
+  IComplaint,
+  ComplaintStatus,
+  ComplaintPriority,
+  cleanupExpiredClosedComplaints,
+} from './Complaint.js';
 
 export {
   Employee,
@@ -54,6 +60,11 @@ export {
   IShopOrder,
   Review,
   IReview,
+  Complaint,
+  IComplaint,
+  ComplaintStatus,
+  ComplaintPriority,
+  cleanupExpiredClosedComplaints,
 };
 
 export default {
@@ -71,5 +82,6 @@ export default {
   Shop,
   ShopOrder,
   Review,
+  Complaint,
 };
 

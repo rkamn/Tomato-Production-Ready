@@ -1289,6 +1289,7 @@
           ...(hasPerm('riders_manage') ? [{ id: 'admin-riders', icon: '🚴', label: 'Riders' }] : []),
           ...(hasPerm('customers_manage') ? [{ id: 'admin-customers', icon: '👥', label: 'Customers' }] : []),
           ...(hasPerm('dashboard_view') ? [{ id: 'admin-analytics', icon: '📈', label: 'Analytics' }] : []),
+          { id: 'admin-complaints', icon: '⚖️', label: 'Complaint Review' },
           ...(hasPerm('subadmins_manage') ? [{ id: 'admin-subadmins', icon: '🛡️', label: 'Sub-Admins & RBAC' }] : []),
           { id: 'settings', icon: '⚙️', label: 'Platform Settings' },
         ];
@@ -1299,18 +1300,21 @@
             { id: 'customer-order', icon: '🍽️', label: 'Order Online' },
             { id: 'customer-orders', icon: '📦', label: 'My Orders' },
             { id: 'customer-address', icon: '📍', label: 'Saved Addresses' },
+            { id: 'support', icon: '🛟', label: 'Help & Support' },
             { id: 'settings', icon: '⚙️', label: 'Profile Settings' },
           ],
           restaurant: [
             { id: 'overview', icon: '🏠', label: 'Overview' },
             { id: 'restaurant-orders', icon: '🔔', label: 'Kitchen Orders' },
             { id: 'restaurant-menu', icon: '📋', label: 'Menu Management' },
+            { id: 'support', icon: '🛟', label: 'Help & Support' },
             { id: 'settings', icon: '⚙️', label: 'Restaurant Profile' },
           ],
           shop: [
             { id: 'overview', icon: '🏠', label: 'Overview' },
             { id: 'shop-orders', icon: '🛍️', label: 'Shop Orders' },
             { id: 'shop-items', icon: '📋', label: 'Item Management' },
+            { id: 'support', icon: '🛟', label: 'Help & Support' },
             { id: 'settings', icon: '⚙️', label: 'Shop Profile' },
           ],
           deliveryPartner: [
@@ -1318,6 +1322,7 @@
             { id: 'rider-available', icon: '🚴', label: 'Available Pickups' },
             { id: 'rider-active', icon: '🚀', label: 'Active Delivery' },
             { id: 'rider-history', icon: '💰', label: 'Trip Earnings' },
+            { id: 'support', icon: '🛟', label: 'Help & Support' },
             { id: 'settings', icon: '⚙️', label: 'Rider Profile' },
           ],
           admin: adminItems,
@@ -1342,7 +1347,29 @@
               itemMap.delete(id);
             }
           });
-          // Append any permitted items not in savedOrder (e.g. newly granted permissions)
+          // If 'support' is new and not in savedOrder, place it right above 'settings'
+          if (itemMap.has('support')) {
+            const supportItem = itemMap.get('support');
+            itemMap.delete('support');
+            const settingsIdx = items.findIndex((it) => it.id === 'settings');
+            if (settingsIdx !== -1) {
+              items.splice(settingsIdx, 0, supportItem);
+            } else {
+              items.push(supportItem);
+            }
+          }
+          // If 'admin-complaints' is new and not in savedOrder, place it right above 'settings'
+          if (itemMap.has('admin-complaints')) {
+            const complaintItem = itemMap.get('admin-complaints');
+            itemMap.delete('admin-complaints');
+            const settingsIdx = items.findIndex((it) => it.id === 'settings');
+            if (settingsIdx !== -1) {
+              items.splice(settingsIdx, 0, complaintItem);
+            } else {
+              items.push(complaintItem);
+            }
+          }
+          // Append any remaining permitted items not in savedOrder (e.g. newly granted permissions)
           itemMap.forEach((item) => {
             items.push(item);
           });
@@ -1639,6 +1666,10 @@
           fetchAdminAnalytics();
         } else if (viewId === 'admin-subadmins') {
           fetchAdminSubAdmins();
+        } else if (viewId === 'admin-complaints') {
+          fetchAdminComplaints();
+        } else if (viewId === 'support') {
+          loadSupportPanel();
         } else if (viewId === 'settings') {
           loadProfileSettings();
         } else if (viewId === 'overview') {
@@ -7181,6 +7212,481 @@
         }
       }
 
+      // =========================================================================
+      // ADMIN & SUB-ADMIN: COMPLAINT REVIEW DESK CONTROLLER
+      // =========================================================================
+      let adminComplaintsList = [];
+      let currentComplaintFilterStatus = 'all';
+      let adminComplaintsDebounceTimer = null;
+
+      async function fetchAdminComplaints() {
+        const tableContainer = document.getElementById('admin-complaints-table-container');
+        if (!tableContainer) return;
+
+        // Display skeleton loading on initial or empty load
+        if (!tableContainer.innerHTML.trim() || tableContainer.innerHTML.includes('No Complaints Found')) {
+          tableContainer.innerHTML = renderTableSkeleton('complaint tickets');
+        }
+
+        const userSearchInput = document.getElementById('admin-complaints-user-search');
+        const keywordSearchInput = document.getElementById('admin-complaints-keyword-search');
+        const roleFilterSelect = document.getElementById('admin-complaints-role-filter');
+
+        const userQuery = userSearchInput ? userSearchInput.value.trim() : '';
+        const keywordQuery = keywordSearchInput ? keywordSearchInput.value.trim() : '';
+        const roleQuery = roleFilterSelect ? roleFilterSelect.value : 'all';
+
+        const params = new URLSearchParams();
+        if (currentComplaintFilterStatus && currentComplaintFilterStatus !== 'all') {
+          params.append('status', currentComplaintFilterStatus);
+        }
+        if (userQuery) {
+          params.append('user', userQuery);
+        }
+        if (keywordQuery) {
+          params.append('search', keywordQuery);
+        }
+        if (roleQuery && roleQuery !== 'all') {
+          params.append('role', roleQuery);
+        }
+
+        // Active filter indicator updates
+        const indicator = document.getElementById('admin-complaints-filter-indicator');
+        if (indicator) {
+          const activeFilters = [];
+          if (currentComplaintFilterStatus !== 'all') activeFilters.push(`Status: ${currentComplaintFilterStatus}`);
+          if (userQuery) activeFilters.push(`User: "${userQuery}"`);
+          if (keywordQuery) activeFilters.push(`Keyword: "${keywordQuery}"`);
+          if (roleQuery !== 'all') activeFilters.push(`Role: ${roleQuery}`);
+
+          if (activeFilters.length > 0) {
+            indicator.style.display = 'inline';
+            indicator.textContent = `Filtered by (${activeFilters.join(' • ')})`;
+          } else {
+            indicator.style.display = 'none';
+          }
+        }
+
+        try {
+          const queryString = params.toString();
+          const endpoint = `/api/admin/complaints${queryString ? `?${queryString}` : ''}`;
+          const res = await apiFetch(endpoint);
+
+          const complaints = res.complaints || [];
+          adminComplaintsList = complaints;
+
+          // Compute/update KPI statistics
+          const counts = res.counts || {};
+          const totalCount = counts.total != null ? counts.total : complaints.length;
+          const openCount = counts.open != null ? counts.open : complaints.filter((c) => c.status === 'Open').length;
+          const inReviewCount = counts.inReview != null ? counts.inReview : complaints.filter((c) => c.status === 'In Review').length;
+          const resolvedCount = counts.resolved != null ? counts.resolved : complaints.filter((c) => c.status === 'Resolved' || c.status === 'Closed').length;
+
+          const totalEl = document.getElementById('complaints-kpi-total');
+          const openEl = document.getElementById('complaints-kpi-open');
+          const inReviewEl = document.getElementById('complaints-kpi-in-review');
+          const resolvedEl = document.getElementById('complaints-kpi-resolved');
+          const badgeEl = document.getElementById('admin-complaints-total-badge');
+
+          if (totalEl) totalEl.textContent = totalCount;
+          if (openEl) openEl.textContent = openCount;
+          if (inReviewEl) inReviewEl.textContent = inReviewCount;
+          if (resolvedEl) resolvedEl.textContent = resolvedCount;
+          if (badgeEl) badgeEl.textContent = `${totalCount} Complaint${totalCount === 1 ? '' : 's'}`;
+
+          renderAdminComplaintsTable(complaints);
+        } catch (err) {
+          console.error('Failed to fetch admin complaints:', err);
+          tableContainer.innerHTML = `
+            <div style="text-align:center; padding:2.5rem; background:#fff; border:1px solid var(--line); border-radius:8px;">
+              <span style="font-size:2rem; display:block; margin-bottom:0.5rem;">⚠️</span>
+              <h3 style="font-size:1.05rem; margin-bottom:0.4rem; color:var(--ink);">Unable to Load Complaints</h3>
+              <p style="color:var(--muted); font-size:0.85rem; margin-bottom:1rem;">${escapeHtml(err.message || 'Server error occurred')}</p>
+              <button class="btn btn-outline btn-sm" onclick="fetchAdminComplaints()">Try Again</button>
+            </div>
+          `;
+        }
+      }
+      window.fetchAdminComplaints = fetchAdminComplaints;
+
+      function renderAdminComplaintsTable(complaints) {
+        const tableContainer = document.getElementById('admin-complaints-table-container');
+        if (!tableContainer) return;
+
+        if (!complaints || complaints.length === 0) {
+          tableContainer.innerHTML = `
+            <div style="text-align:center; padding:3rem 1.5rem; background:#fff; border:1px solid var(--line); border-radius:8px;">
+              <span style="font-size:2.5rem; display:block; margin-bottom:0.5rem;">🕊️</span>
+              <h3 style="font-size:1.1rem; margin-bottom:0.4rem; color:var(--ink);">No Complaints Found</h3>
+              <p style="color:var(--muted); font-size:0.85rem; max-width:420px; margin:0 auto 1.25rem;">
+                No complaint tickets matched your current search or filter criteria. You can clear the search or change status tabs.
+              </p>
+              <button class="btn btn-outline btn-sm" onclick="clearAllComplaintFilters()">Reset All Filters</button>
+            </div>
+          `;
+          return;
+        }
+
+        const getStatusBadge = (status) => {
+          switch (status) {
+            case 'Open':
+              return `<span class="badge" style="background:#fee2e2; color:#b91c1c; font-weight:700; font-size:0.75rem; padding:0.2rem 0.55rem; border-radius:999px;">🔴 Open</span>`;
+            case 'In Review':
+              return `<span class="badge" style="background:#fef3c7; color:#b45309; font-weight:700; font-size:0.75rem; padding:0.2rem 0.55rem; border-radius:999px;">🟡 In Review</span>`;
+            case 'Resolved':
+              return `<span class="badge" style="background:#dcfce7; color:#15803d; font-weight:700; font-size:0.75rem; padding:0.2rem 0.55rem; border-radius:999px;">🟢 Resolved</span>`;
+            case 'Closed':
+              return `<span class="badge" style="background:#f1f5f9; color:#475569; font-weight:700; font-size:0.75rem; padding:0.2rem 0.55rem; border-radius:999px;">⚪ Closed</span>`;
+            default:
+              return `<span class="badge" style="background:#f1f5f9; color:#475569; font-size:0.75rem; padding:0.2rem 0.55rem; border-radius:999px;">${escapeHtml(status || 'Unknown')}</span>`;
+          }
+        };
+
+        const getPriorityBadge = (p) => {
+          const pr = (p || 'Medium').toLowerCase();
+          if (pr === 'urgent' || pr === 'critical') {
+            return `<span class="badge" style="background:#dc2626; color:#fff; font-size:0.7rem; font-weight:700; padding:0.15rem 0.45rem; border-radius:4px;">URGENT</span>`;
+          } else if (pr === 'high') {
+            return `<span class="badge" style="background:#ea580c; color:#fff; font-size:0.7rem; font-weight:700; padding:0.15rem 0.45rem; border-radius:4px;">HIGH</span>`;
+          } else if (pr === 'low') {
+            return `<span class="badge" style="background:#f1f5f9; color:#64748b; font-size:0.7rem; font-weight:600; padding:0.15rem 0.45rem; border-radius:4px;">LOW</span>`;
+          }
+          return `<span class="badge" style="background:#fef9c3; color:#854d0e; font-size:0.7rem; font-weight:600; padding:0.15rem 0.45rem; border-radius:4px;">MEDIUM</span>`;
+        };
+
+        const getRoleBadge = (r) => {
+          const roleStr = (r || 'customer').toLowerCase();
+          const colors = {
+            customer: { bg: '#e0f2fe', text: '#0369a1', icon: '👤' },
+            restaurant: { bg: '#ffedd5', text: '#c2410c', icon: '🏪' },
+            shop: { bg: '#f3e8ff', text: '#7e22ce', icon: '🏬' },
+            rider: { bg: '#dcfce7', text: '#15803d', icon: '🚴' },
+          };
+          const style = colors[roleStr] || { bg: '#f1f5f9', text: '#475569', icon: '👥' };
+          return `<span class="badge" style="background:${style.bg}; color:${style.text}; font-size:0.72rem; font-weight:600; padding:0.15rem 0.5rem; border-radius:999px; display:inline-flex; align-items:center; gap:0.25rem;">
+            <span>${style.icon}</span>${escapeHtml(roleStr)}
+          </span>`;
+        };
+
+        let html = `
+          <div style="overflow-x:auto; background:#fff; border:1px solid var(--line); border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.02);">
+            <table class="data-table" style="width:100%; border-collapse:collapse; text-align:left; font-size:0.85rem;">
+              <thead>
+                <tr style="background:#f8fafc; border-bottom:1px solid var(--line); color:var(--muted); font-size:0.78rem; text-transform:uppercase; letter-spacing:0.04em;">
+                  <th style="padding:0.85rem 1rem;">Ticket / Ref</th>
+                  <th style="padding:0.85rem 1rem;">Complainant User</th>
+                  <th style="padding:0.85rem 1rem;">Subject &amp; Category</th>
+                  <th style="padding:0.85rem 1rem;">Priority</th>
+                  <th style="padding:0.85rem 1rem;">Status</th>
+                  <th style="padding:0.85rem 1rem;">Date Filed</th>
+                  <th style="padding:0.85rem 1rem; text-align:right;">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+        `;
+
+        complaints.forEach((c) => {
+          const cid = c._id || c.id;
+          const ticketId = c.ticketId || `TKT-${String(cid).slice(-6).toUpperCase()}`;
+          const dateStr = c.createdAt ? new Date(c.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Recently';
+          const hasAdminComment = Boolean(c.adminComment && c.adminComment.trim());
+
+          html += `
+            <tr style="border-bottom:1px solid var(--line); transition:background 0.15s;" onmouseover="this.style.background='#fafaf9'" onmouseout="this.style.background='transparent'">
+              <td style="padding:0.85rem 1rem; vertical-align:top;">
+                <strong style="color:var(--ink); font-size:0.88rem; display:block;">${escapeHtml(ticketId)}</strong>
+                ${c.orderRef ? `<span style="font-size:0.75rem; color:#0284c7; display:block; margin-top:0.2rem;">📦 ${escapeHtml(c.orderRef)}</span>` : ''}
+              </td>
+              <td style="padding:0.85rem 1rem; vertical-align:top;">
+                <div style="font-weight:600; color:var(--ink);">${escapeHtml(c.userName || 'Anonymous User')}</div>
+                <div style="font-size:0.78rem; color:var(--muted);">${escapeHtml(c.userEmail || '')}</div>
+                <div style="margin-top:0.3rem;">${getRoleBadge(c.userRole)}</div>
+                ${c.userId ? `<span style="font-size:0.72rem; color:var(--muted); display:block; margin-top:0.2rem;">ID: ${escapeHtml(c.userId)}</span>` : ''}
+              </td>
+              <td style="padding:0.85rem 1rem; vertical-align:top; max-width:280px;">
+                <div style="font-weight:600; color:var(--ink); line-height:1.3; margin-bottom:0.25rem;">${escapeHtml(c.subject || 'Complaint')}</div>
+                <div style="font-size:0.75rem; color:var(--muted); margin-bottom:0.35rem;">Category: <strong>${escapeHtml(c.category || 'General')}</strong></div>
+                <div style="font-size:0.8rem; color:#475569; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; line-height:1.35;">
+                  ${escapeHtml(c.description || '')}
+                </div>
+                ${hasAdminComment ? `
+                  <div style="margin-top:0.4rem; padding:0.35rem 0.5rem; background:#f0fdf4; border-left:3px solid #16a34a; border-radius:3px; font-size:0.75rem; color:#166534;">
+                    <strong>Admin Comment:</strong> ${escapeHtml(c.adminComment)}
+                  </div>
+                ` : ''}
+              </td>
+              <td style="padding:0.85rem 1rem; vertical-align:top; white-space:nowrap;">
+                ${getPriorityBadge(c.priority)}
+              </td>
+              <td style="padding:0.85rem 1rem; vertical-align:top; white-space:nowrap;">
+                ${getStatusBadge(c.status)}
+              </td>
+              <td style="padding:0.85rem 1rem; vertical-align:top; white-space:nowrap; font-size:0.8rem; color:var(--muted);">
+                ${escapeHtml(dateStr)}
+              </td>
+              <td style="padding:0.85rem 1rem; vertical-align:top; text-align:right; white-space:nowrap;">
+                <button
+                  type="button"
+                  class="btn btn-outline btn-sm"
+                  style="padding:0.35rem 0.75rem; font-size:0.8rem; font-weight:600; display:inline-flex; align-items:center; gap:0.3rem;"
+                  onclick="openReviewComplaintModal('${escapeHtml(cid)}')"
+                  title="Review complaint, change status, and comment"
+                >
+                  <span>⚖️</span> Review &amp; Comment
+                </button>
+              </td>
+            </tr>
+          `;
+        });
+
+        html += `
+              </tbody>
+            </table>
+          </div>
+        `;
+
+        tableContainer.innerHTML = html;
+      }
+      window.renderAdminComplaintsTable = renderAdminComplaintsTable;
+
+      function setAdminComplaintsStatusFilter(status) {
+        currentComplaintFilterStatus = status;
+        const tabs = ['all', 'open', 'in-review', 'resolved', 'closed'];
+        tabs.forEach((tabId) => {
+          const btn = document.getElementById(`complaint-tab-${tabId}`);
+          if (btn) {
+            const matches =
+              (tabId === 'all' && status === 'all') ||
+              (tabId === 'open' && status.toLowerCase() === 'open') ||
+              (tabId === 'in-review' && status.toLowerCase() === 'in review') ||
+              (tabId === 'resolved' && status.toLowerCase() === 'resolved') ||
+              (tabId === 'closed' && status.toLowerCase() === 'closed');
+            btn.classList.toggle('active', matches);
+          }
+        });
+        fetchAdminComplaints();
+      }
+      window.setAdminComplaintsStatusFilter = setAdminComplaintsStatusFilter;
+
+      function handleAdminComplaintsFilterChange() {
+        fetchAdminComplaints();
+      }
+      window.handleAdminComplaintsFilterChange = handleAdminComplaintsFilterChange;
+
+      function debounceAdminComplaintsSearch() {
+        if (adminComplaintsDebounceTimer) {
+          clearTimeout(adminComplaintsDebounceTimer);
+        }
+        adminComplaintsDebounceTimer = setTimeout(() => {
+          fetchAdminComplaints();
+        }, 300);
+      }
+      window.debounceAdminComplaintsSearch = debounceAdminComplaintsSearch;
+
+      function clearComplaintsUserSearch() {
+        const input = document.getElementById('admin-complaints-user-search');
+        if (input) {
+          input.value = '';
+          fetchAdminComplaints();
+        }
+      }
+      window.clearComplaintsUserSearch = clearComplaintsUserSearch;
+
+      function clearComplaintsKeywordSearch() {
+        const input = document.getElementById('admin-complaints-keyword-search');
+        if (input) {
+          input.value = '';
+          fetchAdminComplaints();
+        }
+      }
+      window.clearComplaintsKeywordSearch = clearComplaintsKeywordSearch;
+
+      function clearAllComplaintFilters() {
+        const userInput = document.getElementById('admin-complaints-user-search');
+        const keywordInput = document.getElementById('admin-complaints-keyword-search');
+        const roleSelect = document.getElementById('admin-complaints-role-filter');
+        if (userInput) userInput.value = '';
+        if (keywordInput) keywordInput.value = '';
+        if (roleSelect) roleSelect.value = 'all';
+        setAdminComplaintsStatusFilter('all');
+      }
+      window.clearAllComplaintFilters = clearAllComplaintFilters;
+
+      function openReviewComplaintModal(complaintId) {
+        if (!complaintId) {
+          console.warn('openReviewComplaintModal called without complaintId');
+          return;
+        }
+
+        const complaint = adminComplaintsList.find(
+          (c) =>
+            String(c._id || '') === String(complaintId) ||
+            String(c.id || '') === String(complaintId) ||
+            String(c.ticketId || '') === String(complaintId)
+        );
+
+        if (!complaint) {
+          console.error('Complaint details not found for ID:', complaintId, 'in list:', adminComplaintsList);
+          alert('Complaint details not found. Please refresh the Complaint Review list.');
+          return;
+        }
+
+        const idEl = document.getElementById('review-modal-complaint-id');
+        const ticketEl = document.getElementById('review-modal-ticket-id');
+        const priorityEl = document.getElementById('review-modal-priority-badge');
+        const subjectEl = document.getElementById('review-modal-subject');
+        const userNameEl = document.getElementById('review-modal-user-name');
+        const roleBadgeEl = document.getElementById('review-modal-user-role-badge');
+        const emailEl = document.getElementById('review-modal-user-email');
+        const userIdEl = document.getElementById('review-modal-user-id');
+        const catEl = document.getElementById('review-modal-category');
+        const orderRefEl = document.getElementById('review-modal-order-ref');
+        const createdAtEl = document.getElementById('review-modal-created-at');
+        const descEl = document.getElementById('review-modal-description');
+        const statusSelect = document.getElementById('review-modal-status-select');
+        const commentTextarea = document.getElementById('review-modal-comment-textarea');
+        const auditBox = document.getElementById('review-modal-audit-info');
+        const reviewerNameEl = document.getElementById('review-modal-reviewer-name');
+        const reviewedAtEl = document.getElementById('review-modal-reviewed-at');
+
+        const tid = complaint.ticketId || `TKT-${String(complaint._id || complaint.id).slice(-6).toUpperCase()}`;
+
+        if (idEl) idEl.value = complaint._id || complaint.id || complaint.ticketId;
+        if (ticketEl) ticketEl.textContent = tid;
+
+        if (priorityEl) {
+          priorityEl.textContent = (complaint.priority || 'Medium').toUpperCase();
+          const p = (complaint.priority || 'Medium').toLowerCase();
+          if (p === 'urgent' || p === 'critical') {
+            priorityEl.style.background = '#dc2626';
+            priorityEl.style.color = '#fff';
+          } else if (p === 'high') {
+            priorityEl.style.background = '#ea580c';
+            priorityEl.style.color = '#fff';
+          } else {
+            priorityEl.style.background = '#0369a1';
+            priorityEl.style.color = '#fff';
+          }
+        }
+
+        if (subjectEl) subjectEl.textContent = complaint.subject || 'Complaint';
+        if (userNameEl) userNameEl.textContent = complaint.userName || 'Anonymous User';
+        if (roleBadgeEl) roleBadgeEl.textContent = (complaint.userRole || 'customer').toUpperCase();
+        if (emailEl) emailEl.textContent = complaint.userEmail || 'No email provided';
+        if (userIdEl) userIdEl.textContent = `ID: ${complaint.userId || 'N/A'}`;
+        if (catEl) catEl.textContent = complaint.category || 'General';
+        if (orderRefEl) orderRefEl.textContent = complaint.orderRef ? `Order: ${complaint.orderRef}` : 'Order: None';
+        if (createdAtEl) {
+          createdAtEl.textContent = complaint.createdAt ? new Date(complaint.createdAt).toLocaleString('en-US') : 'Recently';
+        }
+        if (descEl) descEl.textContent = complaint.description || 'No detailed description provided.';
+
+        if (statusSelect) {
+          statusSelect.value = complaint.status || 'Open';
+        }
+
+        if (commentTextarea) {
+          commentTextarea.value = complaint.adminComment || '';
+        }
+
+        if (auditBox) {
+          if (complaint.reviewedBy) {
+            auditBox.style.display = 'block';
+            if (reviewerNameEl) {
+              const rName =
+                typeof complaint.reviewedBy === 'object'
+                  ? complaint.reviewedBy.name || complaint.reviewedBy.userId || 'Admin'
+                  : complaint.reviewedBy;
+              reviewerNameEl.textContent = rName || 'Admin';
+            }
+            if (reviewedAtEl) {
+              reviewedAtEl.textContent = complaint.reviewedAt ? new Date(complaint.reviewedAt).toLocaleString('en-US') : '';
+            }
+          } else {
+            auditBox.style.display = 'none';
+          }
+        }
+
+        openModal('admin-complaint-review-modal');
+      }
+      window.openReviewComplaintModal = openReviewComplaintModal;
+
+      async function handleSaveComplaintReview(event) {
+        if (event && event.preventDefault) event.preventDefault();
+
+        const idEl = document.getElementById('review-modal-complaint-id');
+        const statusSelect = document.getElementById('review-modal-status-select');
+        const commentTextarea = document.getElementById('review-modal-comment-textarea');
+        const submitBtn = document.getElementById('btn-save-complaint-review');
+
+        if (!idEl || !idEl.value) {
+          alert('Complaint ID is missing.');
+          return;
+        }
+
+        const complaintId = idEl.value;
+        const newStatus = statusSelect ? statusSelect.value : 'In Review';
+        const adminComment = commentTextarea ? commentTextarea.value.trim() : '';
+
+        if (!adminComment) {
+          alert('Please provide an admin review comment or resolution note.');
+          if (commentTextarea) commentTextarea.focus();
+          return;
+        }
+
+        const originalText = submitBtn ? submitBtn.innerHTML : 'Save';
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.innerHTML = '⏳ Saving...';
+        }
+
+        try {
+          const res = await apiFetch(`/api/admin/complaints/${complaintId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+              status: newStatus,
+              adminComment: adminComment,
+            }),
+          });
+
+          closeModal('admin-complaint-review-modal');
+          showToastNotification({
+            title: 'Complaint Review Saved',
+            message: res.message || `Status changed to ${newStatus}`,
+            type: 'success',
+          });
+          fetchAdminComplaints();
+        } catch (err) {
+          console.error('Failed to update complaint:', err);
+          alert(`Error saving complaint review: ${err.message}`);
+        } finally {
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = originalText;
+          }
+        }
+      }
+      window.handleSaveComplaintReview = handleSaveComplaintReview;
+
+      async function handleDirectCloseComplaint() {
+        const statusSelect = document.getElementById('review-modal-status-select');
+        const commentTextarea = document.getElementById('review-modal-comment-textarea');
+
+        if (statusSelect) {
+          statusSelect.value = 'Closed';
+        }
+
+        if (commentTextarea && !commentTextarea.value.trim()) {
+          commentTextarea.value = 'Complaint has been reviewed, addressed, and closed by the administrator.';
+        }
+
+        const form = document.getElementById('admin-complaint-review-form');
+        if (form) {
+          handleSaveComplaintReview(new Event('submit'));
+        }
+      }
+      window.handleDirectCloseComplaint = handleDirectCloseComplaint;
+
       // Admin Analytics Date Helpers & View
       function getAdminTodayDateString() {
         const now = new Date();
@@ -7529,6 +8035,481 @@
         }
       }
       window.fetchAdminAnalytics = fetchAdminAnalytics;
+
+      // =========================================================================
+      // SUPPORT & HELP DESK (CUSTOMER, RESTAURANT, SHOP)
+      // =========================================================================
+      function getSupportTicketsStorageKey() {
+        const userId = user && (user._id || user.id || user.email);
+        return `tomato_support_tickets_${userId ? `${userId}_${role}` : role}`;
+      }
+
+      function loadSupportPanel() {
+        // Update role badge & description
+        const roleBadge = document.getElementById('support-role-badge');
+        const supportMeta = document.getElementById('support-meta');
+        const orderRefLabel = document.getElementById('support-order-ref-label');
+        const orderRefInput = document.getElementById('support-order-ref');
+        const categorySelect = document.getElementById('support-category');
+
+        let badgeText = 'Customer Help';
+        let badgeBg = '#e0f2fe';
+        let badgeColor = '#0369a1';
+        let metaText = 'Instant assistance, order queries, ticket resolution and operational FAQs';
+        let orderRefText = 'Related Order / Reference ID (Optional)';
+        let orderRefPlaceholder = 'e.g. ORD-10023';
+
+        let categories = [
+          'Order Delay / Live Tracking Issue',
+          'Missing or Incorrect Food Items',
+          'Payment Deducted / Refund & Wallet Query',
+          'Food Quality or Packaging Complaint',
+          'Delivery Partner / Rider Coordination',
+          'Account, Profile & App Feedback',
+          'General Inquiry'
+        ];
+
+        if (role === 'restaurant') {
+          badgeText = 'Restaurant Partner Help';
+          badgeBg = '#fef3c7';
+          badgeColor = '#92400e';
+          metaText = 'Kitchen operations support, order dispatch issues, menu approval and billing inquiries';
+          orderRefText = 'Related Kitchen Order / Settlement ID (Optional)';
+          orderRefPlaceholder = 'e.g. ORD-5501 or BATCH-99';
+          categories = [
+            'Kitchen Order Delay / Prep Issues',
+            'Rider Pickup Coordination Delay',
+            'Menu Item, Pricing & Stock Availability',
+            'Payout, Commission & Bank Settlements',
+            'Operating Hours & Outlet Online Status',
+            'Order Cancellation & Customer Disputes',
+            'Merchant Technical / Dashboard Support'
+          ];
+        } else if (role === 'shop') {
+          badgeText = 'Shop Partner Help';
+          badgeBg = '#f3e8ff';
+          badgeColor = '#6b21a8';
+          metaText = 'Retail dispatch support, inventory synchronization, grocery orders and payout queries';
+          orderRefText = 'Related Shop Order ID / Item SKU (Optional)';
+          orderRefPlaceholder = 'e.g. ORD-8810 or SKU-201';
+          categories = [
+            'Shop Order Packing & Dispatch Issue',
+            'Rider Pickup Coordination Delay',
+            'Catalog, Inventory & Stock Sync Issue',
+            'Weekly Payouts & Settlement Query',
+            'Store Timings & Customer Inquiries',
+            'Barcode / Scanner & System Query',
+            'Retailer Technical Support'
+          ];
+        } else if (role === 'deliveryPartner' || role === 'rider') {
+          badgeText = 'Rider Delivery Help';
+          badgeBg = '#dcfce7';
+          badgeColor = '#166534';
+          metaText = 'Live trip routing assistance, restaurant delays, earnings reconciliation and emergency support';
+          orderRefText = 'Related Delivery Trip ID (Optional)';
+          orderRefPlaceholder = 'e.g. TRIP-3304';
+          categories = [
+            'Delivery Address Navigation Issue',
+            'Customer Unreachable / Phone Switched Off',
+            'Restaurant / Shop Pickup Delay',
+            'Trip Earnings & Wallet Payout Query',
+            'Accident / Vehicle Breakdown / Emergency',
+            'Rider App Technical Issue'
+          ];
+        }
+
+        if (roleBadge) {
+          roleBadge.textContent = badgeText;
+          roleBadge.style.background = badgeBg;
+          roleBadge.style.color = badgeColor;
+        }
+        if (supportMeta) {
+          supportMeta.textContent = metaText;
+        }
+        if (orderRefLabel) {
+          orderRefLabel.textContent = orderRefText;
+        }
+        if (orderRefInput) {
+          orderRefInput.placeholder = orderRefPlaceholder;
+        }
+
+        if (categorySelect) {
+          categorySelect.innerHTML = categories
+            .map((cat, idx) => `<option value="${escapeHtml(cat)}" ${idx === 0 ? 'selected' : ''}>${escapeHtml(cat)}</option>`)
+            .join('');
+        }
+
+        renderSupportTicketsList();
+        renderSupportFAQs();
+      }
+      window.loadSupportPanel = loadSupportPanel;
+
+      async function submitSupportTicket(e) {
+        if (e && e.preventDefault) e.preventDefault();
+        const categoryEl = document.getElementById('support-category');
+        const priorityEl = document.getElementById('support-priority');
+        const orderRefEl = document.getElementById('support-order-ref');
+        const subjectEl = document.getElementById('support-subject');
+        const descriptionEl = document.getElementById('support-description');
+        const submitBtn = e?.target ? e.target.querySelector('button[type="submit"]') : null;
+
+        const category = categoryEl ? categoryEl.value.trim() : 'General Inquiry';
+        const priority = priorityEl ? priorityEl.value.trim() : 'Normal';
+        const orderRef = orderRefEl ? orderRefEl.value.trim() : '';
+        const subject = subjectEl ? subjectEl.value.trim() : '';
+        const description = descriptionEl ? descriptionEl.value.trim() : '';
+
+        if (!subject || !description) {
+          alert('Please enter both a Subject and Detailed Description for your ticket.');
+          return;
+        }
+
+        const originalBtnText = submitBtn ? submitBtn.innerHTML : 'Submit Ticket';
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.innerHTML = '⏳ Submitting...';
+        }
+
+        try {
+          const res = await apiFetch('/api/support/tickets', {
+            method: 'POST',
+            body: JSON.stringify({
+              category,
+              priority,
+              orderRef,
+              subject,
+              description,
+            }),
+          });
+
+          const createdTicket = res.ticket || {
+            ticketId: `TKT-${Math.floor(100000 + Math.random() * 900000)}`,
+            category,
+            priority,
+            orderRef,
+            subject,
+            description,
+            status: 'Open',
+            createdAt: new Date().toISOString(),
+          };
+
+          // Also save in local cache
+          let tickets = [];
+          try {
+            const raw = localStorage.getItem(getSupportTicketsStorageKey());
+            if (raw) tickets = JSON.parse(raw);
+          } catch (_) {}
+          if (!Array.isArray(tickets)) tickets = [];
+          tickets.unshift(createdTicket);
+          try {
+            localStorage.setItem(getSupportTicketsStorageKey(), JSON.stringify(tickets));
+          } catch (_) {}
+
+          if (subjectEl) subjectEl.value = '';
+          if (descriptionEl) descriptionEl.value = '';
+          if (orderRefEl) orderRefEl.value = '';
+
+          renderSupportTicketsList();
+
+          showToastNotification({
+            title: 'Support Ticket Logged',
+            message: `Ticket ${createdTicket.ticketId || createdTicket.id} received and queued in Complaint Review Desk`,
+            type: 'success',
+          });
+
+          alert(`✅ Support Ticket Created Successfully!\nTicket ID: ${createdTicket.ticketId || createdTicket.id}\nCategory: ${category}\nPriority: ${priority}\n\nThis ticket has been sent to the Admin & Sub-Admin Complaint Review Desk for immediate review.`);
+        } catch (err) {
+          console.error('Support ticket submission error:', err);
+          // Fallback to local storage if API failed
+          const fallbackId = `TKT-${Math.floor(100000 + Math.random() * 900000)}`;
+          const fallbackTicket = {
+            id: fallbackId,
+            ticketId: fallbackId,
+            role,
+            category,
+            priority,
+            orderRef,
+            subject,
+            description,
+            status: 'Open',
+            createdAt: new Date().toISOString(),
+          };
+
+          let tickets = [];
+          try {
+            const raw = localStorage.getItem(getSupportTicketsStorageKey());
+            if (raw) tickets = JSON.parse(raw);
+          } catch (_) {}
+          if (!Array.isArray(tickets)) tickets = [];
+          tickets.unshift(fallbackTicket);
+          try {
+            localStorage.setItem(getSupportTicketsStorageKey(), JSON.stringify(tickets));
+          } catch (_) {}
+
+          if (subjectEl) subjectEl.value = '';
+          if (descriptionEl) descriptionEl.value = '';
+          if (orderRefEl) orderRefEl.value = '';
+
+          renderSupportTicketsList();
+          alert(`✅ Support Ticket Created (Offline Mode)!\nTicket ID: ${fallbackId}\nCategory: ${category}\nPriority: ${priority}`);
+        } finally {
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = originalBtnText;
+          }
+        }
+      }
+      window.submitSupportTicket = submitSupportTicket;
+
+      async function renderSupportTicketsList() {
+        const container = document.getElementById('support-tickets-list-container');
+        const countBadge = document.getElementById('support-active-tickets-count');
+        if (!container) return;
+
+        let tickets = [];
+
+        // Attempt to fetch fresh tickets from backend API
+        try {
+          const res = await apiFetch('/api/support/tickets');
+          if (res && Array.isArray(res.tickets) && res.tickets.length > 0) {
+            tickets = res.tickets;
+            try {
+              localStorage.setItem(getSupportTicketsStorageKey(), JSON.stringify(tickets));
+            } catch (_) {}
+          }
+        } catch (_) {}
+
+        // Fallback to localStorage if API returned empty or failed
+        if (!tickets || tickets.length === 0) {
+          try {
+            const raw = localStorage.getItem(getSupportTicketsStorageKey());
+            if (raw) tickets = JSON.parse(raw);
+          } catch (_) {}
+        }
+
+        if (!Array.isArray(tickets) || !tickets.length) {
+          // Provide default starter ticket for demo/clarity if empty
+          tickets = [
+            {
+              id: 'TKT-10492',
+              ticketId: 'TKT-10492',
+              role,
+              category: role === 'customer' ? 'Welcome & Onboarding' : 'Partner Account Verification',
+              priority: 'Normal',
+              orderRef: '',
+              subject: role === 'customer' ? 'Welcome to Tomato Support' : 'Merchant Partner Support Desk',
+              description: role === 'customer'
+                ? 'Welcome to Tomato! If you face any issues with orders or delivery, raise a ticket here for priority resolution.'
+                : 'Welcome to your Partner Helpdesk. Use this channel to coordinate orders, request settlements, and contact support.',
+              status: 'Resolved',
+              createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
+            }
+          ];
+          try {
+            localStorage.setItem(getSupportTicketsStorageKey(), JSON.stringify(tickets));
+          } catch (_) {}
+        }
+
+        const activeCount = tickets.filter((t) => t.status === 'Open' || t.status === 'In Review' || t.status === 'In Progress').length;
+        if (countBadge) {
+          countBadge.textContent = `${activeCount} Active`;
+          countBadge.style.color = activeCount > 0 ? 'var(--tomato)' : 'var(--ink)';
+        }
+
+        container.innerHTML = tickets.map((t) => {
+          const tid = t.ticketId || t.id || t._id;
+          const isResolved = t.status === 'Resolved' || t.status === 'Closed';
+          const priorityColor = t.priority === 'Urgent' || t.priority === 'Critical' ? '#ef4444' : t.priority === 'High' ? '#f59e0b' : '#0284c7';
+          const priorityBg = t.priority === 'Urgent' || t.priority === 'Critical' ? '#fef2f2' : t.priority === 'High' ? '#fffbeb' : '#f0f9ff';
+          
+          let statusBg = '#fee2e2';
+          let statusColor = '#b91c1c';
+          if (t.status === 'In Review') {
+            statusBg = '#fef3c7';
+            statusColor = '#b45309';
+          } else if (t.status === 'Resolved') {
+            statusBg = '#dcfce7';
+            statusColor = '#15803d';
+          } else if (t.status === 'Closed') {
+            statusBg = '#f1f5f9';
+            statusColor = '#475569';
+          }
+
+          const dateStr = new Date(t.createdAt).toLocaleDateString(undefined, {
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          });
+
+          const hasAdminComment = Boolean(t.adminComment && t.adminComment.trim());
+
+          return `
+            <div style="border:1px solid var(--line); border-radius:6px; padding:0.85rem; margin-bottom:0.75rem; background:#fafafa;">
+              <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.4rem; margin-bottom:0.4rem;">
+                <div style="display:flex; align-items:center; gap:0.45rem;">
+                  <strong style="font-size:0.85rem; color:var(--ink);">${escapeHtml(tid)}</strong>
+                  <span class="badge" style="background:${priorityBg}; color:${priorityColor}; font-size:0.7rem; padding:0.1rem 0.45rem; border-radius:999px; font-weight:700;">${escapeHtml(t.priority || 'Normal')}</span>
+                  ${t.orderRef ? `<span class="badge" style="background:#f1f5f9; color:#475569; font-size:0.7rem; padding:0.1rem 0.45rem; border-radius:999px;">Ref: ${escapeHtml(t.orderRef)}</span>` : ''}
+                </div>
+                <div style="display:flex; align-items:center; gap:0.4rem;">
+                  <span class="badge" style="background:${statusBg}; color:${statusColor}; font-size:0.72rem; padding:0.15rem 0.5rem; border-radius:999px; font-weight:700;">${escapeHtml(t.status)}</span>
+                  <button type="button" class="btn btn-outline btn-sm" style="font-size:0.7rem; padding:0.15rem 0.45rem; cursor:pointer;" onclick="toggleSupportTicketStatus('${escapeHtml(tid)}')">
+                    ${isResolved ? 'Reopen' : 'Mark Resolved'}
+                  </button>
+                </div>
+              </div>
+              <div style="font-weight:600; font-size:0.88rem; color:var(--ink); margin-bottom:0.25rem;">${escapeHtml(t.subject)}</div>
+              <div style="font-size:0.8rem; color:var(--muted); margin-bottom:0.45rem; line-height:1.35;">${escapeHtml(t.description)}</div>
+              ${hasAdminComment ? `
+                <div style="margin-top:0.5rem; margin-bottom:0.45rem; padding:0.45rem 0.65rem; background:#ecfdf5; border-left:3px solid #10b981; border-radius:4px; font-size:0.78rem; color:#065f46;">
+                  <strong>💬 Admin Review Note:</strong> ${escapeHtml(t.adminComment)}
+                  ${t.reviewedBy?.name ? `<span style="display:block; font-size:0.72rem; color:#047857; margin-top:0.2rem;">Reviewed by: ${escapeHtml(t.reviewedBy.name)}</span>` : ''}
+                </div>
+              ` : ''}
+              <div style="font-size:0.72rem; color:#94a3b8; display:flex; justify-content:space-between; align-items:center;">
+                <span>Category: <em>${escapeHtml(t.category)}</em></span>
+                <span>${dateStr}</span>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+      window.renderSupportTicketsList = renderSupportTicketsList;
+
+      async function toggleSupportTicketStatus(ticketId) {
+        try {
+          await apiFetch(`/api/support/tickets/${ticketId}/toggle`, { method: 'PATCH' });
+        } catch (_) {}
+
+        let tickets = [];
+        try {
+          const raw = localStorage.getItem(getSupportTicketsStorageKey());
+          if (raw) tickets = JSON.parse(raw);
+        } catch (_) {}
+
+        const target = tickets.find((t) => (t.ticketId || t.id || t._id) === ticketId);
+        if (target) {
+          target.status = target.status === 'Resolved' || target.status === 'Closed' ? 'Open' : 'Resolved';
+          try {
+            localStorage.setItem(getSupportTicketsStorageKey(), JSON.stringify(tickets));
+          } catch (_) {}
+        }
+        renderSupportTicketsList();
+      }
+      window.toggleSupportTicketStatus = toggleSupportTicketStatus;
+
+      function renderSupportFAQs() {
+        const container = document.getElementById('support-faqs-container');
+        if (!container) return;
+
+        let faqs = [];
+
+        if (role === 'restaurant') {
+          faqs = [
+            {
+              q: 'When are daily / weekly merchant payouts credited?',
+              a: 'Settlement payouts are calculated automatically and transferred directly to your verified bank account every Tuesday morning. Check transaction reference IDs in your Banking statements.'
+            },
+            {
+              q: 'How do I toggle item availability or mark dishes out of stock?',
+              a: 'Navigate to "Menu Management" from the sidebar. You can toggle any food item between "In Stock" and "Out of Stock" instantly, which reflects on customer search in real time.'
+            },
+            {
+              q: 'What should I do if a delivery rider is delayed for pickup?',
+              a: 'Ensure you click "Accept" and "Food is Ready" on the Kitchen Orders panel. The system continuously tracks the closest active riders within a 2km proximity ring and dispatches replacements if needed.'
+            },
+            {
+              q: 'How can I change kitchen opening hours or pause incoming orders?',
+              a: 'Click your profile status toggle in the sidebar or under "Restaurant Profile" to mark your kitchen as "Closed" or "Busy" during rush hours.'
+            }
+          ];
+        } else if (role === 'shop') {
+          faqs = [
+            {
+              q: 'How does the shop order packing workflow work?',
+              a: 'When an order arrives, click "Accept", pack all grocery / retail items, and click "Pack & Dispatch". An assigned rider will arrive at your store with the order verification code.'
+            },
+            {
+              q: 'How do I update prices or add new retail items?',
+              a: 'Go to "Item Management" in your sidebar. Click "+ Add New Retail Item" to upload products with prices, SKU tags, and category labels.'
+            },
+            {
+              q: 'When do shop partner settlements arrive?',
+              a: 'Reconciled settlements are generated on a rolling 7-day cycle and credited to your registered bank account.'
+            },
+            {
+              q: 'What if an ordered grocery item is out of stock in my shop?',
+              a: 'You can update stock quantity directly from Item Management, or raise a ticket above for immediate order adjustment.'
+            }
+          ];
+        } else {
+          // Customer FAQs
+          faqs = [
+            {
+              q: 'How do I check the live status of my food order?',
+              a: 'You can check real-time order tracking either under the "Live Activity & Notifications" panel on the Overview page or by visiting "My Orders" in the sidebar.'
+            },
+            {
+              q: 'Where do refunds go if an order is cancelled or items are missing?',
+              a: 'Refunds are automatically processed to your Tomato Wallet instantly, or back to your original payment card / UPI within 3–5 banking business days.'
+            },
+            {
+              q: 'How do I add or change my delivery address?',
+              a: 'Click "Saved Addresses" in the sidebar to add a new address or edit your Home, Work, and Landmark tags.'
+            },
+            {
+              q: 'Can I cancel an order after placing it?',
+              a: 'You can cancel an order before the kitchen accepts and starts preparation. If preparation has already begun, please raise a ticket above for assistance.'
+            },
+            {
+              q: 'How do I use my Wallet points during checkout?',
+              a: 'Your available wallet balance is automatically displayed on the checkout payment modal when placing your order.'
+            }
+          ];
+        }
+
+        container.innerHTML = faqs.map((f, i) => `
+          <div style="border:1px solid var(--line); border-radius:6px; overflow:hidden; background:#fbfbfb;">
+            <button
+              type="button"
+              onclick="toggleFaqAccordion(${i})"
+              style="width:100%; text-align:left; background:#fff; border:none; padding:0.75rem 0.9rem; font-size:0.87rem; font-weight:600; color:var(--ink); display:flex; justify-content:space-between; align-items:center; cursor:pointer;"
+            >
+              <span>${escapeHtml(f.q)}</span>
+              <span id="faq-chevron-${i}" style="font-size:0.8rem; color:var(--muted); transition:transform 0.2s;">▼</span>
+            </button>
+            <div id="faq-answer-${i}" style="display:none; padding:0.75rem 0.9rem; font-size:0.82rem; color:var(--muted); background:#f8fafc; border-top:1px solid var(--line); line-height:1.45;">
+              ${escapeHtml(f.a)}
+            </div>
+          </div>
+        `).join('');
+      }
+      window.renderSupportFAQs = renderSupportFAQs;
+
+      function toggleFaqAccordion(index) {
+        const answer = document.getElementById(`faq-answer-${index}`);
+        const chevron = document.getElementById(`faq-chevron-${index}`);
+        if (!answer) return;
+        const isOpen = answer.style.display === 'block';
+        answer.style.display = isOpen ? 'none' : 'block';
+        if (chevron) {
+          chevron.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(180deg)';
+        }
+      }
+      window.toggleFaqAccordion = toggleFaqAccordion;
+
+      function startQuickSupportChat() {
+        const subjectEl = document.getElementById('support-subject');
+        const descEl = document.getElementById('support-description');
+        if (subjectEl && descEl) {
+          subjectEl.value = 'Live Chat Assistance Request';
+          descEl.value = 'Hi Support, I would like to speak to an agent regarding my recent activity on Tomato.';
+          subjectEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          subjectEl.focus();
+        }
+      }
+      window.startQuickSupportChat = startQuickSupportChat;
 
       // =========================================================================
       // SETTINGS & PROFILE

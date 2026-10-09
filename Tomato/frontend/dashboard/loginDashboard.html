@@ -833,6 +833,158 @@
         </section>
 
         <!-- =================================================================
+             14B. SUPPORT & HELP VIEW (CUSTOMER, RESTAURANT, SHOP)
+             ================================================================= -->
+        <section id="support-view" class="view-section">
+          <div class="panel">
+            <div class="panel-header" style="flex-wrap:wrap; gap:0.75rem; align-items:center;">
+              <div>
+                <h2 class="panel-title" style="margin-bottom:0.2rem; display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                  <span>🛟 Help &amp; Support Desk</span>
+                  <span id="support-role-badge" class="badge" style="background:#e0f2fe; color:#0369a1; font-size:0.75rem; font-weight:700; padding:0.2rem 0.6rem; border-radius:999px;">Customer Help</span>
+                </h2>
+                <p class="food-meta" id="support-meta">Instant assistance, order queries, ticket resolution and operational FAQs</p>
+              </div>
+              <div style="display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap;">
+                <button class="btn btn-outline btn-sm" type="button" onclick="loadSupportPanel()">↻ Refresh</button>
+              </div>
+            </div>
+
+            <!-- QUICK CONTACT / CHANNELS GRID -->
+            <div class="support-channels-grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:1rem; margin-bottom:1.5rem;">
+              <div class="support-channel-card" style="background:#fff; border:1px solid var(--line); border-radius:8px; padding:1rem; box-shadow:0 1px 3px rgba(0,0,0,0.04); display:flex; align-items:flex-start; gap:0.8rem;">
+                <div style="font-size:1.8rem; line-height:1;">📞</div>
+                <div>
+                  <strong style="display:block; font-size:0.9rem; color:var(--ink);">24/7 Helpline</strong>
+                  <a href="tel:18001238662" style="font-size:0.85rem; color:var(--tomato); font-weight:700; text-decoration:none;">1800-123-TOMATO</a>
+                  <p style="margin:0.2rem 0 0; font-size:0.75rem; color:var(--muted);">Toll-free immediate assistance</p>
+                </div>
+              </div>
+
+              <div class="support-channel-card" style="background:#fff; border:1px solid var(--line); border-radius:8px; padding:1rem; box-shadow:0 1px 3px rgba(0,0,0,0.04); display:flex; align-items:flex-start; gap:0.8rem;">
+                <div style="font-size:1.8rem; line-height:1;">✉️</div>
+                <div>
+                  <strong style="display:block; font-size:0.9rem; color:var(--ink);">Priority Email</strong>
+                  <a href="mailto:support@tomato-app.com" style="font-size:0.85rem; color:var(--ink); font-weight:700; text-decoration:none;">support@tomato-app.com</a>
+                  <p style="margin:0.2rem 0 0; font-size:0.75rem; color:var(--muted);">Guaranteed response within 2 hrs</p>
+                </div>
+              </div>
+
+              <div class="support-channel-card" style="background:#fff; border:1px solid var(--line); border-radius:8px; padding:1rem; box-shadow:0 1px 3px rgba(0,0,0,0.04); display:flex; align-items:flex-start; gap:0.8rem;">
+                <div style="font-size:1.8rem; line-height:1;">💬</div>
+                <div>
+                  <strong style="display:block; font-size:0.9rem; color:var(--ink);">Live Chat Desk</strong>
+                  <span style="display:inline-flex; align-items:center; gap:0.3rem; font-size:0.8rem; color:#16a34a; font-weight:600;">
+                    <span style="display:inline-block; width:7px; height:7px; border-radius:50%; background:#16a34a;"></span> Active Now
+                  </span>
+                  <p style="margin:0.2rem 0 0; font-size:0.75rem; color:var(--muted);">Average wait &lt; 2 minutes</p>
+                </div>
+              </div>
+
+              <div class="support-channel-card" style="background:#fff; border:1px solid var(--line); border-radius:8px; padding:1rem; box-shadow:0 1px 3px rgba(0,0,0,0.04); display:flex; align-items:flex-start; gap:0.8rem;">
+                <div style="font-size:1.8rem; line-height:1;">🎫</div>
+                <div>
+                  <strong style="display:block; font-size:0.9rem; color:var(--ink);">Your Tickets</strong>
+                  <span id="support-active-tickets-count" style="font-size:0.85rem; color:var(--ink); font-weight:700;">0 Active</span>
+                  <p style="margin:0.2rem 0 0; font-size:0.75rem; color:var(--muted);">Track open requests</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- TWO-COLUMN WORKSPACE: LEFT (TICKET FORM & LIST), RIGHT (FAQS) -->
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:1.5rem; align-items:start;">
+              <!-- LEFT COLUMN: RAISE TICKET & TICKET HISTORY -->
+              <div>
+                <!-- Ticket Submission Box -->
+                <div style="background:#fff; border:1px solid var(--line); border-radius:8px; padding:1.25rem; margin-bottom:1.5rem; box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+                  <h3 style="margin:0 0 1rem; font-size:1.05rem; display:flex; align-items:center; gap:0.4rem; color:var(--ink);">
+                    <span>✍️ Raise a Support Ticket</span>
+                  </h3>
+                  <form id="support-ticket-form" onsubmit="submitSupportTicket(event)">
+                    <div class="form-row">
+                      <div class="form-group" style="flex:1;">
+                        <label for="support-category">Issue Category <span style="color:var(--tomato);">*</span></label>
+                        <select id="support-category" required style="width:100%; padding:0.5rem 0.75rem; border:1px solid var(--line); border-radius:6px; background:#fff;">
+                          <!-- Populated dynamically based on role -->
+                        </select>
+                      </div>
+                      <div class="form-group" style="flex:1;">
+                        <label for="support-priority">Priority</label>
+                        <select id="support-priority" style="width:100%; padding:0.5rem 0.75rem; border:1px solid var(--line); border-radius:6px; background:#fff;">
+                          <option value="Normal">Normal</option>
+                          <option value="High">High</option>
+                          <option value="Urgent">Urgent</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div class="form-group" id="support-order-select-group" style="margin-top:0.75rem;">
+                      <label for="support-order-ref" id="support-order-ref-label">Related Order / Reference ID (Optional)</label>
+                      <input id="support-order-ref" type="text" placeholder="e.g. ORD-10023 or Item SKU" style="width:100%; padding:0.5rem 0.75rem; border:1px solid var(--line); border-radius:6px;" />
+                    </div>
+
+                    <div class="form-group" style="margin-top:0.75rem;">
+                      <label for="support-subject">Subject <span style="color:var(--tomato);">*</span></label>
+                      <input id="support-subject" type="text" placeholder="Brief summary of your query or issue" required style="width:100%; padding:0.5rem 0.75rem; border:1px solid var(--line); border-radius:6px;" />
+                    </div>
+
+                    <div class="form-group" style="margin-top:0.75rem;">
+                      <label for="support-description">Detailed Description <span style="color:var(--tomato);">*</span></label>
+                      <textarea id="support-description" rows="4" placeholder="Please describe what happened, steps to reproduce, or details to help us resolve quickly..." required style="width:100%; padding:0.5rem 0.75rem; border:1px solid var(--line); border-radius:6px; font-family:inherit; resize:vertical;"></textarea>
+                    </div>
+
+                    <div style="margin-top:1rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+                      <span style="font-size:0.78rem; color:var(--muted);">Our dedicated support team typically replies within minutes.</span>
+                      <button class="btn btn-primary btn-sm" type="submit" id="support-submit-btn" style="padding:0.45rem 1.1rem; font-weight:600;">Submit Ticket</button>
+                    </div>
+                  </form>
+                </div>
+
+                <!-- Recent Tickets List -->
+                <div style="background:#fff; border:1px solid var(--line); border-radius:8px; padding:1.25rem; box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.8rem; flex-wrap:wrap; gap:0.5rem;">
+                    <h3 style="margin:0; font-size:1.05rem; display:flex; align-items:center; gap:0.4rem; color:var(--ink);">
+                      <span>📋 Your Recent Tickets</span>
+                    </h3>
+                    <button class="btn btn-outline btn-sm" type="button" style="font-size:0.75rem; padding:0.2rem 0.5rem;" onclick="renderSupportTicketsList()">Refresh List</button>
+                  </div>
+                  <div id="support-tickets-list-container">
+                    <!-- Rendered via JS -->
+                  </div>
+                </div>
+              </div>
+
+              <!-- RIGHT COLUMN: FAQS ACCORDION & QUICK HELP -->
+              <div>
+                <div style="background:#fff; border:1px solid var(--line); border-radius:8px; padding:1.25rem; box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+                  <h3 style="margin:0 0 0.8rem; font-size:1.05rem; display:flex; align-items:center; gap:0.4rem; color:var(--ink);">
+                    <span>💡 Frequently Asked Questions</span>
+                  </h3>
+                  <p style="font-size:0.83rem; color:var(--muted); margin:0 0 1rem;">Instant answers tailored for your account role.</p>
+                  <div id="support-faqs-container" style="display:flex; flex-direction:column; gap:0.6rem;">
+                    <!-- Rendered via JS according to role -->
+                  </div>
+                </div>
+
+                <!-- Live Help Contact Card -->
+                <div style="margin-top:1.25rem; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:1.2rem;">
+                  <strong style="color:#166534; font-size:0.95rem; display:flex; align-items:center; gap:0.4rem;">
+                    <span>🛡️ Tomato Assurance Guarantee</span>
+                  </strong>
+                  <p style="font-size:0.82rem; color:#14532d; margin:0.4rem 0 0.75rem; line-height:1.4;">
+                    All orders are covered by the Tomato Safety &amp; Quality Pledge. For missing items, delayed deliveries, or merchant queries, assistance is available 24/7.
+                  </p>
+                  <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
+                    <button type="button" class="btn btn-sm" style="background:#16a34a; color:#fff; border:none; cursor:pointer;" onclick="startQuickSupportChat()">💬 Start Quick Chat</button>
+                    <button type="button" class="btn btn-outline btn-sm" style="background:#fff; cursor:pointer;" onclick="window.open('tel:18001238662')">📞 Call Agent</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- =================================================================
              15. SETTINGS VIEW (PROFILE & RESTAURANT/RIDER DETAILS)
              ================================================================= -->
         <section id="settings-view" class="view-section">
@@ -932,6 +1084,115 @@
 
             <!-- Table Container -->
             <div id="admin-subadmins-table"></div>
+          </div>
+        </section>
+
+        <!-- =================================================================
+             16. ADMIN & SUB-ADMIN: COMPLAINT REVIEW PANEL
+             ================================================================= -->
+        <section id="admin-complaints-view" class="view-section">
+          <div class="panel">
+            <div class="panel-header" style="flex-wrap:wrap; gap:0.75rem; align-items:center;">
+              <div>
+                <h2 class="panel-title" style="margin-bottom:0.2rem; display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                  <span>⚖️ Complaint Review Desk</span>
+                  <span id="admin-complaints-total-badge" class="badge" style="background:#e0f2fe; color:#0369a1; font-size:0.75rem; font-weight:700; padding:0.2rem 0.6rem; border-radius:999px;">0 Complaints</span>
+                </h2>
+                <p class="food-meta">Review, investigate, resolve, and close platform complaints raised by customers and merchant partners</p>
+              </div>
+
+              <!-- Controls Toolbar -->
+              <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                <button class="btn btn-outline btn-sm" type="button" onclick="fetchAdminComplaints()">↻ Refresh</button>
+              </div>
+            </div>
+
+            <!-- Stats KPI Cards -->
+            <div id="admin-complaints-stats" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:1rem; margin-bottom:1.25rem;">
+              <div class="stat-card" style="background:#fff; border:1px solid var(--line); border-radius:8px; padding:1rem; box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+                <div style="font-size:0.8rem; color:var(--muted); font-weight:600;">TOTAL COMPLAINTS</div>
+                <div id="complaints-kpi-total" style="font-size:1.6rem; font-weight:700; color:var(--ink); margin-top:0.2rem;">0</div>
+                <div style="font-size:0.75rem; color:var(--muted); margin-top:0.15rem;">Across all platforms</div>
+              </div>
+              <div class="stat-card" style="background:#fff; border:1px solid var(--line); border-radius:8px; padding:1rem; box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+                <div style="font-size:0.8rem; color:#dc2626; font-weight:600;">OPEN / PENDING</div>
+                <div id="complaints-kpi-open" style="font-size:1.6rem; font-weight:700; color:#dc2626; margin-top:0.2rem;">0</div>
+                <div style="font-size:0.75rem; color:var(--muted); margin-top:0.15rem;">Awaiting first review</div>
+              </div>
+              <div class="stat-card" style="background:#fff; border:1px solid var(--line); border-radius:8px; padding:1rem; box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+                <div style="font-size:0.8rem; color:#d97706; font-weight:600;">IN REVIEW</div>
+                <div id="complaints-kpi-in-review" style="font-size:1.6rem; font-weight:700; color:#d97706; margin-top:0.2rem;">0</div>
+                <div style="font-size:0.75rem; color:var(--muted); margin-top:0.15rem;">Under investigation</div>
+              </div>
+              <div class="stat-card" style="background:#fff; border:1px solid var(--line); border-radius:8px; padding:1rem; box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+                <div style="font-size:0.8rem; color:#16a34a; font-weight:600;">RESOLVED &amp; CLOSED</div>
+                <div id="complaints-kpi-resolved" style="font-size:1.6rem; font-weight:700; color:#16a34a; margin-top:0.2rem;">0</div>
+                <div style="font-size:0.75rem; color:var(--muted); margin-top:0.15rem;">Successfully closed</div>
+              </div>
+            </div>
+
+            <!-- SEARCH & FILTER TOOLBAR -->
+            <div style="background:#fcfaf5; border:1px solid var(--line); border-radius:8px; padding:0.9rem 1rem; margin-bottom:1.25rem; display:flex; flex-direction:column; gap:0.75rem;">
+              <div style="display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap;">
+                <!-- SEARCH COMPLAIN BY USER (as requested by user!) -->
+                <div style="flex:1 1 260px; min-width:240px; display:flex; align-items:center; gap:0.4rem; background:#fff; border:1px solid var(--line); border-radius:6px; padding:0.35rem 0.65rem;">
+                  <span style="font-size:0.9rem;">👤</span>
+                  <input
+                    type="text"
+                    id="admin-complaints-user-search"
+                    placeholder="Search complainByUser (Name, Email, ID)..."
+                    style="border:none; outline:none; width:100%; font-size:0.85rem; font-family:inherit; background:transparent;"
+                    oninput="debounceAdminComplaintsSearch()"
+                  />
+                  <button type="button" class="btn btn-sm" style="border:none; background:transparent; color:var(--muted); font-size:0.75rem; cursor:pointer;" onclick="clearComplaintsUserSearch()" title="Clear user search">✕</button>
+                </div>
+
+                <!-- KEYWORD / TICKET SEARCH -->
+                <div style="flex:1 1 220px; min-width:200px; display:flex; align-items:center; gap:0.4rem; background:#fff; border:1px solid var(--line); border-radius:6px; padding:0.35rem 0.65rem;">
+                  <span style="font-size:0.9rem;">🔍</span>
+                  <input
+                    type="text"
+                    id="admin-complaints-keyword-search"
+                    placeholder="Search Ticket ID, subject, order #..."
+                    style="border:none; outline:none; width:100%; font-size:0.85rem; font-family:inherit; background:transparent;"
+                    oninput="debounceAdminComplaintsSearch()"
+                  />
+                  <button type="button" class="btn btn-sm" style="border:none; background:transparent; color:var(--muted); font-size:0.75rem; cursor:pointer;" onclick="clearComplaintsKeywordSearch()" title="Clear keyword search">✕</button>
+                </div>
+
+                <!-- USER ROLE FILTER -->
+                <div style="flex:0 0 auto; display:flex; align-items:center; gap:0.4rem;">
+                  <label for="admin-complaints-role-filter" style="font-size:0.82rem; font-weight:600; color:var(--ink); margin:0;">Role:</label>
+                  <select
+                    id="admin-complaints-role-filter"
+                    style="padding:0.4rem 0.65rem; border:1px solid var(--line); border-radius:6px; background:#fff; font-size:0.85rem;"
+                    onchange="handleAdminComplaintsFilterChange()"
+                  >
+                    <option value="all">All Complainant Roles</option>
+                    <option value="customer">Customers</option>
+                    <option value="restaurant">Restaurants</option>
+                    <option value="shop">Shops</option>
+                    <option value="rider">Riders</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- STATUS FILTER TABS -->
+              <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; padding-top:0.35rem; border-top:1px dashed #e2e8f0;">
+                <span style="font-size:0.8rem; font-weight:600; color:var(--muted);">Filter by Status:</span>
+                <button id="complaint-tab-all" class="btn btn-sm btn-outline active" type="button" onclick="setAdminComplaintsStatusFilter('all')">All</button>
+                <button id="complaint-tab-open" class="btn btn-sm btn-outline" type="button" onclick="setAdminComplaintsStatusFilter('open')">🔴 Open</button>
+                <button id="complaint-tab-in-review" class="btn btn-sm btn-outline" type="button" onclick="setAdminComplaintsStatusFilter('in review')">🟡 In Review</button>
+                <button id="complaint-tab-resolved" class="btn btn-sm btn-outline" type="button" onclick="setAdminComplaintsStatusFilter('resolved')">🟢 Resolved</button>
+                <button id="complaint-tab-closed" class="btn btn-sm btn-outline" type="button" onclick="setAdminComplaintsStatusFilter('closed')">⚪ Closed</button>
+                <span id="admin-complaints-filter-indicator" style="display:none; font-size:0.8rem; color:var(--tomato); font-weight:600; margin-left:auto;"></span>
+              </div>
+            </div>
+
+            <!-- COMPLAINTS TABLE CONTAINER -->
+            <div id="admin-complaints-table-container">
+              <!-- Rendered via JS -->
+            </div>
           </div>
         </section>
       </main>
@@ -1788,6 +2049,116 @@
           <div id="product-reviews-list-container" style="display:flex; flex-direction:column; gap:0.75rem;">
             <p style="color:var(--muted); font-size:0.85rem; text-align:center; padding:1.5rem 0;">Loading reviews...</p>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- =====================================================================
+         ADMIN: REVIEW COMPLAINT & RESOLUTION MODAL
+         ===================================================================== -->
+    <div id="admin-complaint-review-modal" class="modal-overlay" style="z-index:999995;">
+      <div class="modal-box" style="max-width:760px; max-height:92vh; overflow-y:auto;">
+        <div class="modal-header">
+          <div>
+            <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+              <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:#0369a1; font-weight:700;">⚖️ Complaint Review Desk</span>
+              <span id="review-modal-ticket-id" class="badge" style="background:#0369a1; color:#fff; font-size:0.75rem; padding:0.15rem 0.5rem; border-radius:999px;">TKT-000000</span>
+              <span id="review-modal-priority-badge" class="badge" style="font-size:0.72rem; padding:0.12rem 0.45rem; border-radius:999px;">Normal</span>
+            </div>
+            <h2 id="review-modal-subject" style="font-size:1.25rem; margin-top:0.35rem; margin-bottom:0; color:var(--ink);">Complaint Subject</h2>
+          </div>
+          <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('admin-complaint-review-modal')">&times;</button>
+        </div>
+
+        <div style="padding:1.25rem;">
+          <!-- Complainant User Details Card -->
+          <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:0.9rem 1.1rem; margin-bottom:1.2rem;">
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:0.75rem; font-size:0.85rem;">
+              <div>
+                <span style="color:var(--muted); font-size:0.78rem; display:block;">COMPLAINANT USER</span>
+                <strong id="review-modal-user-name" style="color:var(--ink); font-size:0.95rem;">User Name</strong>
+                <span id="review-modal-user-role-badge" class="badge" style="background:#f1f5f9; color:#475569; font-size:0.7rem; padding:0.1rem 0.4rem; border-radius:999px; margin-left:0.3rem;">customer</span>
+              </div>
+              <div>
+                <span style="color:var(--muted); font-size:0.78rem; display:block;">CONTACT &amp; ID</span>
+                <div id="review-modal-user-email" style="color:var(--ink);">email@example.com</div>
+                <div id="review-modal-user-id" style="color:var(--muted); font-size:0.78rem;">ID: CUST-1001</div>
+              </div>
+              <div>
+                <span style="color:var(--muted); font-size:0.78rem; display:block;">CATEGORY &amp; REFERENCE</span>
+                <div id="review-modal-category" style="font-weight:600; color:var(--ink);">Category</div>
+                <div id="review-modal-order-ref" style="color:#0284c7; font-size:0.8rem;">Order: None</div>
+              </div>
+              <div>
+                <span style="color:var(--muted); font-size:0.78rem; display:block;">DATE FILED</span>
+                <div id="review-modal-created-at" style="color:var(--ink);">Oct 9, 2026, 6:00 PM</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Full Complaint Description -->
+          <div style="margin-bottom:1.3rem;">
+            <label style="display:block; font-size:0.85rem; font-weight:700; color:var(--ink); margin-bottom:0.4rem;">Description of Complaint Raised</label>
+            <div id="review-modal-description" style="background:#fff; border:1px solid var(--line); border-radius:6px; padding:0.9rem; font-size:0.88rem; line-height:1.45; color:var(--ink); white-space:pre-wrap; max-height:160px; overflow-y:auto;">
+              Full complaint description text...
+            </div>
+          </div>
+
+          <!-- Audit Log / Previous Reviewer Info if any -->
+          <div id="review-modal-audit-info" style="display:none; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:6px; padding:0.6rem 0.9rem; font-size:0.8rem; color:#065f46; margin-bottom:1.2rem;">
+            Previously reviewed by <strong id="review-modal-reviewer-name">Admin</strong> on <span id="review-modal-reviewed-at">Date</span>
+          </div>
+
+          <!-- Review & Resolution Form -->
+          <form id="admin-complaint-review-form" onsubmit="handleSaveComplaintReview(event)">
+            <input type="hidden" id="review-modal-complaint-id" value="" />
+
+            <div class="form-row">
+              <div class="form-group" style="flex:1;">
+                <label for="review-modal-status-select" style="font-weight:700; font-size:0.85rem;">Update Complaint Status <span style="color:var(--tomato);">*</span></label>
+                <select id="review-modal-status-select" required style="width:100%; padding:0.5rem 0.75rem; border:1px solid var(--line); border-radius:6px; background:#fff; font-size:0.9rem; font-weight:600;">
+                  <option value="Open">🔴 Open (Pending Investigation)</option>
+                  <option value="In Review">🟡 In Review (Under Investigation)</option>
+                  <option value="Resolved">🟢 Resolved (Issue Solved / Refund Given)</option>
+                  <option value="Closed">⚪ Closed (Investigation Completed &amp; Closed)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-top:0.75rem;">
+              <label for="review-modal-comment-textarea" style="font-weight:700; font-size:0.85rem;">
+                Admin Review Comment / Resolution Note <span style="color:var(--tomato);">*</span>
+              </label>
+              <textarea
+                id="review-modal-comment-textarea"
+                rows="4"
+                placeholder="Provide detailed feedback, actions taken, refund details, or reason for closing the complaint..."
+                style="width:100%; padding:0.6rem 0.8rem; border:1px solid var(--line); border-radius:6px; font-size:0.88rem; font-family:inherit; resize:vertical;"
+                required
+              ></textarea>
+              <small style="display:block; margin-top:0.3rem; color:var(--muted); font-size:0.78rem;">
+                This comment will be recorded in the complaint audit trail and sent to the complainant user.
+              </small>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:1.5rem; flex-wrap:wrap; gap:0.75rem;">
+              <button
+                type="button"
+                class="btn btn-outline btn-sm"
+                style="color:#dc2626; border-color:#fca5a5;"
+                onclick="handleDirectCloseComplaint()"
+                title="Mark this complaint as Closed immediately"
+              >
+                ✕ Mark as Closed &amp; Save
+              </button>
+              <div style="display:flex; gap:0.6rem;">
+                <button type="button" class="btn btn-outline btn-sm" onclick="closeModal('admin-complaint-review-modal')">Cancel</button>
+                <button type="submit" class="btn btn-primary btn-sm" id="btn-save-complaint-review" style="padding:0.45rem 1.25rem; font-weight:600;">
+                  💾 Save Comment &amp; Status
+                </button>
+              </div>
+            </div>
+          </form>
         </div>
       </div>
     </div>

@@ -1615,3 +1615,66 @@
         transform: translateY(-1px);
       }
 
+      /* Overview header tabs (My Cart & Notifications) */
+      .overview-tab-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.35rem 0.75rem;
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: 600;
+        transition: all 0.15s ease;
+        background: #fff;
+        border: 1px solid var(--line, #e2e8f0);
+        color: var(--ink, #1e293b);
+      }
+      .overview-tab-btn:hover {
+        background: #f8fafc;
+        border-color: #cbd5e1;
+      }
+      #overview-cart-toggle-btn.active {
+        background: var(--tomato, #ff4c3b) !important;
+        color: #fff !important;
+        border-color: var(--tomato, #ff4c3b) !important;
+      }
+      #overview-cart-toggle-btn.active #overview-cart-toggle-badge {
+        background: #fff !important;
+        color: var(--tomato, #ff4c3b) !important;
+      }
+      #overview-notif-btn.active {
+        background: #0284c7 !important;
+        color: #fff !important;
+        border-color: #0284c7 !important;
+      }
+      #overview-notif-btn.active #overview-notif-badge {
+        background: #fff !important;
+        color: #0284c7 !important;
+      }
+
+      /* Order view header cart button */
+      .order-header-cart-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-weight: 600;
+        cursor: pointer;
+        padding: 0.45rem 0.75rem;
+        border-radius: 6px;
+        border: 1.5px solid var(--tomato, #ff4c3b);
+        color: var(--tomato, #ff4c3b);
+        background: #fff;
+        white-space: nowrap;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+        transition: all 0.15s ease;
+      }
+      .order-header-cart-button:hover {
+        background: var(--tomato, #ff4c3b) !important;
+        color: #fff !important;
+      }
+      .order-header-cart-button:hover #order-header-cart-badge {
+        background: #fff !important;
+        color: var(--tomato, #ff4c3b) !important;
+      }
+
+

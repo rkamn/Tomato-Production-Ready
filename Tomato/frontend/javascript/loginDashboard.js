@@ -152,6 +152,7 @@
       let selectedMenuItemId = 'all';
       let openDropdownTab = null;
       const cart = [];
+      let isCustomerCartViewActive = false;
       let customerAddresses = [];
       let selectedPaymentMethod = 'card';
 
@@ -1138,6 +1139,22 @@
         if (customerSidebarToggle) {
           customerSidebarToggle.style.display = role === 'customer' ? 'block' : 'none';
         }
+        const topbarCartBtn = document.getElementById('topbar-cart-btn');
+        if (topbarCartBtn) {
+          topbarCartBtn.style.display = role === 'customer' ? 'inline-flex' : 'none';
+        }
+        const overviewCartToggleBtn = document.getElementById('overview-cart-toggle-btn');
+        if (overviewCartToggleBtn) {
+          overviewCartToggleBtn.style.display = role === 'customer' ? 'inline-flex' : 'none';
+        }
+        const overviewNotifBtn = document.getElementById('overview-notif-btn');
+        if (overviewNotifBtn) {
+          overviewNotifBtn.style.display = role === 'customer' ? 'inline-flex' : 'none';
+        }
+        const orderHeaderCartBtn = document.getElementById('order-header-cart-btn');
+        if (orderHeaderCartBtn) {
+          orderHeaderCartBtn.style.display = role === 'customer' ? 'inline-flex' : 'none';
+        }
         refreshProfileWallet();
 
         const initials = (user.name || 'T').split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase();
@@ -1539,6 +1556,17 @@
             } else {
               fetchCustomerOrders();
             }
+          } else if (viewId === 'customer-order') {
+            if (isCustomerCartViewActive) {
+              toggleCustomerOrderCart(false);
+            }
+          } else if (viewId === 'overview') {
+            if (role === 'customer') {
+              showOverviewCartView();
+            } else {
+              showOverviewNotificationsView();
+              loadNotifications();
+            }
           }
           return;
         }
@@ -1558,8 +1586,26 @@
           targetSec.classList.add('active');
         }
 
+        // Close overview cart if switching to another view
+        if (viewId !== 'overview') {
+          const overviewDrawer = document.getElementById('overview-cart-drawer');
+          if (overviewDrawer && overviewDrawer.style.display !== 'none') {
+            overviewDrawer.style.display = 'none';
+          }
+        }
+
         // Trigger view data refresh
-        if (viewId === 'customer-order') {
+        if (viewId === 'overview') {
+          if (role === 'customer') {
+            showOverviewCartView();
+          } else {
+            showOverviewNotificationsView();
+            loadNotifications();
+          }
+        } else if (viewId === 'customer-order') {
+          if (isCustomerCartViewActive) {
+            toggleCustomerOrderCart(false);
+          }
           loadCustomerMenuSection();
         } else if (viewId === 'customer-orders') {
           fetchCustomerOrders();
@@ -1897,6 +1943,11 @@
       let currentNotifPage = 1;
       const NOTIFICATIONS_PER_PAGE = 5;
 
+      function isOverviewCartDrawerOpen() {
+        const drawer = document.getElementById('overview-cart-drawer');
+        return !!(drawer && drawer.style.display !== 'none');
+      }
+
       async function loadNotifications(targetPage = null) {
         const feed = document.getElementById('activity-feed');
         if (!feed) return;
@@ -1927,6 +1978,16 @@
             countBadge.textContent = `${currentNotifications.length} ${currentNotifications.length === 1 ? 'Update' : 'Updates'}`;
           }
 
+          const notifBtnBadge = document.getElementById('overview-notif-badge') || document.getElementById('overview-notif-btn-badge');
+          if (notifBtnBadge) {
+            if (currentNotifications.length > 0) {
+              notifBtnBadge.textContent = String(currentNotifications.length);
+              notifBtnBadge.style.display = 'inline-block';
+            } else {
+              notifBtnBadge.style.display = 'none';
+            }
+          }
+
           if (!currentNotifications.length) {
             feed.innerHTML = `
               <div style="text-align:center; padding:2rem 1rem; color:var(--muted);">
@@ -1936,6 +1997,9 @@
               </div>
             `;
             if (paginationBar) paginationBar.style.display = 'none';
+            if (isOverviewCartDrawerOpen()) {
+              feed.style.display = 'none';
+            }
             return;
           }
 
@@ -1945,10 +2009,20 @@
 
           renderNotifPage(currentNotifPage);
           renderNotifPaginationControls();
+
+          if (isOverviewCartDrawerOpen()) {
+            if (feed) feed.style.display = 'none';
+            if (paginationBar) paginationBar.style.display = 'none';
+            if (countBadge) countBadge.style.display = 'none';
+          }
         } catch (e) {
           console.error('Error loading notifications:', e);
           if (!currentNotifications.length) {
             feed.innerHTML = '<p style="color:var(--muted); font-size:0.85rem; padding:0.5rem 0;">Unable to load notifications.</p>';
+            if (paginationBar) paginationBar.style.display = 'none';
+          }
+          if (isOverviewCartDrawerOpen()) {
+            if (feed) feed.style.display = 'none';
             if (paginationBar) paginationBar.style.display = 'none';
           }
         }
@@ -1957,6 +2031,10 @@
       function renderNotifPage(page) {
         const feed = document.getElementById('activity-feed');
         if (!feed) return;
+
+        if (isOverviewCartDrawerOpen()) {
+          feed.style.display = 'none';
+        }
 
         const startIndex = (page - 1) * NOTIFICATIONS_PER_PAGE;
         const endIndex = startIndex + NOTIFICATIONS_PER_PAGE;
@@ -1996,6 +2074,11 @@
         const pageNumbersEl = document.getElementById('notif-page-numbers');
 
         if (!paginationBar) return;
+
+        if (isOverviewCartDrawerOpen()) {
+          paginationBar.style.display = 'none';
+          return;
+        }
 
         const totalItems = currentNotifications.length;
         const totalPages = Math.ceil(totalItems / NOTIFICATIONS_PER_PAGE);
@@ -2137,12 +2220,21 @@
         const searchInput = document.getElementById('dish-search');
 
         if (titleEl) {
-          titleEl.textContent = isShop ? 'Explore Shops & Products' : 'Explore Restaurants & Menus';
+          if (isCustomerCartViewActive) {
+            const totalQty = cart.reduce((sum, i) => sum + i.quantity, 0);
+            titleEl.textContent = `Item in your Cart : ${totalQty}`;
+          } else {
+            titleEl.textContent = isShop ? 'Explore Shops & Products' : 'Explore Restaurants & Menus';
+          }
         }
         if (subtitleEl) {
-          subtitleEl.textContent = isShop
-            ? 'Fresh groceries, daily essentials & retail items from local shops'
-            : 'Fresh dishes prepared and delivered to your doorstep';
+          if (isCustomerCartViewActive) {
+            subtitleEl.textContent = 'Review your selected items and proceed to checkout';
+          } else {
+            subtitleEl.textContent = isShop
+              ? 'Fresh groceries, daily essentials & retail items from local shops'
+              : 'Fresh dishes prepared and delivered to your doorstep';
+          }
         }
         if (searchInput) {
           searchInput.placeholder = isShop
@@ -3201,49 +3293,347 @@
         updateCartUI();
       }
 
-      function updateCartUI() {
-        const drawer = document.getElementById('cart-drawer');
-        const container = document.getElementById('cart-items-container');
-        if (!drawer || !container) return;
-
-        if (!cart.length) {
-          drawer.style.display = 'none';
-          return;
-        }
-
-        drawer.style.display = 'block';
-
-        container.innerHTML = cart.map((item) => `
+      function renderCartRowsHtml() {
+        return cart.map((item) => `
           <div class="cart-row">
             <div>
               <strong>${escapeHtml(item.name)}</strong>
               <div style="font-size:0.75rem; color:var(--muted);">₹${item.price.toFixed(2)} each</div>
             </div>
             <div class="cart-qty-ctrl">
-              <button class="qty-btn" onclick="updateCartQuantity('${item.itemId}', -1)">-</button>
+              <button class="qty-btn" type="button" onclick="updateCartQuantity('${item.itemId}', -1)">-</button>
               <span style="font-weight:700; width:1.4rem; text-align:center;">${item.quantity}</span>
-              <button class="qty-btn" onclick="updateCartQuantity('${item.itemId}', 1)">+</button>
+              <button class="qty-btn" type="button" onclick="updateCartQuantity('${item.itemId}', 1)">+</button>
             </div>
             <div style="font-weight:700; min-width:65px; text-align:right;">₹${(item.price * item.quantity).toFixed(2)}</div>
           </div>
         `).join('');
+      }
+
+      function updateCartUI() {
+        const totalQty = cart.reduce((sum, i) => sum + i.quantity, 0);
+
+        // Update Overview Cart Badges
+        const overviewBadge = document.getElementById('overview-cart-badge');
+        if (overviewBadge) {
+          overviewBadge.textContent = String(totalQty);
+        }
+        const overviewToggleBadge = document.getElementById('overview-cart-toggle-badge');
+        if (overviewToggleBadge) {
+          overviewToggleBadge.textContent = String(totalQty);
+        }
+        const orderHeaderCartBadge = document.getElementById('order-header-cart-badge');
+        if (orderHeaderCartBadge) {
+          orderHeaderCartBadge.textContent = String(totalQty);
+        }
+
+        // Dynamically update header if cart view is active
+        if (isCustomerCartViewActive) {
+          const titleEl = document.getElementById('customer-browse-title');
+          if (titleEl) {
+            titleEl.textContent = `Item in your Cart : ${totalQty}`;
+          }
+        }
 
         const subtotal = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
         const tax = Number((subtotal * 0.05).toFixed(2));
         const grandTotal = subtotal + tax + 40;
 
-        document.getElementById('cart-subtotal').textContent = `₹${subtotal.toFixed(2)}`;
-        document.getElementById('cart-tax').textContent = `₹${tax.toFixed(2)}`;
-        document.getElementById('cart-grand-total').textContent = `₹${grandTotal.toFixed(2)}`;
-
         const defaultAddr = customerAddresses.find((a) => a.isDefault) || customerAddresses[0];
-        const labelEl = document.getElementById('cart-delivery-label');
-        if (labelEl) {
-          labelEl.innerHTML = defaultAddr
-            ? `<strong>${escapeHtml(defaultAddr.label)}</strong> (${escapeHtml(defaultAddr.line1)}, ${escapeHtml(defaultAddr.city)}) ${defaultAddr.isDefault ? '<span class="badge badge-delivered" style="padding:1px 5px; font-size:0.7rem;">Default</span>' : ''}`
-            : 'Home (Click Addresses tab to add)';
+        const addrHtml = defaultAddr
+          ? `<strong>${escapeHtml(defaultAddr.label)}</strong> (${escapeHtml(defaultAddr.line1)}, ${escapeHtml(defaultAddr.city)}) ${defaultAddr.isDefault ? '<span class="badge badge-delivered" style="padding:1px 5px; font-size:0.7rem;">Default</span>' : ''}`
+          : 'Home (Click Addresses tab to add)';
+
+        // Customer Order View Cart container (#customer-cart-view-container)
+        const orderContainer = document.getElementById('order-cart-items-container');
+        const orderEmptyMsg = document.getElementById('order-cart-empty-message');
+        const orderFooter = document.getElementById('order-cart-footer-section');
+
+        if (orderContainer || orderEmptyMsg || orderFooter) {
+          if (!cart.length) {
+            if (orderContainer) orderContainer.innerHTML = '';
+            if (orderEmptyMsg) orderEmptyMsg.style.display = 'block';
+            if (orderFooter) orderFooter.style.display = 'none';
+          } else {
+            if (orderEmptyMsg) orderEmptyMsg.style.display = 'none';
+            if (orderFooter) orderFooter.style.display = 'block';
+            if (orderContainer) orderContainer.innerHTML = renderCartRowsHtml();
+
+            const orderSubtotalEl = document.getElementById('order-cart-subtotal');
+            const orderTaxEl = document.getElementById('order-cart-tax');
+            const orderGrandTotalEl = document.getElementById('order-cart-grand-total');
+            const orderLabelEl = document.getElementById('order-cart-delivery-label');
+
+            if (orderSubtotalEl) orderSubtotalEl.textContent = `₹${subtotal.toFixed(2)}`;
+            if (orderTaxEl) orderTaxEl.textContent = `₹${tax.toFixed(2)}`;
+            if (orderGrandTotalEl) orderGrandTotalEl.textContent = `₹${grandTotal.toFixed(2)}`;
+            if (orderLabelEl) orderLabelEl.innerHTML = addrHtml;
+          }
+        }
+
+        // Overview Cart drawer (#overview-cart-drawer) under Live Activity & Notifications (if present)
+        const overviewDrawer = document.getElementById('overview-cart-drawer');
+        const overviewContainer = document.getElementById('overview-cart-items-container');
+        const overviewEmptyMsg = document.getElementById('overview-cart-empty-message');
+        const overviewFooter = document.getElementById('overview-cart-footer-section');
+
+        if (overviewDrawer && overviewDrawer.style.display !== 'none') {
+          const overviewTitle = document.getElementById('overview-activity-title');
+          if (overviewTitle) {
+            overviewTitle.textContent = `Item in your Cart : ${totalQty}`;
+          }
+          const feed = document.getElementById('activity-feed');
+          if (feed) feed.style.display = 'none';
+          const paginationBar = document.getElementById('notif-pagination-container');
+          if (paginationBar) paginationBar.style.display = 'none';
+          const countBadge = document.getElementById('notif-count-badge');
+          if (countBadge) countBadge.style.display = 'none';
+          const refreshBtn = document.getElementById('overview-refresh-btn');
+          if (refreshBtn) refreshBtn.style.display = 'inline-block';
+
+          if (!cart.length) {
+            if (overviewContainer) overviewContainer.innerHTML = '';
+            if (overviewEmptyMsg) overviewEmptyMsg.style.display = 'block';
+            if (overviewFooter) overviewFooter.style.display = 'none';
+          } else {
+            if (overviewEmptyMsg) overviewEmptyMsg.style.display = 'none';
+            if (overviewFooter) overviewFooter.style.display = 'block';
+            if (overviewContainer) overviewContainer.innerHTML = renderCartRowsHtml();
+
+            const ovSubtotalEl = document.getElementById('overview-cart-subtotal');
+            const ovTaxEl = document.getElementById('overview-cart-tax');
+            const ovGrandTotalEl = document.getElementById('overview-cart-grand-total');
+            const ovLabelEl = document.getElementById('overview-cart-delivery-label');
+
+            if (ovSubtotalEl) ovSubtotalEl.textContent = `₹${subtotal.toFixed(2)}`;
+            if (ovTaxEl) ovTaxEl.textContent = `₹${tax.toFixed(2)}`;
+            if (ovGrandTotalEl) ovGrandTotalEl.textContent = `₹${grandTotal.toFixed(2)}`;
+            if (ovLabelEl) ovLabelEl.innerHTML = addrHtml;
+          }
         }
       }
+
+      function toggleCustomerOrderCart(forceOpen) {
+        const cartContainer = document.getElementById('customer-cart-view-container');
+        const browseWrapper = document.getElementById('customer-browse-menu-wrapper');
+        const titleEl = document.getElementById('customer-browse-title');
+        const subtitleEl = document.getElementById('customer-browse-subtitle');
+        const topbarCartBtn = document.getElementById('topbar-cart-btn');
+
+        const willOpen = typeof forceOpen === 'boolean'
+          ? forceOpen
+          : !isCustomerCartViewActive;
+
+        isCustomerCartViewActive = willOpen;
+
+        if (cartContainer) {
+          cartContainer.style.display = willOpen ? 'block' : 'none';
+        }
+        if (browseWrapper) {
+          browseWrapper.style.display = willOpen ? 'none' : 'block';
+        }
+        if (topbarCartBtn) {
+          topbarCartBtn.classList.toggle('active', willOpen);
+        }
+
+        const totalQty = cart.reduce((sum, i) => sum + i.quantity, 0);
+
+        if (titleEl) {
+          if (willOpen) {
+            titleEl.textContent = `Item in your Cart : ${totalQty}`;
+          } else {
+            const isShop = customerBrowseMode === 'shop';
+            titleEl.textContent = isShop ? 'Explore Shops & Products' : 'Explore Restaurants & Menus';
+          }
+        }
+        if (subtitleEl) {
+          if (willOpen) {
+            subtitleEl.textContent = 'Review your selected items and proceed to checkout';
+          } else {
+            const isShop = customerBrowseMode === 'shop';
+            subtitleEl.textContent = isShop
+              ? 'Fresh groceries, daily essentials & retail items from local shops'
+              : 'Fresh dishes prepared and delivered to your doorstep';
+          }
+        }
+
+        if (willOpen) {
+          // If customer addresses are not yet fetched, fetch them in background to populate address label
+          if (role === 'customer' && (!customerAddresses || !customerAddresses.length)) {
+            apiFetch('/api/customer/addresses')
+              .then((data) => {
+                customerAddresses = data.addresses || [];
+                updateCartUI();
+              })
+              .catch(() => {});
+          }
+
+          if (cartContainer) {
+            cartContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }
+        }
+
+        updateCartUI();
+      }
+      window.toggleCustomerOrderCart = toggleCustomerOrderCart;
+
+      let overviewCustomerSubView = 'cart'; // 'cart' | 'notifications'
+
+      function showOverviewCartView() {
+        overviewCustomerSubView = 'cart';
+        const drawer = document.getElementById('overview-cart-drawer');
+        const feed = document.getElementById('activity-feed');
+        const paginationBar = document.getElementById('notif-pagination-container');
+        const titleEl = document.getElementById('overview-activity-title');
+        const countBadge = document.getElementById('notif-count-badge');
+        const refreshBtn = document.getElementById('overview-refresh-btn');
+        const cartBtn = document.getElementById('overview-cart-toggle-btn');
+        const notifBtn = document.getElementById('overview-notif-btn');
+        const notifIcon = document.getElementById('overview-notif-icon');
+        const notifLabel = document.getElementById('overview-notif-label');
+        const btn = document.getElementById('topbar-cart-btn');
+
+        if (drawer) drawer.style.display = 'block';
+        if (feed) feed.style.display = 'none';
+        if (paginationBar) paginationBar.style.display = 'none';
+        if (countBadge) countBadge.style.display = 'none';
+        if (refreshBtn) refreshBtn.style.display = 'inline-block';
+
+        if (cartBtn) {
+          cartBtn.style.display = role === 'customer' ? 'inline-flex' : 'none';
+          cartBtn.classList.add('active');
+        }
+
+        if (notifBtn) {
+          notifBtn.style.display = role === 'customer' ? 'inline-flex' : 'none';
+          notifBtn.classList.remove('active');
+          if (notifIcon) notifIcon.textContent = '🔔';
+          if (notifLabel) notifLabel.textContent = 'Notifications';
+          notifBtn.title = 'View Live Activity & Notifications';
+        }
+
+        if (btn) {
+          btn.classList.add('active');
+        }
+
+        const totalQty = cart.reduce((sum, i) => sum + i.quantity, 0);
+        if (titleEl) {
+          titleEl.textContent = `Item in your Cart : ${totalQty}`;
+        }
+
+        // Fetch customer addresses if needed
+        if (role === 'customer' && (!customerAddresses || !customerAddresses.length)) {
+          apiFetch('/api/customer/addresses')
+            .then((data) => {
+              customerAddresses = data.addresses || [];
+              updateCartUI();
+            })
+            .catch(() => {});
+        }
+
+        updateCartUI();
+      }
+      window.showOverviewCartView = showOverviewCartView;
+
+      function showOverviewNotificationsView() {
+        overviewCustomerSubView = 'notifications';
+        const drawer = document.getElementById('overview-cart-drawer');
+        const feed = document.getElementById('activity-feed');
+        const paginationBar = document.getElementById('notif-pagination-container');
+        const titleEl = document.getElementById('overview-activity-title');
+        const countBadge = document.getElementById('notif-count-badge');
+        const refreshBtn = document.getElementById('overview-refresh-btn');
+        const cartBtn = document.getElementById('overview-cart-toggle-btn');
+        const notifBtn = document.getElementById('overview-notif-btn');
+        const notifIcon = document.getElementById('overview-notif-icon');
+        const notifLabel = document.getElementById('overview-notif-label');
+        const btn = document.getElementById('topbar-cart-btn');
+
+        if (drawer) drawer.style.display = 'none';
+        if (feed) feed.style.display = 'block';
+        if (countBadge) {
+          countBadge.style.display = 'inline-block';
+          countBadge.textContent = `${currentNotifications.length} ${currentNotifications.length === 1 ? 'Update' : 'Updates'}`;
+        }
+        if (refreshBtn) refreshBtn.style.display = 'inline-block';
+
+        if (cartBtn) {
+          cartBtn.style.display = role === 'customer' ? 'inline-flex' : 'none';
+          cartBtn.classList.remove('active');
+        }
+
+        if (notifBtn) {
+          notifBtn.style.display = role === 'customer' ? 'inline-flex' : 'none';
+          notifBtn.classList.add('active');
+          if (notifIcon) notifIcon.textContent = '🔔';
+          if (notifLabel) notifLabel.textContent = 'Notifications';
+          notifBtn.title = 'View Live Activity & Notifications';
+        }
+
+        if (btn) {
+          btn.classList.remove('active');
+        }
+
+        if (titleEl) {
+          titleEl.textContent = 'Live Activity & Notifications';
+        }
+
+        const totalPages = Math.ceil(currentNotifications.length / NOTIFICATIONS_PER_PAGE);
+        if (paginationBar) {
+          paginationBar.style.display = totalPages > 1 ? 'flex' : 'none';
+        }
+
+        loadNotifications(1);
+      }
+      window.showOverviewNotificationsView = showOverviewNotificationsView;
+
+      function handleOverviewNotifBtnClick() {
+        if (overviewCustomerSubView === 'cart') {
+          showOverviewNotificationsView();
+        } else {
+          showOverviewCartView();
+        }
+      }
+      window.handleOverviewNotifBtnClick = handleOverviewNotifBtnClick;
+
+      function toggleOverviewCart(forceOpen) {
+        if (typeof forceOpen === 'boolean') {
+          if (forceOpen) {
+            showOverviewCartView();
+          } else {
+            showOverviewNotificationsView();
+          }
+        } else {
+          if (overviewCustomerSubView === 'cart') {
+            showOverviewNotificationsView();
+          } else {
+            showOverviewCartView();
+          }
+        }
+      }
+      window.toggleOverviewCart = toggleOverviewCart;
+
+      function handleOverviewRefreshClick() {
+        if (overviewCustomerSubView === 'cart' && role === 'customer') {
+          updateCartUI();
+        } else {
+          loadNotifications(1);
+        }
+      }
+      window.handleOverviewRefreshClick = handleOverviewRefreshClick;
+
+      function handleHeaderCartClick() {
+        if (activeView !== 'overview') {
+          switchView('overview');
+        }
+        showOverviewCartView();
+        const drawer = document.getElementById('overview-cart-drawer');
+        if (drawer) {
+          drawer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      }
+      window.handleHeaderCartClick = handleHeaderCartClick;
+      window.handleOrderHeaderCartClick = handleHeaderCartClick;
 
       // =========================================================================
       // PAYMENT GATEWAY & PLACE ORDER

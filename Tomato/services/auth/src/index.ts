@@ -17,46 +17,13 @@ import {
   riderRoutes,
 } from './modules/index.js';
 
+import { upload, uploadDir } from './middleware/upload.js';
+
 dotenv.config({ path: fileURLToPath(new URL('../.env', import.meta.url)) });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const uploadDir = path.join(__dirname, '../uploads');
 const frontendDir = path.resolve(__dirname, '../../../frontend');
-fs.mkdirSync(uploadDir, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (
-    _req: Request,
-    _file: Express.Multer.File,
-    cb: (error: Error | null, destination: string) => void,
-  ) => cb(null, uploadDir),
-  filename: (
-    _req: Request,
-    file: Express.Multer.File,
-    cb: (error: Error | null, filename: string) => void,
-  ) => {
-    const extension = path.extname(file.originalname) || '.png';
-    const safeName = `${Date.now()}-${Math.random().toString(16).slice(2)}${extension}`;
-    cb(null, safeName);
-  },
-});
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (
-    _req: Request,
-    file: Express.Multer.File,
-    cb: FileFilterCallback,
-  ) => {
-    if (file.mimetype.startsWith('image/')) {
-      cb(null, true);
-      return;
-    }
-    cb(new Error('Only image files are allowed'));
-  },
-});
 
 const app = express();
 const PORT = process.env.PORT || 5050;

@@ -1100,6 +1100,22 @@
             <label>Description</label>
             <textarea id="mi-desc" rows="2" placeholder="Brief mouth-watering description..."></textarea>
           </div>
+          <div class="form-group">
+            <label>Dish Image (Optional)</label>
+            <div style="display:flex; align-items:center; gap:0.9rem; margin-top:0.35rem;">
+              <div id="mi-image-preview-circle" style="width:58px; height:58px; border-radius:50%; border:2.5px solid #2563eb; overflow:hidden; display:flex; align-items:center; justify-content:center; background:#f0f7ff; flex-shrink:0; box-shadow:0 1px 4px rgba(37,99,235,0.15);">
+                <span id="mi-image-placeholder" style="font-size:1.5rem;">🍽️</span>
+                <img id="mi-image-preview" src="" alt="Dish preview" style="display:none; width:100%; height:100%; object-fit:cover; border-radius:50%;" />
+              </div>
+              <div style="flex:1;">
+                <input type="file" id="mi-image-file" accept=".jpg,.jpeg,image/jpeg" style="font-size:0.82rem;" onchange="handleProductImageSelection('restaurant', this)" />
+                <input type="hidden" id="mi-image-url" value="" />
+                <div id="mi-image-status" style="font-size:0.75rem; color:var(--muted); margin-top:0.25rem;">
+                  Upload dish image (.jpg or .jpeg only, max 5MB). You can replace or upload later anytime.
+                </div>
+              </div>
+            </div>
+          </div>
           <div class="form-group" style="display:flex; align-items:center; gap:0.5rem;">
             <input type="checkbox" id="mi-active" checked />
             <label for="mi-active" style="text-transform:none; margin:0;">Active on Restaurant Menu</label>
@@ -1152,6 +1168,22 @@
           <div class="form-group">
             <label>Description</label>
             <textarea id="si-desc" rows="2" placeholder="Product details, ingredients, expiry or pack information..."></textarea>
+          </div>
+          <div class="form-group">
+            <label>Product Image (Optional)</label>
+            <div style="display:flex; align-items:center; gap:0.9rem; margin-top:0.35rem;">
+              <div id="si-image-preview-circle" style="width:58px; height:58px; border-radius:50%; border:2.5px solid #2563eb; overflow:hidden; display:flex; align-items:center; justify-content:center; background:#f0f7ff; flex-shrink:0; box-shadow:0 1px 4px rgba(37,99,235,0.15);">
+                <span id="si-image-placeholder" style="font-size:1.5rem;">🛍️</span>
+                <img id="si-image-preview" src="" alt="Product preview" style="display:none; width:100%; height:100%; object-fit:cover; border-radius:50%;" />
+              </div>
+              <div style="flex:1;">
+                <input type="file" id="si-image-file" accept=".jpg,.jpeg,image/jpeg" style="font-size:0.82rem;" onchange="handleProductImageSelection('shop', this)" />
+                <input type="hidden" id="si-image-url" value="" />
+                <div id="si-image-status" style="font-size:0.75rem; color:var(--muted); margin-top:0.25rem;">
+                  Upload product image (.jpg or .jpeg only, max 5MB). You can replace or upload later anytime.
+                </div>
+              </div>
+            </div>
           </div>
           <div class="form-group" style="display:flex; align-items:center; gap:0.5rem;">
             <input type="checkbox" id="si-active" checked />

@@ -14,6 +14,7 @@ import {
 import { formatBill } from '../../utils/orderHelpers.js';
 import Order, { OrderStatus } from '../../model/Order.js';
 import notificationService from '../notification/notificationService.js';
+import { productImageUpload } from '../../middleware/upload.js';
 
 const createShopRouter = () => {
   const router = express.Router();
@@ -251,6 +252,19 @@ const createShopRouter = () => {
     } catch (error) {
       console.error('Shop item create failed:', error);
       return res.status(500).json({ message: 'Unable to add shop item' });
+    }
+  });
+
+  router.post('/upload-image', productImageUpload.single('image'), (req: Request, res: Response) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: 'No image file uploaded' });
+      }
+      const imageUrl = `/uploads/${req.file.filename}`;
+      return res.json({ message: 'Image uploaded successfully', imageUrl });
+    } catch (error: any) {
+      console.error('Shop image upload error:', error);
+      return res.status(500).json({ message: error.message || 'Image upload failed' });
     }
   });
 

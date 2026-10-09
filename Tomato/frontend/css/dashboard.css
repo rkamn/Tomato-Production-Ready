@@ -1044,14 +1044,18 @@
       .dietary-non-veg { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
       .food-desc {
         color: var(--muted);
-        font-size: 0.84rem;
-        margin: 0.6rem 0;
-        line-height: 1.4;
+        font-size: 0.83rem;
+        margin: 0.3rem 0 0.4rem 0;
+        line-height: 1.35;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
       }
       .food-meta {
         font-size: 0.78rem;
         color: #8c887e;
-        margin-bottom: 0.8rem;
+        margin-bottom: 0.35rem;
       }
       .food-bottom {
         display: flex;

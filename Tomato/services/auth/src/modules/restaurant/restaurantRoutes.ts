@@ -19,6 +19,7 @@ import {
   buildOrderLiveTrackingData,
   createNotificationForRole,
 } from '../../utils/orderHelpers.js';
+import { productImageUpload } from '../../middleware/upload.js';
 
 const createRestaurantRouter = () => {
   const router = express.Router();
@@ -260,6 +261,19 @@ const createRestaurantRouter = () => {
     } catch (error) {
       console.error('Restaurant menu save failed:', error);
       return res.status(500).json({ message: 'Unable to add food item' });
+    }
+  });
+
+  router.post('/upload-image', productImageUpload.single('image'), (req: Request, res: Response) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: 'No image file uploaded' });
+      }
+      const imageUrl = `/uploads/${req.file.filename}`;
+      return res.json({ message: 'Image uploaded successfully', imageUrl });
+    } catch (error: any) {
+      console.error('Restaurant image upload error:', error);
+      return res.status(500).json({ message: error.message || 'Image upload failed' });
     }
   });
 

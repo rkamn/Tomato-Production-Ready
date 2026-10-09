@@ -30,6 +30,100 @@
       const userPerms = Array.isArray(user?.permissions) ? user.permissions : [];
       const hasPerm = (p) => role === 'admin' || userPerms.includes(p) || userPerms.includes('*');
 
+      function resolveImageUrl(img) {
+        if (!img || typeof img !== 'string' || !img.trim()) return '';
+        const trimmed = img.trim();
+        if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:')) {
+          return trimmed;
+        }
+        if (trimmed.startsWith('/')) {
+          return `${API_ROOT}${trimmed}`;
+        }
+        return `${API_ROOT}/${trimmed}`;
+      }
+      window.resolveImageUrl = resolveImageUrl;
+
+      async function handleProductImageSelection(type, fileInput) {
+        if (!fileInput || !fileInput.files || !fileInput.files[0]) return;
+        const file = fileInput.files[0];
+        const prefix = type === 'shop' ? 'si' : 'mi';
+        const previewImg = document.getElementById(`${prefix}-image-preview`);
+        const placeholder = document.getElementById(`${prefix}-image-placeholder`);
+        const hiddenUrl = document.getElementById(`${prefix}-image-url`);
+        const statusEl = document.getElementById(`${prefix}-image-status`);
+
+        // Strict JPG/JPEG validation
+        const fileName = (file.name || '').toLowerCase();
+        const fileType = (file.type || '').toLowerCase();
+        const isJpgExt = fileName.endsWith('.jpg') || fileName.endsWith('.jpeg');
+        const isJpgMime = !fileType || fileType === 'image/jpeg' || fileType === 'image/jpg' || fileType === 'image/pjpeg';
+
+        if (!isJpgExt || !isJpgMime) {
+          if (statusEl) {
+            statusEl.textContent = '⚠️ Only JPG and JPEG images are allowed (.jpg / .jpeg).';
+            statusEl.style.color = '#dc2626';
+          }
+          alert('Invalid file format. Product image must be JPG or JPEG only (.jpg / .jpeg).');
+          fileInput.value = '';
+          return;
+        }
+
+        if (file.size > 5 * 1024 * 1024) {
+          if (statusEl) {
+            statusEl.textContent = '⚠️ Image size exceeds 5MB limit.';
+            statusEl.style.color = '#dc2626';
+          }
+          alert('File is too large. Product image must be less than 5MB.');
+          fileInput.value = '';
+          return;
+        }
+
+        // Local instant preview in circular box
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          if (previewImg) {
+            previewImg.src = e.target.result;
+            previewImg.style.display = 'block';
+          }
+          if (placeholder) {
+            placeholder.style.display = 'none';
+          }
+        };
+        reader.readAsDataURL(file);
+
+        if (statusEl) {
+          statusEl.textContent = 'Uploading image...';
+          statusEl.style.color = '#2563eb';
+        }
+
+        try {
+          const formData = new FormData();
+          formData.append('image', file);
+          const endpoint = type === 'shop' ? '/api/shop/upload-image' : '/api/restaurant/upload-image';
+          const res = await fetch(`${API_ROOT}${endpoint}`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            body: formData,
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.message || 'Upload failed');
+          if (hiddenUrl) hiddenUrl.value = data.imageUrl || '';
+          if (statusEl) {
+            statusEl.textContent = '✓ Image uploaded! Ready to save.';
+            statusEl.style.color = '#059669';
+          }
+        } catch (err) {
+          console.error('Image upload failed:', err);
+          if (statusEl) {
+            statusEl.textContent = `⚠️ Upload failed: ${err.message}. You can try again.`;
+            statusEl.style.color = '#dc2626';
+          }
+        }
+      }
+      window.handleProductImageSelection = handleProductImageSelection;
+
       // Global state - Default landing view per role:
       // - Admin: Analytics ('admin-analytics')
       // - Shop: Shop Orders ('shop-orders')
@@ -2892,11 +2986,13 @@
 
             return `
               <div class="food-card" style="${isShopClosed ? 'opacity:0.8; border-color:#fca5a5;' : ''}">
-                <div>
-                  <div class="food-head" style="display:flex; justify-content:space-between; align-items:flex-start; gap:0.5rem; margin-bottom:0.35rem;">
+                <div style="flex:1;">
+                  <div class="food-head" style="display:flex; justify-content:space-between; align-items:flex-start; gap:0.65rem;">
                     <div style="flex:1; min-width:0;">
                       <h3 class="food-title" style="margin-bottom:0.25rem;">${escapeHtml(item.name)}</h3>
-                      <div class="food-meta">${escapeHtml(item.category || 'Retail Product')} • ${escapeHtml(shopDisplay)}</div>
+                      <div class="food-meta" style="margin-bottom:0.35rem;">${escapeHtml(item.category || 'Retail Product')} • ${escapeHtml(shopDisplay)}</div>
+                      <p class="food-desc" style="margin:0.25rem 0 0.35rem 0; font-size:0.83rem; color:var(--muted); line-height:1.35; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;" title="${escapeHtml(item.description || '')}">${escapeHtml(item.description || 'Quality retail item from local store.')}</p>
+                      <div style="font-size:0.75rem; color:var(--muted); margin-bottom:0.4rem;">Available in stock: ${stockQty}</div>
                     </div>
                     <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.25rem; flex-shrink:0;">
                       <div style="display:flex; gap:0.35rem; align-items:center;">
@@ -2909,11 +3005,14 @@
                       <button type="button" class="review-action-link" data-mode="view-only" data-item-id="${escapeHtml(itemIdStr)}" data-item-name="${escapeHtml(item.name)}" onclick="handleOrderReviewButtonClick(this)" title="View ratings & reviews">
                         Reviews
                       </button>
+                      <div class="product-circle-img-wrap" style="width:52px; height:52px; border-radius:50%; border:2.5px solid #2563eb; overflow:hidden; display:flex; align-items:center; justify-content:center; background:#f0f7ff; margin-top:0.35rem; box-shadow:0 1px 4px rgba(37,99,235,0.15); flex-shrink:0;">
+                        ${item.image && item.image.trim()
+                          ? `<img src="${escapeHtml(resolveImageUrl(item.image))}" alt="${escapeHtml(item.name)}" style="width:100%; height:100%; object-fit:cover; border-radius:50%; display:block;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" /><span style="display:none; font-size:1.35rem;">🛍️</span>`
+                          : `<span style="font-size:1.35rem;" title="No image uploaded">🛍️</span>`
+                        }
+                      </div>
                     </div>
                   </div>
-
-                  <p class="food-desc">${escapeHtml(item.description || 'Quality retail item from local store.')}</p>
-                  <div style="font-size:0.75rem; color:var(--muted); margin-bottom:0.6rem;">Available in stock: ${stockQty}</div>
                 </div>
                 <div class="food-bottom">
                   <span class="food-price">₹${Number(item.price).toFixed(2)}</span>
@@ -2982,11 +3081,13 @@
 
           return `
             <div class="food-card" style="${isRestClosed ? 'opacity:0.8; border-color:#fca5a5;' : ''}">
-              <div>
-                <div class="food-head" style="display:flex; justify-content:space-between; align-items:flex-start; gap:0.5rem; margin-bottom:0.35rem;">
+              <div style="flex:1;">
+                <div class="food-head" style="display:flex; justify-content:space-between; align-items:flex-start; gap:0.65rem;">
                   <div style="flex:1; min-width:0;">
                     <h3 class="food-title" style="margin-bottom:0.25rem;">${escapeHtml(item.name)}</h3>
-                    <div class="food-meta">${escapeHtml(item.category || 'Dish')} • ${escapeHtml(restDisplay)}</div>
+                    <div class="food-meta" style="margin-bottom:0.35rem;">${escapeHtml(item.category || 'Dish')} • ${escapeHtml(restDisplay)}</div>
+                    <p class="food-desc" style="margin:0.25rem 0 0.35rem 0; font-size:0.83rem; color:var(--muted); line-height:1.35; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;" title="${escapeHtml(item.description || '')}">${escapeHtml(item.description || 'Deliciously prepared with authentic ingredients.')}</p>
+                    <div style="font-size:0.75rem; color:var(--muted); margin-bottom:0.4rem;">Available in stock: ${item.quantity || 10}</div>
                   </div>
                   <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.25rem; flex-shrink:0;">
                     <div style="display:flex; gap:0.35rem; align-items:center;">
@@ -2999,11 +3100,14 @@
                     <button type="button" class="review-action-link" data-mode="view-only" data-item-id="${escapeHtml(itemIdStr)}" data-item-name="${escapeHtml(item.name)}" onclick="handleOrderReviewButtonClick(this)" title="View ratings & reviews">
                       Reviews
                     </button>
+                    <div class="product-circle-img-wrap" style="width:52px; height:52px; border-radius:50%; border:2.5px solid #2563eb; overflow:hidden; display:flex; align-items:center; justify-content:center; background:#f0f7ff; margin-top:0.35rem; box-shadow:0 1px 4px rgba(37,99,235,0.15); flex-shrink:0;">
+                      ${item.image && item.image.trim()
+                        ? `<img src="${escapeHtml(resolveImageUrl(item.image))}" alt="${escapeHtml(item.name)}" style="width:100%; height:100%; object-fit:cover; border-radius:50%; display:block;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" /><span style="display:none; font-size:1.35rem;">${item.dietary === 'non-veg' ? '🍗' : '🥗'}</span>`
+                        : `<span style="font-size:1.35rem;" title="No image uploaded">${item.dietary === 'non-veg' ? '🍗' : '🥗'}</span>`
+                      }
+                    </div>
                   </div>
                 </div>
-
-                <p class="food-desc">${escapeHtml(item.description || 'Deliciously prepared with authentic ingredients.')}</p>
-                <div style="font-size:0.75rem; color:var(--muted); margin-bottom:0.6rem;">Available in stock: ${item.quantity || 10}</div>
               </div>
               <div class="food-bottom">
                 <span class="food-price">₹${Number(item.price).toFixed(2)}</span>
@@ -4586,8 +4690,18 @@
                   ${items.map((it) => `
                     <tr>
                       <td>
-                        <strong>${escapeHtml(it.name)}</strong>
-                        ${it.description ? `<br><small style="color:var(--muted);">${escapeHtml(it.description)}</small>` : ''}
+                        <div style="display:flex; align-items:center; gap:0.65rem;">
+                          <div style="width:38px; height:38px; border-radius:50%; border:2px solid #2563eb; overflow:hidden; display:flex; align-items:center; justify-content:center; background:#eff6ff; flex-shrink:0;">
+                            ${it.image && it.image.trim()
+                              ? `<img src="${escapeHtml(resolveImageUrl(it.image))}" alt="${escapeHtml(it.name)}" style="width:100%; height:100%; object-fit:cover; border-radius:50%;" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';" /><span style="display:none; font-size:1.05rem;">🛍️</span>`
+                              : `<span style="font-size:1.05rem;" title="No image uploaded">🛍️</span>`
+                            }
+                          </div>
+                          <div>
+                            <strong>${escapeHtml(it.name)}</strong>
+                            ${it.description ? `<br><small style="color:var(--muted);">${escapeHtml(it.description)}</small>` : ''}
+                          </div>
+                        </div>
                       </td>
                       <td>${escapeHtml(it.category || 'General')}</td>
                       <td>${escapeHtml(it.unit || '1 unit')}</td>
@@ -4596,7 +4710,7 @@
                       <td><span class="badge ${it.isActive ? 'badge-delivered' : 'badge-cancelled'}">${it.isActive ? 'Active' : 'Hidden'}</span></td>
                       <td>
                         <div style="display:flex; gap:0.4rem;">
-                          <button class="btn btn-outline btn-sm" onclick="editShopItem('${it._id}', '${escapeHtml(it.name)}', '${escapeHtml(it.category || '')}', '${escapeHtml(it.unit || '')}', '${escapeHtml(it.description || '')}', ${it.price}, ${it.quantity}, ${Boolean(it.isActive)})">Edit</button>
+                          <button class="btn btn-outline btn-sm" onclick="editShopItem('${it._id}', '${escapeHtml(it.name)}', '${escapeHtml(it.category || '')}', '${escapeHtml(it.unit || '')}', '${escapeHtml(it.description || '')}', ${it.price}, ${it.quantity}, ${Boolean(it.isActive)}, '${escapeHtml(it.image || '')}')">Edit</button>
                           <button class="btn btn-danger btn-sm" onclick="deleteShopItem('${it._id}')">Delete</button>
                         </div>
                       </td>
@@ -4628,11 +4742,23 @@
         document.getElementById('si-quantity').value = '50';
         document.getElementById('si-desc').value = '';
         document.getElementById('si-active').checked = true;
+
+        const siImgUrl = document.getElementById('si-image-url');
+        const siImgFile = document.getElementById('si-image-file');
+        const siImgPreview = document.getElementById('si-image-preview');
+        const siImgPh = document.getElementById('si-image-placeholder');
+        const siImgSt = document.getElementById('si-image-status');
+        if (siImgUrl) siImgUrl.value = '';
+        if (siImgFile) siImgFile.value = '';
+        if (siImgPreview) { siImgPreview.src = ''; siImgPreview.style.display = 'none'; }
+        if (siImgPh) siImgPh.style.display = 'inline-block';
+        if (siImgSt) { siImgSt.textContent = 'Upload product image now or replace anytime.'; siImgSt.style.color = 'var(--muted)'; }
+
         openModal('shop-item-modal');
       }
       window.openAddShopItemModal = openAddShopItemModal;
 
-      function editShopItem(id, name, category, unit, desc, price, qty, isActive) {
+      function editShopItem(id, name, category, unit, desc, price, qty, isActive, image) {
         document.getElementById('shop-modal-title').textContent = 'Edit Shop Item';
         document.getElementById('shop-item-id').value = id;
         document.getElementById('si-name').value = name;
@@ -4642,6 +4768,24 @@
         document.getElementById('si-quantity').value = qty;
         document.getElementById('si-desc').value = desc;
         document.getElementById('si-active').checked = isActive;
+
+        const siImgUrl = document.getElementById('si-image-url');
+        const siImgFile = document.getElementById('si-image-file');
+        const siImgPreview = document.getElementById('si-image-preview');
+        const siImgPh = document.getElementById('si-image-placeholder');
+        const siImgSt = document.getElementById('si-image-status');
+        if (siImgUrl) siImgUrl.value = image || '';
+        if (siImgFile) siImgFile.value = '';
+        if (image) {
+          if (siImgPreview) { siImgPreview.src = resolveImageUrl(image); siImgPreview.style.display = 'block'; }
+          if (siImgPh) siImgPh.style.display = 'none';
+          if (siImgSt) { siImgSt.textContent = 'Current image loaded. Select a new file to replace it.'; siImgSt.style.color = 'var(--muted)'; }
+        } else {
+          if (siImgPreview) { siImgPreview.src = ''; siImgPreview.style.display = 'none'; }
+          if (siImgPh) siImgPh.style.display = 'inline-block';
+          if (siImgSt) { siImgSt.textContent = 'No image uploaded yet. You can upload one now.'; siImgSt.style.color = 'var(--muted)'; }
+        }
+
         openModal('shop-item-modal');
       }
       window.editShopItem = editShopItem;
@@ -4656,6 +4800,7 @@
           price: Number(document.getElementById('si-price').value),
           quantity: Number(document.getElementById('si-quantity').value),
           description: document.getElementById('si-desc').value.trim(),
+          image: document.getElementById('si-image-url')?.value?.trim() || '',
           isActive: document.getElementById('si-active').checked,
         };
 
@@ -4817,8 +4962,18 @@
                   ${menu.map((m) => `
                     <tr>
                       <td>
-                        <strong>${escapeHtml(m.name)}</strong>
-                        ${m.description ? `<br><small style="color:var(--muted);">${escapeHtml(m.description)}</small>` : ''}
+                        <div style="display:flex; align-items:center; gap:0.65rem;">
+                          <div style="width:38px; height:38px; border-radius:50%; border:2px solid #2563eb; overflow:hidden; display:flex; align-items:center; justify-content:center; background:#eff6ff; flex-shrink:0;">
+                            ${m.image && m.image.trim()
+                              ? `<img src="${escapeHtml(resolveImageUrl(m.image))}" alt="${escapeHtml(m.name)}" style="width:100%; height:100%; object-fit:cover; border-radius:50%;" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';" /><span style="display:none; font-size:1.05rem;">🍽️</span>`
+                              : `<span style="font-size:1.05rem;" title="No image uploaded">🍽️</span>`
+                            }
+                          </div>
+                          <div>
+                            <strong>${escapeHtml(m.name)}</strong>
+                            ${m.description ? `<br><small style="color:var(--muted);">${escapeHtml(m.description)}</small>` : ''}
+                          </div>
+                        </div>
                       </td>
                       <td>${escapeHtml(m.category)}</td>
                       <td><span class="dietary-tag ${m.dietary === 'non-veg' ? 'dietary-non-veg' : 'dietary-veg'}">${(m.dietary || 'veg').toUpperCase()}</span></td>
@@ -4827,7 +4982,7 @@
                       <td><span class="badge ${m.isActive ? 'badge-delivered' : 'badge-cancelled'}">${m.isActive ? 'Active' : 'Hidden'}</span></td>
                       <td>
                         <div style="display:flex; gap:0.4rem;">
-                          <button class="btn btn-outline btn-sm" onclick="editMenuItem('${m._id}', '${escapeHtml(m.name)}', '${escapeHtml(m.category)}', '${escapeHtml(m.description || '')}', ${m.price}, ${m.quantity}, '${m.dietary}', ${Boolean(m.isActive)})">Edit</button>
+                          <button class="btn btn-outline btn-sm" onclick="editMenuItem('${m._id}', '${escapeHtml(m.name)}', '${escapeHtml(m.category)}', '${escapeHtml(m.description || '')}', ${m.price}, ${m.quantity}, '${m.dietary}', ${Boolean(m.isActive)}, '${escapeHtml(m.image || '')}')">Edit</button>
                           <button class="btn btn-danger btn-sm" onclick="deleteMenuItem('${m._id}')">Delete</button>
                         </div>
                       </td>
@@ -4858,10 +5013,22 @@
         document.getElementById('mi-quantity').value = '20';
         document.getElementById('mi-desc').value = '';
         document.getElementById('mi-active').checked = true;
+
+        const miImgUrl = document.getElementById('mi-image-url');
+        const miImgFile = document.getElementById('mi-image-file');
+        const miImgPreview = document.getElementById('mi-image-preview');
+        const miImgPh = document.getElementById('mi-image-placeholder');
+        const miImgSt = document.getElementById('mi-image-status');
+        if (miImgUrl) miImgUrl.value = '';
+        if (miImgFile) miImgFile.value = '';
+        if (miImgPreview) { miImgPreview.src = ''; miImgPreview.style.display = 'none'; }
+        if (miImgPh) miImgPh.style.display = 'inline-block';
+        if (miImgSt) { miImgSt.textContent = 'Upload dish image now or replace anytime.'; miImgSt.style.color = 'var(--muted)'; }
+
         openModal('menu-item-modal');
       }
 
-      function editMenuItem(id, name, category, desc, price, qty, dietary, isActive) {
+      function editMenuItem(id, name, category, desc, price, qty, dietary, isActive, image) {
         document.getElementById('menu-modal-title').textContent = 'Edit Menu Item';
         document.getElementById('menu-item-id').value = id;
         document.getElementById('mi-name').value = name;
@@ -4871,6 +5038,24 @@
         document.getElementById('mi-quantity').value = qty;
         document.getElementById('mi-desc').value = desc;
         document.getElementById('mi-active').checked = isActive;
+
+        const miImgUrl = document.getElementById('mi-image-url');
+        const miImgFile = document.getElementById('mi-image-file');
+        const miImgPreview = document.getElementById('mi-image-preview');
+        const miImgPh = document.getElementById('mi-image-placeholder');
+        const miImgSt = document.getElementById('mi-image-status');
+        if (miImgUrl) miImgUrl.value = image || '';
+        if (miImgFile) miImgFile.value = '';
+        if (image) {
+          if (miImgPreview) { miImgPreview.src = resolveImageUrl(image); miImgPreview.style.display = 'block'; }
+          if (miImgPh) miImgPh.style.display = 'none';
+          if (miImgSt) { miImgSt.textContent = 'Current image loaded. Select a new file to replace it.'; miImgSt.style.color = 'var(--muted)'; }
+        } else {
+          if (miImgPreview) { miImgPreview.src = ''; miImgPreview.style.display = 'none'; }
+          if (miImgPh) miImgPh.style.display = 'inline-block';
+          if (miImgSt) { miImgSt.textContent = 'No image uploaded yet. You can upload one now.'; miImgSt.style.color = 'var(--muted)'; }
+        }
+
         openModal('menu-item-modal');
       }
 
@@ -4884,6 +5069,7 @@
           price: Number(document.getElementById('mi-price').value),
           quantity: Number(document.getElementById('mi-quantity').value),
           description: document.getElementById('mi-desc').value.trim(),
+          image: document.getElementById('mi-image-url')?.value?.trim() || '',
           isActive: document.getElementById('mi-active').checked,
         };
 
@@ -4909,6 +5095,7 @@
           alert(e.message);
         }
       }
+      window.deleteMenuItem = deleteMenuItem;
 
       // =========================================================================
       // RIDER: AVAILABLE, ACTIVE & EARNINGS

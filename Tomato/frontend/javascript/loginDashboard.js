@@ -27,13 +27,33 @@
         return 'customer';
       };
       const role = normalizeRole(user.role);
+      const userPerms = Array.isArray(user?.permissions) ? user.permissions : [];
+      const hasPerm = (p) => role === 'admin' || userPerms.includes(p) || userPerms.includes('*');
 
-      // Global state
-      let activeView = 'overview';
+      // Global state - Default landing view per role:
+      // - Admin: Analytics ('admin-analytics')
+      // - Shop: Shop Orders ('shop-orders')
+      // - Restaurant: Kitchen Orders ('restaurant-orders')
+      // - Rider: Available Pickups ('rider-available')
+      // - Customer: Order Online ('customer-order')
+      const getDefaultRoleView = () => {
+        if (role === 'admin' || (role === 'subadmin' && hasPerm('dashboard_view'))) return 'admin-analytics';
+        if (role === 'shop') return 'shop-orders';
+        if (role === 'restaurant') return 'restaurant-orders';
+        if (role === 'deliveryPartner') return 'rider-available';
+        if (role === 'customer') return 'customer-order';
+        return 'overview';
+      };
+
+      let activeView = getDefaultRoleView();
+      let customerBrowseMode = 'restaurant'; // 'restaurant' | 'shop'
       let allRestaurants = [];
       let allMenuItems = [];
+      let allShops = [];
+      let allShopItems = [];
       let currentSelectedRestaurantId = 'all';
-      let mainCustomerTab = 'all_restaurants'; // 'all_restaurants' | 'all_menus' | 'category' | 'grocery'
+      let currentSelectedShopId = 'all';
+      let mainCustomerTab = 'all_restaurants'; // 'all_restaurants' | 'all_menus' | 'category' for rest; 'all_shops' | 'all_products' | 'category' for shop
       let selectedCategory = 'all';
       let selectedMenuItemId = 'all';
       let openDropdownTab = null;
@@ -1020,6 +1040,10 @@
         if (creditTransferButton) {
           creditTransferButton.style.display = role === 'admin' ? 'inline-flex' : 'none';
         }
+        const customerSidebarToggle = document.getElementById('customer-sidebar-store-toggle-wrapper');
+        if (customerSidebarToggle) {
+          customerSidebarToggle.style.display = role === 'customer' ? 'block' : 'none';
+        }
         refreshProfileWallet();
 
         const initials = (user.name || 'T').split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase();
@@ -1073,6 +1097,9 @@
         // Load overview stats & data
         loadRoleOverview();
 
+        // Activate role-based default view (Analytics for Admin, Shop Orders for Shop, Kitchen Orders for Restaurant, Available Pickups for Rider, Order Online for Customer)
+        switchView(activeView, null, true);
+
         // Start real-time notifications stream
         initNotificationStream();
 
@@ -1091,9 +1118,53 @@
         });
       }
 
+      // Navigation Drag & Drop, Persistence & Ordering
+      let isDraggingNav = false;
+
+      function getNavStorageKey() {
+        const userId = user && (user._id || user.id || user.email);
+        return `tomato_nav_order_${userId ? `${userId}_${role}` : role}`;
+      }
+
+      function updateResetNavButtonVisibility() {
+        const hint = document.getElementById('nav-reorder-hint');
+        if (!hint) return;
+        let isCustomized = false;
+        try {
+          isCustomized = !!localStorage.getItem(getNavStorageKey());
+        } catch (_) {}
+        hint.style.display = isCustomized ? 'flex' : 'none';
+      }
+
+      function saveNavOrder() {
+        const navContainer = document.getElementById('dynamic-nav');
+        if (!navContainer) return;
+        const currentOrder = Array.from(navContainer.querySelectorAll('.nav-item'))
+          .map((el) => el.dataset.targetView)
+          .filter(Boolean);
+        try {
+          localStorage.setItem(getNavStorageKey(), JSON.stringify(currentOrder));
+        } catch (_) {}
+        updateResetNavButtonVisibility();
+      }
+
+      function getDragAfterElement(container, y) {
+        const draggableElements = [...container.querySelectorAll('.nav-item:not(.dragging)')];
+        return draggableElements.reduce((closest, child) => {
+          const box = child.getBoundingClientRect();
+          const offset = y - box.top - box.height / 2;
+          if (offset < 0 && offset > closest.offset) {
+            return { offset: offset, element: child };
+          } else {
+            return closest;
+          }
+        }, { offset: Number.NEGATIVE_INFINITY }).element;
+      }
+
       // Build Navigation Menu dynamically
       function buildNav() {
         const navContainer = document.getElementById('dynamic-nav');
+        if (!navContainer) return;
         navContainer.innerHTML = '';
 
         const userPerms = Array.isArray(user.permissions) ? user.permissions : [];
@@ -1142,16 +1213,160 @@
           subadmin: adminItems,
         };
 
-        const items = navConfigs[role] || navConfigs.customer;
-        items.forEach((item, index) => {
+        const defaultItems = navConfigs[role] || navConfigs.customer;
+
+        // Retrieve saved custom order
+        let savedOrder = [];
+        try {
+          const rawOrder = localStorage.getItem(getNavStorageKey());
+          if (rawOrder) savedOrder = JSON.parse(rawOrder);
+        } catch (_) {}
+
+        let items = [];
+        if (Array.isArray(savedOrder) && savedOrder.length > 0) {
+          const itemMap = new Map(defaultItems.map((item) => [item.id, item]));
+          savedOrder.forEach((id) => {
+            if (itemMap.has(id)) {
+              items.push(itemMap.get(id));
+              itemMap.delete(id);
+            }
+          });
+          // Append any permitted items not in savedOrder (e.g. newly granted permissions)
+          itemMap.forEach((item) => {
+            items.push(item);
+          });
+        } else {
+          items = defaultItems;
+        }
+
+        items.forEach((item) => {
           const btn = document.createElement('button');
-          btn.className = `nav-item ${index === 0 ? 'active' : ''}`;
+          btn.className = `nav-item ${item.id === activeView ? 'active' : ''}`;
           btn.type = 'button';
+          btn.draggable = true;
           btn.dataset.targetView = item.id;
-          btn.innerHTML = `<span class="nav-icon">${item.icon}</span> <span>${item.label}</span>`;
-          btn.addEventListener('click', () => switchView(item.id));
+          btn.setAttribute('aria-grabbed', 'false');
+          btn.title = `Drag to reposition "${item.label}"`;
+          btn.innerHTML = `
+            <span class="nav-drag-handle" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
+            <span class="nav-icon">${item.icon}</span>
+            <span class="nav-label">${item.label}</span>
+          `;
+
+          btn.addEventListener('click', (e) => {
+            if (isDraggingNav) {
+              e.preventDefault();
+              return;
+            }
+            switchView(item.id);
+          });
+
+          btn.addEventListener('dragstart', (e) => {
+            isDraggingNav = true;
+            btn.setAttribute('aria-grabbed', 'true');
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', item.id);
+            requestAnimationFrame(() => {
+              btn.classList.add('dragging');
+            });
+          });
+
+          btn.addEventListener('dragend', () => {
+            btn.classList.remove('dragging');
+            btn.setAttribute('aria-grabbed', 'false');
+            saveNavOrder();
+            setTimeout(() => {
+              isDraggingNav = false;
+            }, 120);
+          });
+
           navContainer.appendChild(btn);
         });
+
+        // Initialize dragover, drop and touch event listeners on nav container once
+        if (!navContainer.dataset.dragInitialized) {
+          navContainer.dataset.dragInitialized = 'true';
+
+          navContainer.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            const draggingItem = navContainer.querySelector('.nav-item.dragging');
+            if (!draggingItem) return;
+            const afterElement = getDragAfterElement(navContainer, e.clientY);
+            if (afterElement == null) {
+              navContainer.appendChild(draggingItem);
+            } else if (afterElement !== draggingItem) {
+              navContainer.insertBefore(draggingItem, afterElement);
+            }
+          });
+
+          navContainer.addEventListener('drop', (e) => {
+            e.preventDefault();
+            saveNavOrder();
+          });
+
+          // Mobile / tablet touch reordering support
+          let touchItem = null;
+          let touchStartY = 0;
+          let touchMoved = false;
+
+          navContainer.addEventListener('touchstart', (e) => {
+            const handle = e.target.closest('.nav-drag-handle') || e.target.closest('.nav-item');
+            if (!handle) return;
+            const itemEl = e.target.closest('.nav-item');
+            if (!itemEl) return;
+            touchItem = itemEl;
+            touchStartY = e.touches[0].clientY;
+            touchMoved = false;
+          }, { passive: true });
+
+          navContainer.addEventListener('touchmove', (e) => {
+            if (!touchItem) return;
+            const currentY = e.touches[0].clientY;
+            if (!touchMoved && Math.abs(currentY - touchStartY) > 8) {
+              touchMoved = true;
+              isDraggingNav = true;
+              touchItem.classList.add('dragging');
+            }
+            if (touchMoved) {
+              if (e.cancelable) e.preventDefault();
+              const afterElement = getDragAfterElement(navContainer, currentY);
+              if (afterElement == null) {
+                navContainer.appendChild(touchItem);
+              } else if (afterElement !== touchItem) {
+                navContainer.insertBefore(touchItem, afterElement);
+              }
+            }
+          }, { passive: false });
+
+          navContainer.addEventListener('touchend', () => {
+            if (touchItem) {
+              touchItem.classList.remove('dragging');
+              if (touchMoved) {
+                saveNavOrder();
+                setTimeout(() => {
+                  isDraggingNav = false;
+                }, 150);
+              }
+              touchItem = null;
+              touchMoved = false;
+            }
+          });
+        }
+
+        // Initialize reset button listener once
+        const resetBtn = document.getElementById('nav-reset-order-btn');
+        if (resetBtn && !resetBtn.dataset.bound) {
+          resetBtn.dataset.bound = 'true';
+          resetBtn.addEventListener('click', () => {
+            try {
+              localStorage.removeItem(getNavStorageKey());
+            } catch (_) {}
+            buildNav();
+          });
+        }
+
+        updateResetNavButtonVisibility();
       }
 
       // Cache tracker for view data to eliminate flocking / layout shifting
@@ -1193,7 +1408,7 @@
       }
 
       // Switch View
-      function switchView(viewId, filter = null) {
+      function switchView(viewId, filter = null, force = false) {
         if (viewId === 'restaurant-orders') {
           currentRestaurantOrderFilter = filter || 'all';
           if (typeof updateRestaurantFilterButtons === 'function') {
@@ -1204,9 +1419,14 @@
           if (typeof updateShopFilterButtons === 'function') {
             updateShopFilterButtons();
           }
+        } else if (viewId === 'customer-orders') {
+          currentCustomerOrderFilter = filter || 'all';
+          if (typeof updateCustomerFilterButtons === 'function') {
+            updateCustomerFilterButtons();
+          }
         }
 
-        if (activeView === viewId) {
+        if (activeView === viewId && !force) {
           if (viewId === 'restaurant-orders') {
             if (cachedRestaurantOrders && cachedRestaurantOrders.length) {
               renderRestaurantOrdersTable(cachedRestaurantOrders);
@@ -1218,6 +1438,12 @@
               renderShopOrdersTable(cachedShopOrders);
             } else {
               fetchShopOrders();
+            }
+          } else if (viewId === 'customer-orders') {
+            if (cachedCustomerOrders && cachedCustomerOrders.length) {
+              renderCustomerOrdersList(cachedCustomerOrders);
+            } else {
+              fetchCustomerOrders();
             }
           }
           return;
@@ -1275,6 +1501,8 @@
           fetchAdminSubAdmins();
         } else if (viewId === 'settings') {
           loadProfileSettings();
+        } else if (viewId === 'overview') {
+          loadRoleOverview();
         }
       }
 
@@ -1341,8 +1569,7 @@
 
       function handleActiveOrdersCardClick(activeCount) {
         if (activeCount > 0) {
-          switchView('customer-orders');
-          fetchCustomerOrders();
+          switchView('customer-orders', 'active');
         } else {
           showAutoDismissNotice({
             title: 'Active Orders',
@@ -1355,8 +1582,7 @@
 
       function handleTotalPlacedCardClick(totalCount) {
         if (totalCount > 0) {
-          switchView('customer-orders');
-          fetchCustomerOrders();
+          switchView('customer-orders', 'all');
         } else {
           showAutoDismissNotice({
             title: 'Total Placed',
@@ -1422,7 +1648,7 @@
 
         if (role === 'customer') {
           kickerEl.textContent = 'Customer Ordering Hub';
-          copyEl.textContent = 'Browse kitchens, place food / grocery orders, and track deliveries in real time.';
+          copyEl.textContent = 'Browse kitchens, place food orders, and track deliveries in real time.';
           try {
             const [ordersData, addrData] = await Promise.all([
               apiFetch('/api/customer/orders').catch(() => ({ orders: [] })),
@@ -1751,16 +1977,21 @@
       // =========================================================================
       async function loadCustomerMenuSection() {
         try {
-          const [restData, menuData, addrData] = await Promise.all([
+          const [restData, menuData, shopsData, shopItemsData, addrData] = await Promise.all([
             apiFetch('/api/customer/restaurants'),
-            apiFetch('/api/customer/menu'),
+            apiFetch('/api/customer/menu?type=restaurant'),
+            apiFetch('/api/customer/shops').catch(() => ({ shops: [] })),
+            apiFetch('/api/customer/menu?type=shop').catch(() => ({ menu: [] })),
             apiFetch('/api/customer/addresses').catch(() => ({ addresses: [] })),
           ]);
 
           allRestaurants = restData.restaurants || [];
           allMenuItems = menuData.menu || [];
+          allShops = shopsData.shops || [];
+          allShopItems = shopItemsData.menu || [];
           customerAddresses = addrData.addresses || [];
 
+          updateBrowseModeUI();
           renderRestaurantPills();
           renderMenuItems();
           updateCartUI();
@@ -1769,17 +2000,117 @@
         }
       }
 
-      function isGroceryItem(item) {
-        const cat = (item.category || '').toLowerCase();
-        const groceryKeywords = ['grocery', 'spices', 'spice', 'kirana', 'dairy', 'staples', 'vegetables', 'fruits'];
-        return groceryKeywords.some((kw) => cat === kw || cat.startsWith(kw));
+      function updateBrowseModeUI() {
+        const isShop = customerBrowseMode === 'shop';
+
+        // Header store duty switch
+        const headerToggleBtn = document.getElementById('header-store-toggle-btn');
+        const headerToggleLabel = document.getElementById('header-store-toggle-label');
+        if (headerToggleBtn) {
+          headerToggleBtn.classList.toggle('is-shop', isShop);
+          headerToggleBtn.classList.toggle('is-restaurant', !isShop);
+          headerToggleBtn.setAttribute('aria-checked', isShop ? 'true' : 'false');
+        }
+        if (headerToggleLabel) {
+          headerToggleLabel.textContent = isShop ? '🏪 Shop' : '🍽️ Restaurant';
+        }
+
+        // Sidebar store duty switch
+        const sidebarToggleBtn = document.getElementById('sidebar-store-toggle-btn');
+        const sidebarToggleLabel = document.getElementById('sidebar-store-toggle-label');
+        if (sidebarToggleBtn) {
+          sidebarToggleBtn.classList.toggle('is-shop', isShop);
+          sidebarToggleBtn.classList.toggle('is-restaurant', !isShop);
+          sidebarToggleBtn.setAttribute('aria-checked', isShop ? 'true' : 'false');
+        }
+        if (sidebarToggleLabel) {
+          sidebarToggleLabel.textContent = isShop ? '🏪 Shop' : '🍽️ Restaurant';
+        }
+
+        // Segmented pill buttons (if present)
+        const restToggle = document.getElementById('toggle-store-restaurant');
+        const shopToggle = document.getElementById('toggle-store-shop');
+        const sidebarRestToggle = document.getElementById('sidebar-toggle-store-restaurant');
+        const sidebarShopToggle = document.getElementById('sidebar-toggle-store-shop');
+
+        if (restToggle) restToggle.classList.toggle('active', !isShop);
+        if (shopToggle) shopToggle.classList.toggle('active', isShop);
+        if (sidebarRestToggle) sidebarRestToggle.classList.toggle('active', !isShop);
+        if (sidebarShopToggle) sidebarShopToggle.classList.toggle('active', isShop);
+
+        const titleEl = document.getElementById('customer-browse-title');
+        const subtitleEl = document.getElementById('customer-browse-subtitle');
+        const searchInput = document.getElementById('dish-search');
+
+        if (titleEl) {
+          titleEl.textContent = isShop ? 'Explore Shops & Products' : 'Explore Restaurants & Menus';
+        }
+        if (subtitleEl) {
+          subtitleEl.textContent = isShop
+            ? 'Fresh groceries, daily essentials & retail items from local shops'
+            : 'Fresh dishes prepared and delivered to your doorstep';
+        }
+        if (searchInput) {
+          searchInput.placeholder = isShop
+            ? 'Search products (e.g. Milk, Bread, Rice)...'
+            : 'Search dishes (e.g. Paneer, Pasta)...';
+        }
       }
+
+      function toggleCustomerBrowseMode() {
+        const nextMode = customerBrowseMode === 'shop' ? 'restaurant' : 'shop';
+        setCustomerBrowseMode(nextMode);
+      }
+      window.toggleCustomerBrowseMode = toggleCustomerBrowseMode;
+
+      function setCustomerBrowseMode(mode) {
+        customerBrowseMode = mode === 'shop' ? 'shop' : 'restaurant';
+        updateBrowseModeUI();
+
+        // If currently on another customer tab, switch to Order Online
+        if (role === 'customer' && typeof activeView !== 'undefined' && activeView !== 'customer-order') {
+          switchView('customer-order');
+        }
+
+        // Reset filter states for new mode
+        if (customerBrowseMode === 'shop') {
+          mainCustomerTab = 'all_shops';
+          currentSelectedShopId = 'all';
+        } else {
+          mainCustomerTab = 'all_restaurants';
+          currentSelectedRestaurantId = 'all';
+        }
+        selectedCategory = 'all';
+        selectedMenuItemId = 'all';
+
+        const searchInput = document.getElementById('dish-search');
+        if (searchInput) searchInput.value = '';
+
+        renderRestaurantPills();
+        renderMenuItems();
+      }
+      window.setCustomerBrowseMode = setCustomerBrowseMode;
 
       // Helper: case-insensitively deduplicated & nicely formatted distinct categories
       function getDistinctCategories() {
         const categoryMap = new Map();
         allMenuItems.forEach((m) => {
           const raw = (m.category || 'Main Course').trim();
+          if (!raw) return;
+          const key = raw.toLowerCase();
+          if (!categoryMap.has(key)) {
+            const formatted = raw.charAt(0).toUpperCase() + raw.slice(1);
+            categoryMap.set(key, formatted);
+          }
+        });
+        return Array.from(categoryMap.values());
+      }
+
+      // Helper: distinct categories for shops
+      function getDistinctShopCategories() {
+        const categoryMap = new Map();
+        allShopItems.forEach((m) => {
+          const raw = (m.category || 'Retail Goods').trim();
           if (!raw) return;
           const key = raw.toLowerCase();
           if (!categoryMap.has(key)) {
@@ -1870,18 +2201,28 @@
         const searchInput = document.getElementById('filter-modal-search');
 
         if (titleEl) {
-          if (activeFilterModalTab === 'all_restaurants') {
-            titleEl.textContent = '🏪 Select Restaurant';
-            if (searchInput) searchInput.placeholder = 'Search restaurant by name, cuisine, address...';
-          } else if (activeFilterModalTab === 'all_menus') {
-            titleEl.textContent = '🍽️ Select Menu / Dish';
-            if (searchInput) searchInput.placeholder = 'Search dishes by name, description, or category...';
-          } else if (activeFilterModalTab === 'category') {
-            titleEl.textContent = '📑 Select Food Category';
-            if (searchInput) searchInput.placeholder = 'Search food category...';
-          } else if (activeFilterModalTab === 'grocery') {
-            titleEl.textContent = '🛒 Select Grocery Category';
-            if (searchInput) searchInput.placeholder = 'Search grocery category...';
+          if (customerBrowseMode === 'shop') {
+            if (activeFilterModalTab === 'all_shops') {
+              titleEl.textContent = '🏪 Select Retail Shop';
+              if (searchInput) searchInput.placeholder = 'Search shop by name, category, address...';
+            } else if (activeFilterModalTab === 'all_products') {
+              titleEl.textContent = '🛍️ Select Product';
+              if (searchInput) searchInput.placeholder = 'Search products by name, description, category...';
+            } else if (activeFilterModalTab === 'category') {
+              titleEl.textContent = '📑 Select Product Category';
+              if (searchInput) searchInput.placeholder = 'Search product category...';
+            }
+          } else {
+            if (activeFilterModalTab === 'all_restaurants') {
+              titleEl.textContent = '🏪 Select Restaurant';
+              if (searchInput) searchInput.placeholder = 'Search restaurant by name, cuisine, address...';
+            } else if (activeFilterModalTab === 'all_menus') {
+              titleEl.textContent = '🍽️ Select Menu / Dish';
+              if (searchInput) searchInput.placeholder = 'Search dishes by name, description, or category...';
+            } else if (activeFilterModalTab === 'category') {
+              titleEl.textContent = '📑 Select Food Category';
+              if (searchInput) searchInput.placeholder = 'Search food category...';
+            }
           }
         }
 
@@ -1920,11 +2261,11 @@
 
         if (filterType === 'restaurant') {
           selectRestaurantFilter(filterVal);
+        } else if (filterType === 'shop') {
+          selectShopFilter(filterVal);
         } else if (filterType === 'category') {
           selectCategoryFilter(filterVal);
-        } else if (filterType === 'grocery') {
-          selectGroceryFilter(filterVal);
-        } else if (filterType === 'menu') {
+        } else if (filterType === 'menu' || filterType === 'product') {
           selectMenuItemFilter(filterVal);
         }
       }
@@ -1943,7 +2284,104 @@
         const q = (query || '').toLowerCase().trim();
         let html = '';
 
-        if (tab === 'all_restaurants') {
+        if (tab === 'all_shops') {
+          const isAllActive = currentSelectedShopId === 'all';
+          if (!q || 'all shops'.includes(q)) {
+            html += `
+              <div class="filter-modal-card ${isAllActive ? 'active' : ''}" data-filter-type="shop" data-filter-value="all" onclick="handleFilterModalCardClick(this)">
+                <div>
+                  <div style="font-weight:700; font-size:0.95rem;">All Shops</div>
+                  <div style="font-size:0.78rem; color:var(--muted);">View products across all retail shops</div>
+                </div>
+                <span class="filter-modal-card-badge">${allShopItems.length} products</span>
+              </div>
+            `;
+          }
+
+          const filteredShops = allShops.filter((shop) => {
+            if (!q) return true;
+            const name = (shop.name || shop.displayName || '').toLowerCase();
+            const cat = (shop.category || '').toLowerCase();
+            const addr = (shop.shopAddress || shop.address || '').toLowerCase();
+            return name.includes(q) || cat.includes(q) || addr.includes(q);
+          });
+
+          if (!filteredShops.length && q) {
+            html += `<p style="color:var(--muted); text-align:center; padding:1.5rem 0;">No shops match "${escapeHtml(query)}"</p>`;
+          } else {
+            filteredShops.forEach((shop) => {
+              const shopId = String(shop.id || shop._id);
+              const count = allShopItems.filter((m) => String(m.restaurantId) === shopId).length;
+              const shopDisplay = formatCleanName(shop.name || shop.displayName || 'Shop');
+              const isClosed = shop.isOpen === false || shop.isOnline === false;
+              const isActive = currentSelectedShopId === shopId;
+              const catText = shop.category ? ` • ${escapeHtml(shop.category)}` : '';
+              const addrText = (shop.shopAddress || shop.address) ? ` • ${escapeHtml(shop.shopAddress || shop.address)}` : '';
+
+              html += `
+                <div class="filter-modal-card ${isActive ? 'active' : ''}" data-filter-type="shop" data-filter-value="${escapeHtml(shopId)}" onclick="handleFilterModalCardClick(this)">
+                  <div style="flex:1; min-width:0;">
+                    <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
+                      <span style="font-weight:600; font-size:0.92rem; color:var(--ink);">${escapeHtml(shopDisplay)}</span>
+                      ${isClosed ? '<span style="font-size:0.7em; color:#ef4444; font-weight:700; background:#fee2e2; padding:0.1rem 0.35rem; border-radius:4px;">[CLOSED]</span>' : ''}
+                    </div>
+                    <div style="font-size:0.76rem; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:0.2rem;">
+                      ${count} products${catText}${addrText}
+                    </div>
+                  </div>
+                  <span class="filter-modal-card-badge">${count} products</span>
+                </div>
+              `;
+            });
+          }
+        } else if (tab === 'all_products') {
+          const isAllActive = selectedCategory === 'all' && selectedMenuItemId === 'all';
+
+          if (!q || 'all products'.includes(q)) {
+            html += `
+              <div class="filter-modal-card ${isAllActive ? 'active' : ''}" data-filter-type="product" data-filter-value="all" onclick="handleFilterModalCardClick(this)">
+                <div>
+                  <div style="font-weight:700; font-size:0.95rem;">All Products</div>
+                  <div style="font-size:0.78rem; color:var(--muted);">All groceries, retail goods and packaged products</div>
+                </div>
+                <span class="filter-modal-card-badge">${allShopItems.length} products</span>
+              </div>
+            `;
+          }
+
+          const filteredProds = allShopItems.filter((m) => {
+            if (!q) return true;
+            const name = (m.name || '').toLowerCase();
+            const cat = (m.category || '').toLowerCase();
+            const desc = (m.description || '').toLowerCase();
+            return name.includes(q) || cat.includes(q) || desc.includes(q);
+          });
+
+          if (!filteredProds.length && q) {
+            html += `<p style="color:var(--muted); text-align:center; padding:1.5rem 0;">No products match "${escapeHtml(query)}"</p>`;
+          } else {
+            filteredProds.forEach((item) => {
+              const itemId = String(item.id || item._id);
+              const isActive = selectedMenuItemId === itemId;
+              const matchShop = allShops.find((s) => String(s.id || s._id) === String(item.restaurantId));
+              const shopName = matchShop?.name || item.restaurantName || item.shopName || '';
+
+              html += `
+                <div class="filter-modal-card ${isActive ? 'active' : ''}" data-filter-type="product" data-filter-value="${escapeHtml(itemId)}" onclick="handleFilterModalCardClick(this)">
+                  <div style="flex:1; min-width:0;">
+                    <div style="display:flex; align-items:center; gap:0.4rem;">
+                      <span style="font-weight:600; font-size:0.92rem;">${escapeHtml(item.name)}</span>
+                    </div>
+                    <div style="font-size:0.76rem; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:0.2rem;">
+                      ${escapeHtml(item.category || 'Retail')}${shopName ? ` • by ${escapeHtml(shopName)}` : ''}
+                    </div>
+                  </div>
+                  <span class="filter-modal-card-badge">₹${item.price}</span>
+                </div>
+              `;
+            });
+          }
+        } else if (tab === 'all_restaurants') {
           const isAllActive = currentSelectedRestaurantId === 'all';
           if (!q || 'all restaurants'.includes(q)) {
             html += `
@@ -1994,7 +2432,9 @@
             });
           }
         } else if (tab === 'category') {
-          const distinctCategories = getDistinctCategories();
+          const isShopMode = customerBrowseMode === 'shop';
+          const distinctCategories = isShopMode ? getDistinctShopCategories() : getDistinctCategories();
+          const sourceItems = isShopMode ? allShopItems : allMenuItems;
           const isAllActive = selectedCategory === 'all';
 
           if (!q || 'all categories'.includes(q)) {
@@ -2002,9 +2442,9 @@
               <div class="filter-modal-card ${isAllActive ? 'active' : ''}" data-filter-type="category" data-filter-value="all" onclick="handleFilterModalCardClick(this)">
                 <div>
                   <div style="font-weight:700; font-size:0.95rem;">All Categories</div>
-                  <div style="font-size:0.78rem; color:var(--muted);">Explore all food categories</div>
+                  <div style="font-size:0.78rem; color:var(--muted);">${isShopMode ? 'Explore all retail product categories' : 'Explore all food categories'}</div>
                 </div>
-                <span class="filter-modal-card-badge">${allMenuItems.length} dishes</span>
+                <span class="filter-modal-card-badge">${sourceItems.length} ${isShopMode ? 'products' : 'dishes'}</span>
               </div>
             `;
           }
@@ -2014,48 +2454,12 @@
             html += `<p style="color:var(--muted); text-align:center; padding:1.5rem 0;">No categories match "${escapeHtml(query)}"</p>`;
           } else {
             filteredCats.forEach((cat) => {
-              const count = allMenuItems.filter((m) => (m.category || 'Main Course').toLowerCase() === cat.toLowerCase()).length;
+              const count = sourceItems.filter((m) => (m.category || (isShopMode ? 'Retail Goods' : 'Main Course')).toLowerCase() === cat.toLowerCase()).length;
               const isActive = selectedCategory.toLowerCase() === cat.toLowerCase();
               html += `
                 <div class="filter-modal-card ${isActive ? 'active' : ''}" data-filter-type="category" data-filter-value="${escapeHtml(cat)}" onclick="handleFilterModalCardClick(this)">
                   <div>
                     <div style="font-weight:600; font-size:0.92rem;">${escapeHtml(cat)}</div>
-                  </div>
-                  <span class="filter-modal-card-badge">${count} items</span>
-                </div>
-              `;
-            });
-          }
-        } else if (tab === 'grocery') {
-          const groceryItems = allMenuItems.filter(isGroceryItem);
-          const standardGroceryCategories = ['Spices', 'Dairy & Eggs', 'Staples', 'Snacks & Beverages', 'Fruits & Vegetables'];
-          const existingGroceryCategories = Array.from(new Set(groceryItems.map((m) => (m.category || '').trim()).filter(Boolean)));
-          const allGroceryCatsToDisplay = Array.from(new Set([...standardGroceryCategories, ...existingGroceryCategories]));
-          const isAllActive = selectedCategory === 'all';
-
-          if (!q || 'all grocery'.includes(q)) {
-            html += `
-              <div class="filter-modal-card ${isAllActive ? 'active' : ''}" data-filter-type="grocery" data-filter-value="all" onclick="handleFilterModalCardClick(this)">
-                <div>
-                  <div style="font-weight:700; font-size:0.95rem;">All Grocery</div>
-                  <div style="font-size:0.78rem; color:var(--muted);">Explore all groceries & essentials</div>
-                </div>
-                <span class="filter-modal-card-badge">${groceryItems.length} items</span>
-              </div>
-            `;
-          }
-
-          const filteredGroceries = allGroceryCatsToDisplay.filter((sc) => !q || sc.toLowerCase().includes(q));
-          if (!filteredGroceries.length && q) {
-            html += `<p style="color:var(--muted); text-align:center; padding:1.5rem 0;">No grocery categories match "${escapeHtml(query)}"</p>`;
-          } else {
-            filteredGroceries.forEach((sc) => {
-              const count = groceryItems.filter((m) => (m.category || '').toLowerCase() === sc.toLowerCase()).length;
-              const isActive = selectedCategory.toLowerCase() === sc.toLowerCase();
-              html += `
-                <div class="filter-modal-card ${isActive ? 'active' : ''}" data-filter-type="grocery" data-filter-value="${escapeHtml(sc)}" onclick="handleFilterModalCardClick(this)">
-                  <div>
-                    <div style="font-weight:600; font-size:0.92rem;">${escapeHtml(sc)}</div>
                   </div>
                   <span class="filter-modal-card-badge">${count} items</span>
                 </div>
@@ -2145,12 +2549,31 @@
         const container = document.getElementById('restaurant-pills');
         if (!container) return;
 
-        // Calculate counts for each primary header
+        if (customerBrowseMode === 'shop') {
+          // --- SHOP MODE PRIMARY HEADERS ---
+          const totalProductsCount = allShopItems.length;
+          const distinctCategories = getDistinctShopCategories();
+
+          let headersHtml = `
+            <button class="filter-pill ${mainCustomerTab === 'all_shops' ? 'active' : ''}" onclick="selectMainCustomerTab('all_shops')">
+              🏪 Shops (${allShops.length})
+            </button>
+            <button class="filter-pill ${mainCustomerTab === 'all_products' ? 'active' : ''}" onclick="selectMainCustomerTab('all_products')">
+              🛍️ Products (${totalProductsCount})
+            </button>
+            <button class="filter-pill ${mainCustomerTab === 'category' ? 'active' : ''}" onclick="selectMainCustomerTab('category')">
+              📑 P-Category (${distinctCategories.length})
+            </button>
+          `;
+          container.innerHTML = headersHtml;
+          renderSubFilterPills();
+          return;
+        }
+
+        // --- RESTAURANT MODE PRIMARY HEADERS ---
         const totalItemsCount = allMenuItems.length;
-        const groceryCount = allMenuItems.filter(isGroceryItem).length;
         const distinctCategories = getDistinctCategories();
 
-        // 1. Primary Headers: Restaurants, Menus, F-Category, Grocery
         let headersHtml = `
           <button class="filter-pill ${mainCustomerTab === 'all_restaurants' ? 'active' : ''}" onclick="selectMainCustomerTab('all_restaurants')">
             🏪 Restaurants (${allRestaurants.length})
@@ -2160,9 +2583,6 @@
           </button>
           <button class="filter-pill ${mainCustomerTab === 'category' ? 'active' : ''}" onclick="selectMainCustomerTab('category')">
             📑 F-Category (${distinctCategories.length})
-          </button>
-          <button class="filter-pill ${mainCustomerTab === 'grocery' ? 'active' : ''}" onclick="selectMainCustomerTab('grocery')">
-            🛒 Grocery (${groceryCount})
           </button>
         `;
         container.innerHTML = headersHtml;
@@ -2177,127 +2597,175 @@
 
         let subHtml = '';
 
-        if (mainCustomerTab === 'all_restaurants') {
-          // --- RESTAURANTS TAB ---
-          // Split pill: "All () ▼" (arrow opens modal popup) + stable last 5 restaurants
-          const isAllActive = currentSelectedRestaurantId === 'all';
-          const recentRests = getStablePillItems('restaurants', allRestaurants, (r) => r.id || r._id);
+        if (customerBrowseMode === 'shop') {
+          // ==================== SHOP MODE SUB-PILLS ====================
+          if (mainCustomerTab === 'all_shops') {
+            const isAllActive = currentSelectedShopId === 'all';
+            const recentShops = getStablePillItems('shops', allShops, (s) => s.id || s._id);
 
-          subHtml += `
-            <div class="split-filter-pill ${isAllActive ? 'active' : ''}">
-              <button type="button" class="split-filter-pill-action" onclick="selectRestaurantFilter('all')">
-                All (${allMenuItems.length})
-              </button>
-              <button type="button" class="split-filter-pill-caret" onclick="openFilterSelectionModal('all_restaurants')" title="Open all restaurants popup" aria-label="Open all restaurants popup">
-                ▼
-              </button>
-            </div>
-          `;
-
-          // Stable 5 visited restaurant pills
-          recentRests.forEach((rest) => {
-            const restId = String(rest.id || rest._id);
-            const count = allMenuItems.filter((m) => String(m.restaurantId) === restId).length;
-            const restDisplay = formatCleanName(rest.name || rest.displayName || 'Restaurant');
-            const isClosed = rest.isOpen === false || rest.isOnline === false;
-            const statusBadge = isClosed ? ' <span style="font-size:0.7em; color:#ef4444; font-weight:700;">[CLOSED]</span>' : '';
-            const isActive = currentSelectedRestaurantId === restId;
             subHtml += `
-              <button class="filter-pill ${isActive ? 'active' : ''}" style="font-size:0.8rem; padding:0.35rem 0.8rem; ${isClosed ? 'opacity:0.85; border-color:#fca5a5;' : ''}" onclick="selectRestaurantFilter('${restId}')">
-                ${escapeHtml(restDisplay)}${statusBadge} (${count})
+              <div class="split-filter-pill ${isAllActive ? 'active' : ''}">
+                <button type="button" class="split-filter-pill-action" onclick="selectShopFilter('all')">
+                  All (${allShopItems.length})
+                </button>
+                <button type="button" class="split-filter-pill-caret" onclick="openFilterSelectionModal('all_shops')" title="Open all shops popup" aria-label="Open all shops popup">
+                  ▼
+                </button>
+              </div>
+            `;
+
+            recentShops.forEach((shop) => {
+              const shopId = String(shop.id || shop._id);
+              const count = allShopItems.filter((m) => String(m.restaurantId) === shopId).length;
+              const shopDisplay = formatCleanName(shop.name || shop.displayName || 'Shop');
+              const isClosed = shop.isOpen === false || shop.isOnline === false;
+              const statusBadge = isClosed ? ' <span style="font-size:0.7em; color:#ef4444; font-weight:700;">[CLOSED]</span>' : '';
+              const isActive = currentSelectedShopId === shopId;
+              subHtml += `
+                <button class="filter-pill ${isActive ? 'active' : ''}" style="font-size:0.8rem; padding:0.35rem 0.8rem; ${isClosed ? 'opacity:0.85; border-color:#fca5a5;' : ''}" onclick="selectShopFilter('${shopId}')">
+                  ${escapeHtml(shopDisplay)}${statusBadge} (${count})
+                </button>
+              `;
+            });
+          } else if (mainCustomerTab === 'category') {
+            const distinctCategories = getDistinctShopCategories();
+            const isAllActive = selectedCategory === 'all';
+            const recentCats = getStablePillItems('shop_categories', distinctCategories, (c) => c);
+
+            subHtml += `
+              <div class="split-filter-pill ${isAllActive ? 'active' : ''}">
+                <button type="button" class="split-filter-pill-action" onclick="selectCategoryFilter('all')">
+                  All Categories (${allShopItems.length})
+                </button>
+                <button type="button" class="split-filter-pill-caret" onclick="openFilterSelectionModal('category')" title="Open all categories popup" aria-label="Open all categories popup">
+                  ▼
+                </button>
+              </div>
+            `;
+
+            recentCats.forEach((cat) => {
+              const count = allShopItems.filter((m) => (m.category || 'Retail Goods').toLowerCase() === cat.toLowerCase()).length;
+              const isActive = selectedCategory.toLowerCase() === cat.toLowerCase();
+              subHtml += `
+                <button class="filter-pill ${isActive ? 'active' : ''}" style="font-size:0.8rem; padding:0.35rem 0.8rem;" onclick="selectCategoryFilter('${escapeHtml(cat)}')">
+                  ${escapeHtml(cat)} (${count})
+                </button>
+              `;
+            });
+          } else if (mainCustomerTab === 'all_products') {
+            const isAllActive = selectedCategory === 'all' && selectedMenuItemId === 'all';
+            const recentProducts = getStablePillItems('products', allShopItems, (m) => m.id || m._id);
+
+            subHtml += `
+              <div class="split-filter-pill ${isAllActive ? 'active' : ''}">
+                <button type="button" class="split-filter-pill-action" onclick="selectMenuItemFilter('all')">
+                  All Products (${allShopItems.length})
+                </button>
+                <button type="button" class="split-filter-pill-caret" onclick="openFilterSelectionModal('all_products')" title="Open all products popup" aria-label="Open all products popup">
+                  ▼
+                </button>
+              </div>
+            `;
+
+            recentProducts.forEach((item) => {
+              const itemId = String(item.id || item._id);
+              const isActive = selectedMenuItemId === itemId;
+              subHtml += `
+                <button class="filter-pill ${isActive ? 'active' : ''}" style="font-size:0.8rem; padding:0.35rem 0.8rem;" onclick="selectMenuItemFilter('${itemId}')">
+                  ${escapeHtml(item.name)} (₹${item.price})
+                </button>
+              `;
+            });
+          }
+        } else {
+          // ==================== RESTAURANT MODE SUB-PILLS ====================
+          if (mainCustomerTab === 'all_restaurants') {
+            const isAllActive = currentSelectedRestaurantId === 'all';
+            const recentRests = getStablePillItems('restaurants', allRestaurants, (r) => r.id || r._id);
+
+            subHtml += `
+              <div class="split-filter-pill ${isAllActive ? 'active' : ''}">
+                <button type="button" class="split-filter-pill-action" onclick="selectRestaurantFilter('all')">
+                  All (${allMenuItems.length})
+                </button>
+                <button type="button" class="split-filter-pill-caret" onclick="openFilterSelectionModal('all_restaurants')" title="Open all restaurants popup" aria-label="Open all restaurants popup">
+                  ▼
+                </button>
+              </div>
+            `;
+
+            recentRests.forEach((rest) => {
+              const restId = String(rest.id || rest._id);
+              const count = allMenuItems.filter((m) => String(m.restaurantId) === restId).length;
+              const restDisplay = formatCleanName(rest.name || rest.displayName || 'Restaurant');
+              const isClosed = rest.isOpen === false || rest.isOnline === false;
+              const statusBadge = isClosed ? ' <span style="font-size:0.7em; color:#ef4444; font-weight:700;">[CLOSED]</span>' : '';
+              const isActive = currentSelectedRestaurantId === restId;
+              subHtml += `
+                <button class="filter-pill ${isActive ? 'active' : ''}" style="font-size:0.8rem; padding:0.35rem 0.8rem; ${isClosed ? 'opacity:0.85; border-color:#fca5a5;' : ''}" onclick="selectRestaurantFilter('${restId}')">
+                  ${escapeHtml(restDisplay)}${statusBadge} (${count})
+                </button>
+              `;
+            });
+          } else if (mainCustomerTab === 'category') {
+            const distinctCategories = getDistinctCategories();
+            const isAllActive = selectedCategory === 'all';
+            const recentCats = getStablePillItems('categories', distinctCategories, (c) => c);
+
+            subHtml += `
+              <div class="split-filter-pill ${isAllActive ? 'active' : ''}">
+                <button type="button" class="split-filter-pill-action" onclick="selectCategoryFilter('all')">
+                  All Categories (${allMenuItems.length})
+                </button>
+                <button type="button" class="split-filter-pill-caret" onclick="openFilterSelectionModal('category')" title="Open all categories popup" aria-label="Open all categories popup">
+                  ▼
+                </button>
+              </div>
+            `;
+
+            recentCats.forEach((cat) => {
+              const count = allMenuItems.filter((m) => (m.category || 'Main Course').toLowerCase() === cat.toLowerCase()).length;
+              const isActive = selectedCategory.toLowerCase() === cat.toLowerCase();
+              subHtml += `
+                <button class="filter-pill ${isActive ? 'active' : ''}" style="font-size:0.8rem; padding:0.35rem 0.8rem;" onclick="selectCategoryFilter('${escapeHtml(cat)}')">
+                  ${escapeHtml(cat)} (${count})
+                </button>
+              `;
+            });
+          } else if (mainCustomerTab === 'all_menus') {
+            const isAllActive = selectedCategory === 'all' && selectedMenuItemId === 'all';
+            const vegCount = allMenuItems.filter((m) => m.dietary !== 'non-veg').length;
+            const nonVegCount = allMenuItems.filter((m) => m.dietary === 'non-veg').length;
+
+            const recentMenuItems = getStablePillItems('menus', allMenuItems, (m) => m.id || m._id);
+
+            subHtml += `
+              <div class="split-filter-pill ${isAllActive ? 'active' : ''}">
+                <button type="button" class="split-filter-pill-action" onclick="selectMenuItemFilter('all')">
+                  All Menus (${allMenuItems.length})
+                </button>
+                <button type="button" class="split-filter-pill-caret" onclick="openFilterSelectionModal('all_menus')" title="Open all menus popup" aria-label="Open all menus popup">
+                  ▼
+                </button>
+              </div>
+              <button class="filter-pill ${selectedCategory === 'veg' && selectedMenuItemId === 'all' ? 'active' : ''}" style="font-size:0.8rem; padding:0.35rem 0.8rem; border-color:#86efac; color:#16a34a;" onclick="selectMenuItemFilter('veg')">
+                🟢 Pure Veg (${vegCount})
+              </button>
+              <button class="filter-pill ${selectedCategory === 'non-veg' && selectedMenuItemId === 'all' ? 'active' : ''}" style="font-size:0.8rem; padding:0.35rem 0.8rem; border-color:#fca5a5; color:#dc2626;" onclick="selectMenuItemFilter('non-veg')">
+                🔴 Non-Veg (${nonVegCount})
               </button>
             `;
-          });
-        } else if (mainCustomerTab === 'category') {
-          // --- F-CATEGORY TAB ---
-          const distinctCategories = getDistinctCategories();
-          const isAllActive = selectedCategory === 'all';
-          const recentCats = getStablePillItems('categories', distinctCategories, (c) => c);
 
-          subHtml += `
-            <div class="split-filter-pill ${isAllActive ? 'active' : ''}">
-              <button type="button" class="split-filter-pill-action" onclick="selectCategoryFilter('all')">
-                All Categories (${allMenuItems.length})
-              </button>
-              <button type="button" class="split-filter-pill-caret" onclick="openFilterSelectionModal('category')" title="Open all categories popup" aria-label="Open all categories popup">
-                ▼
-              </button>
-            </div>
-          `;
-
-          recentCats.forEach((cat) => {
-            const count = allMenuItems.filter((m) => (m.category || 'Main Course').toLowerCase() === cat.toLowerCase()).length;
-            const isActive = selectedCategory.toLowerCase() === cat.toLowerCase();
-            subHtml += `
-              <button class="filter-pill ${isActive ? 'active' : ''}" style="font-size:0.8rem; padding:0.35rem 0.8rem;" onclick="selectCategoryFilter('${escapeHtml(cat)}')">
-                ${escapeHtml(cat)} (${count})
-              </button>
-            `;
-          });
-        } else if (mainCustomerTab === 'grocery') {
-          // --- GROCERY TAB ---
-          const groceryItems = allMenuItems.filter(isGroceryItem);
-          const standardGroceryCategories = ['Spices', 'Dairy & Eggs', 'Staples', 'Snacks & Beverages', 'Fruits & Vegetables'];
-          const existingGroceryCategories = Array.from(new Set(groceryItems.map((m) => (m.category || '').trim()).filter(Boolean)));
-          const allGroceryCatsToDisplay = Array.from(new Set([...standardGroceryCategories, ...existingGroceryCategories]));
-
-          const isAllActive = selectedCategory === 'all';
-          const recentGroceries = getStablePillItems('groceries', allGroceryCatsToDisplay, (g) => g);
-
-          subHtml += `
-            <div class="split-filter-pill ${isAllActive ? 'active' : ''}">
-              <button type="button" class="split-filter-pill-action" onclick="selectGroceryFilter('all')">
-                All Grocery (${groceryItems.length})
-              </button>
-              <button type="button" class="split-filter-pill-caret" onclick="openFilterSelectionModal('grocery')" title="Open all grocery categories popup" aria-label="Open all grocery categories popup">
-                ▼
-              </button>
-            </div>
-          `;
-
-          recentGroceries.forEach((sc) => {
-            const count = groceryItems.filter((m) => (m.category || '').toLowerCase() === sc.toLowerCase()).length;
-            const isActive = selectedCategory.toLowerCase() === sc.toLowerCase();
-            subHtml += `
-              <button class="filter-pill ${isActive ? 'active' : ''}" style="font-size:0.8rem; padding:0.35rem 0.8rem;" onclick="selectGroceryFilter('${escapeHtml(sc)}')">
-                ${escapeHtml(sc)} (${count})
-              </button>
-            `;
-          });
-        } else if (mainCustomerTab === 'all_menus') {
-          // --- MENUS TAB ---
-          const isAllActive = selectedCategory === 'all' && selectedMenuItemId === 'all';
-          const vegCount = allMenuItems.filter((m) => m.dietary !== 'non-veg').length;
-          const nonVegCount = allMenuItems.filter((m) => m.dietary === 'non-veg').length;
-
-          const recentMenuItems = getStablePillItems('menus', allMenuItems, (m) => m.id || m._id);
-
-          subHtml += `
-            <div class="split-filter-pill ${isAllActive ? 'active' : ''}">
-              <button type="button" class="split-filter-pill-action" onclick="selectMenuItemFilter('all')">
-                All Menus (${allMenuItems.length})
-              </button>
-              <button type="button" class="split-filter-pill-caret" onclick="openFilterSelectionModal('all_menus')" title="Open all menus popup" aria-label="Open all menus popup">
-                ▼
-              </button>
-            </div>
-            <button class="filter-pill ${selectedCategory === 'veg' && selectedMenuItemId === 'all' ? 'active' : ''}" style="font-size:0.8rem; padding:0.35rem 0.8rem; border-color:#86efac; color:#16a34a;" onclick="selectMenuItemFilter('veg')">
-              🟢 Pure Veg (${vegCount})
-            </button>
-            <button class="filter-pill ${selectedCategory === 'non-veg' && selectedMenuItemId === 'all' ? 'active' : ''}" style="font-size:0.8rem; padding:0.35rem 0.8rem; border-color:#fca5a5; color:#dc2626;" onclick="selectMenuItemFilter('non-veg')">
-              🔴 Non-Veg (${nonVegCount})
-            </button>
-          `;
-
-          recentMenuItems.forEach((item) => {
-            const itemId = String(item.id || item._id);
-            const isActive = selectedMenuItemId === itemId;
-            subHtml += `
-              <button class="filter-pill ${isActive ? 'active' : ''}" style="font-size:0.8rem; padding:0.35rem 0.8rem;" onclick="selectMenuItemFilter('${itemId}')">
-                ${escapeHtml(item.name)} (₹${item.price})
-              </button>
-            `;
-          });
+            recentMenuItems.forEach((item) => {
+              const itemId = String(item.id || item._id);
+              const isActive = selectedMenuItemId === itemId;
+              subHtml += `
+                <button class="filter-pill ${isActive ? 'active' : ''}" style="font-size:0.8rem; padding:0.35rem 0.8rem;" onclick="selectMenuItemFilter('${itemId}')">
+                  ${escapeHtml(item.name)} (₹${item.price})
+                </button>
+              `;
+            });
+          }
         }
 
         subContainer.innerHTML = subHtml;
@@ -2307,11 +2775,13 @@
         mainCustomerTab = tab;
         selectedCategory = 'all';
         currentSelectedRestaurantId = 'all';
+        currentSelectedShopId = 'all';
         selectedMenuItemId = 'all';
         openDropdownTab = null;
         renderRestaurantPills();
         renderMenuItems();
       }
+      window.selectMainCustomerTab = selectMainCustomerTab;
 
       function closeDropdownMenu() {
         closeFilterModal();
@@ -2326,26 +2796,30 @@
         renderRestaurantPills();
         renderMenuItems();
       }
+      window.selectRestaurantFilter = selectRestaurantFilter;
+
+      function selectShopFilter(id) {
+        currentSelectedShopId = id;
+        if (id !== 'all') {
+          recordVisitedItem('shops', id);
+        }
+        closeFilterModal();
+        renderRestaurantPills();
+        renderMenuItems();
+      }
+      window.selectShopFilter = selectShopFilter;
 
       function selectCategoryFilter(cat) {
         selectedCategory = cat;
         if (cat !== 'all') {
-          recordVisitedItem('categories', cat);
+          const catKey = customerBrowseMode === 'shop' ? 'shop_categories' : 'categories';
+          recordVisitedItem(catKey, cat);
         }
         closeFilterModal();
         renderRestaurantPills();
         renderMenuItems();
       }
-
-      function selectGroceryFilter(cat) {
-        selectedCategory = cat;
-        if (cat !== 'all') {
-          recordVisitedItem('groceries', cat);
-        }
-        closeFilterModal();
-        renderRestaurantPills();
-        renderMenuItems();
-      }
+      window.selectCategoryFilter = selectCategoryFilter;
 
       function selectMenuItemFilter(val) {
         if (val === 'all') {
@@ -2357,12 +2831,14 @@
         } else {
           selectedMenuItemId = val;
           selectedCategory = 'all';
-          recordVisitedItem('menus', val);
+          const itemKey = customerBrowseMode === 'shop' ? 'products' : 'menus';
+          recordVisitedItem(itemKey, val);
         }
         closeFilterModal();
         renderRestaurantPills();
         renderMenuItems();
       }
+      window.selectMenuItemFilter = selectMenuItemFilter;
 
       function filterMenu() {
         renderMenuItems();
@@ -2374,6 +2850,89 @@
 
         const searchVal = (document.getElementById('dish-search')?.value || '').toLowerCase().trim();
 
+        if (customerBrowseMode === 'shop') {
+          // ==================== SHOP PRODUCTS RENDERING ====================
+          let filtered = allShopItems;
+
+          if (mainCustomerTab === 'all_shops') {
+            if (currentSelectedShopId !== 'all') {
+              filtered = filtered.filter((m) => String(m.restaurantId) === String(currentSelectedShopId));
+            }
+          } else if (mainCustomerTab === 'all_products') {
+            if (selectedMenuItemId !== 'all') {
+              filtered = filtered.filter((m) => String(m.id || m._id) === String(selectedMenuItemId));
+            }
+          } else if (mainCustomerTab === 'category') {
+            if (selectedCategory !== 'all') {
+              filtered = filtered.filter((m) => (m.category || 'Retail Goods').toLowerCase() === selectedCategory.toLowerCase());
+            }
+          }
+
+          if (searchVal) {
+            filtered = filtered.filter((m) =>
+              (m.name || '').toLowerCase().includes(searchVal) ||
+              (m.description || '').toLowerCase().includes(searchVal) ||
+              (m.category || '').toLowerCase().includes(searchVal)
+            );
+          }
+
+          if (!filtered.length) {
+            grid.innerHTML = `<p style="color:var(--muted); padding:2rem; grid-column:1/-1; text-align:center;">No products match your selection in shops.</p>`;
+            return;
+          }
+
+          grid.innerHTML = filtered.map((item) => {
+            const matchShop = allShops.find((s) => String(s.id || s._id) === String(item.restaurantId));
+            const shopDisplay = matchShop?.name || item.restaurantName || item.shopName || 'Retail Shop';
+            const isShopClosed = matchShop && (matchShop.isOpen === false || matchShop.isOnline === false);
+            const stockQty = item.quantity != null ? item.quantity : 15;
+            const itemIdStr = String(item._id || item.id || '');
+            const ratingScore = item.rating ? Number(item.rating).toFixed(1) : 'New';
+            const reviewCount = item.reviewCount || 0;
+
+            return `
+              <div class="food-card" style="${isShopClosed ? 'opacity:0.8; border-color:#fca5a5;' : ''}">
+                <div>
+                  <div class="food-head" style="display:flex; justify-content:space-between; align-items:flex-start; gap:0.5rem; margin-bottom:0.35rem;">
+                    <div style="flex:1; min-width:0;">
+                      <h3 class="food-title" style="margin-bottom:0.25rem;">${escapeHtml(item.name)}</h3>
+                      <div class="food-meta">${escapeHtml(item.category || 'Retail Product')} • ${escapeHtml(shopDisplay)}</div>
+                    </div>
+                    <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.25rem; flex-shrink:0;">
+                      <div style="display:flex; gap:0.35rem; align-items:center;">
+                        ${isShopClosed ? '<span class="badge" style="background:#fee2e2; color:#b91c1c; font-size:0.68rem; font-weight:700; padding:0.12rem 0.4rem; border-radius:4px;">CLOSED</span>' : ''}
+                        <span class="badge" style="background:#f0fdf4; color:#15803d; font-size:0.7rem; font-weight:600; padding:0.15rem 0.45rem; border-radius:4px;">🏪 SHOP</span>
+                      </div>
+                      <button type="button" class="review-rating-pill" data-mode="view-only" data-item-id="${escapeHtml(itemIdStr)}" data-item-name="${escapeHtml(item.name)}" onclick="handleOrderReviewButtonClick(this)" title="View ratings & reviews" style="margin:0;">
+                        ⭐ ${ratingScore} <span style="color:#78350f; font-weight:normal;">(${reviewCount})</span>
+                      </button>
+                      <button type="button" class="review-action-link" data-mode="view-only" data-item-id="${escapeHtml(itemIdStr)}" data-item-name="${escapeHtml(item.name)}" onclick="handleOrderReviewButtonClick(this)" title="View ratings & reviews">
+                        Reviews
+                      </button>
+                    </div>
+                  </div>
+
+                  <p class="food-desc">${escapeHtml(item.description || 'Quality retail item from local store.')}</p>
+                  <div style="font-size:0.75rem; color:var(--muted); margin-bottom:0.6rem;">Available in stock: ${stockQty}</div>
+                </div>
+                <div class="food-bottom">
+                  <span class="food-price">₹${Number(item.price).toFixed(2)}</span>
+                  ${isShopClosed
+                    ? `<button class="btn btn-outline btn-sm" disabled style="opacity:0.6; cursor:not-allowed; border-color:#f87171; color:#ef4444;" title="Shop is closed and not taking orders">
+                        Closed
+                      </button>`
+                    : `<button class="btn btn-primary btn-sm" onclick="addToCart('${item._id || item.id}', '${escapeHtml(item.name)}', ${Number(item.price)}, '${item.restaurantId}', 'shop')">
+                        + Add to Cart
+                      </button>`
+                  }
+                </div>
+              </div>
+            `;
+          }).join('');
+          return;
+        }
+
+        // ==================== RESTAURANT DISHES RENDERING ====================
         let filtered = allMenuItems;
 
         // 1. Primary tab filtering
@@ -2393,11 +2952,6 @@
           if (selectedCategory !== 'all') {
             filtered = filtered.filter((m) => (m.category || 'Main Course').toLowerCase() === selectedCategory.toLowerCase());
           }
-        } else if (mainCustomerTab === 'grocery') {
-          filtered = filtered.filter(isGroceryItem);
-          if (selectedCategory !== 'all') {
-            filtered = filtered.filter((m) => (m.category || '').toLowerCase() === selectedCategory.toLowerCase());
-          }
         }
 
         // 2. Live dish search input filtering
@@ -2410,10 +2964,7 @@
         }
 
         if (!filtered.length) {
-          const emptyMsg = mainCustomerTab === 'grocery'
-            ? 'No grocery items currently found. Explore our restaurant menus or search for other dishes!'
-            : 'No dishes match your selection.';
-          grid.innerHTML = `<p style="color:var(--muted); padding:2rem; grid-column:1/-1; text-align:center;">${emptyMsg}</p>`;
+          grid.innerHTML = `<p style="color:var(--muted); padding:2rem; grid-column:1/-1; text-align:center;">No dishes match your selection.</p>`;
           return;
         }
 
@@ -2425,18 +2976,32 @@
             ? `${matchRest.name} / ${matchRest.restaurantId}`
             : (matchRest?.displayName || item.restaurantName || 'Tomato Partner');
           const isRestClosed = matchRest && (matchRest.isOpen === false || matchRest.isOnline === false);
+          const itemIdStr = String(item._id || item.id || '');
+          const ratingScore = item.rating ? Number(item.rating).toFixed(1) : 'New';
+          const reviewCount = item.reviewCount || 0;
 
           return `
             <div class="food-card" style="${isRestClosed ? 'opacity:0.8; border-color:#fca5a5;' : ''}">
               <div>
-                <div class="food-head">
-                  <h3 class="food-title">${escapeHtml(item.name)}</h3>
-                  <div style="display:flex; gap:0.35rem; align-items:center;">
-                    ${isRestClosed ? '<span class="badge" style="background:#fee2e2; color:#b91c1c; font-size:0.68rem; font-weight:700; padding:0.12rem 0.4rem; border-radius:4px;">CLOSED</span>' : ''}
-                    <span class="dietary-tag ${dietaryClass}">${dietaryText}</span>
+                <div class="food-head" style="display:flex; justify-content:space-between; align-items:flex-start; gap:0.5rem; margin-bottom:0.35rem;">
+                  <div style="flex:1; min-width:0;">
+                    <h3 class="food-title" style="margin-bottom:0.25rem;">${escapeHtml(item.name)}</h3>
+                    <div class="food-meta">${escapeHtml(item.category || 'Dish')} • ${escapeHtml(restDisplay)}</div>
+                  </div>
+                  <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.25rem; flex-shrink:0;">
+                    <div style="display:flex; gap:0.35rem; align-items:center;">
+                      ${isRestClosed ? '<span class="badge" style="background:#fee2e2; color:#b91c1c; font-size:0.68rem; font-weight:700; padding:0.12rem 0.4rem; border-radius:4px;">CLOSED</span>' : ''}
+                      <span class="dietary-tag ${dietaryClass}">${dietaryText}</span>
+                    </div>
+                    <button type="button" class="review-rating-pill" data-mode="view-only" data-item-id="${escapeHtml(itemIdStr)}" data-item-name="${escapeHtml(item.name)}" onclick="handleOrderReviewButtonClick(this)" title="View ratings & reviews" style="margin:0;">
+                      ⭐ ${ratingScore} <span style="color:#78350f; font-weight:normal;">(${reviewCount})</span>
+                    </button>
+                    <button type="button" class="review-action-link" data-mode="view-only" data-item-id="${escapeHtml(itemIdStr)}" data-item-name="${escapeHtml(item.name)}" onclick="handleOrderReviewButtonClick(this)" title="View ratings & reviews">
+                      Reviews
+                    </button>
                   </div>
                 </div>
-                <div class="food-meta">${escapeHtml(item.category || 'Dish')} • ${escapeHtml(restDisplay)}</div>
+
                 <p class="food-desc">${escapeHtml(item.description || 'Deliciously prepared with authentic ingredients.')}</p>
                 <div style="font-size:0.75rem; color:var(--muted); margin-bottom:0.6rem;">Available in stock: ${item.quantity || 10}</div>
               </div>
@@ -2446,7 +3011,7 @@
                   ? `<button class="btn btn-outline btn-sm" disabled style="opacity:0.6; cursor:not-allowed; border-color:#f87171; color:#ef4444;" title="Restaurant is closed and not taking orders">
                       Closed
                     </button>`
-                  : `<button class="btn btn-primary btn-sm" onclick="addToCart('${item._id || item.id}', '${escapeHtml(item.name)}', ${Number(item.price)}, '${item.restaurantId}')">
+                  : `<button class="btn btn-primary btn-sm" onclick="addToCart('${item._id || item.id}', '${escapeHtml(item.name)}', ${Number(item.price)}, '${item.restaurantId}', 'restaurant')">
                       + Add to Cart
                     </button>`
                 }
@@ -2457,16 +3022,38 @@
       }
 
       // Cart management
-      function addToCart(itemId, name, price, restaurantId) {
-        const rest = allRestaurants.find((r) => String(r.id || r._id) === String(restaurantId));
-        if (rest && (rest.isOpen === false || rest.isOnline === false)) {
-          alert(`${rest.name} is currently closed and not accepting orders.`);
+      function addToCart(itemId, name, price, restaurantId, storeType = 'restaurant') {
+        let isClosed = false;
+        let storeName = 'Store';
+
+        if (storeType === 'shop' || customerBrowseMode === 'shop') {
+          storeType = 'shop';
+          const shop = allShops.find((s) => String(s.id || s._id) === String(restaurantId));
+          if (shop) {
+            storeName = shop.name || 'Shop';
+            if (shop.isOpen === false || shop.isOnline === false) isClosed = true;
+          }
+        } else {
+          storeType = 'restaurant';
+          const rest = allRestaurants.find((r) => String(r.id || r._id) === String(restaurantId));
+          if (rest) {
+            storeName = rest.name || 'Restaurant';
+            if (rest.isOpen === false || rest.isOnline === false) isClosed = true;
+          }
+        }
+
+        if (isClosed) {
+          alert(`${storeName} is currently closed and not accepting orders.`);
           return;
         }
 
-        // Multi-restaurant alert check
+        // Multi-store conflict check
         if (cart.length && cart[0].restaurantId && restaurantId && cart[0].restaurantId !== restaurantId) {
-          const confirmSwitch = window.confirm('Your cart contains items from another restaurant. Replace cart with items from this restaurant?');
+          const currentStoreType = cart[0].storeType === 'shop' ? 'shop' : 'restaurant';
+          const newStoreType = storeType === 'shop' ? 'shop' : 'restaurant';
+          const confirmSwitch = window.confirm(
+            `Your cart contains items from another ${currentStoreType}. Replace cart with items from this ${newStoreType}?`
+          );
           if (confirmSwitch) {
             cart.length = 0;
           } else {
@@ -2478,17 +3065,18 @@
         if (existing) {
           existing.quantity += 1;
         } else {
-          cart.push({ itemId, name, price, quantity: 1, restaurantId });
+          cart.push({ itemId, name, price, quantity: 1, restaurantId, storeType });
         }
-        if (restaurantId) recordVisitedItem('restaurants', restaurantId);
-        if (itemId) recordVisitedItem('menus', itemId);
-        const itemObj = allMenuItems.find((m) => String(m.id || m._id) === String(itemId));
+        if (restaurantId) {
+          recordVisitedItem(storeType === 'shop' ? 'shops' : 'restaurants', restaurantId);
+        }
+        if (itemId) {
+          recordVisitedItem(storeType === 'shop' ? 'products' : 'menus', itemId);
+        }
+        const sourceList = storeType === 'shop' ? allShopItems : allMenuItems;
+        const itemObj = sourceList.find((m) => String(m.id || m._id) === String(itemId));
         if (itemObj && itemObj.category) {
-          if (isGroceryItem(itemObj)) {
-            recordVisitedItem('groceries', itemObj.category);
-          } else {
-            recordVisitedItem('categories', itemObj.category);
-          }
+          recordVisitedItem(storeType === 'shop' ? 'shop_categories' : 'categories', itemObj.category);
         }
         updateCartUI();
       }
@@ -2743,9 +3331,13 @@
             coordinates: chosenAddr.location?.coordinates || [77.5946, 12.9716],
           };
 
-          // 3. Place order to restaurant
+          // 3. Place order to restaurant or shop
+          const isShopOrder = cart[0]?.storeType === 'shop' || customerBrowseMode === 'shop';
           const orderPayload = {
             restaurantId: cart[0]?.restaurantId,
+            shopId: cart[0]?.restaurantId,
+            isShopOrder,
+            storeType: isShopOrder ? 'shop' : 'restaurant',
             items: cart.map((i) => ({
               foodItemId: i.itemId,
               name: i.name,
@@ -2766,7 +3358,8 @@
           // Order created successfully!
           clearCart();
           closeModal('payment-gateway-modal');
-          alert(`Order Placed Successfully!\nOrder Number: ${orderRes.order.orderNumber}\nDelivering To: ${chosenAddr.label} (${chosenAddr.line1}, ${chosenAddr.city})\nPayment Mode: ${selectedPaymentMethod.toUpperCase()}\nTransaction Ref: ${txnId}`);
+          const storeLabel = isShopOrder ? '🏪 Shop Order' : '🍽️ Restaurant Order';
+          alert(`${storeLabel} Placed Successfully!\nOrder Number: ${orderRes.order.orderNumber}\nDelivering To: ${chosenAddr.label} (${chosenAddr.line1}, ${chosenAddr.city})\nPayment Mode: ${selectedPaymentMethod.toUpperCase()}\nTransaction Ref: ${txnId}`);
 
           switchView('customer-orders');
         } catch (e) {
@@ -2780,6 +3373,564 @@
       // =========================================================================
       // CUSTOMER: ORDERS & TRACKING
       // =========================================================================
+      let currentCustomerOrderFilter = 'all';
+      let cachedCustomerOrders = [];
+
+      function setCustomerOrdersFilter(filter) {
+        currentCustomerOrderFilter = filter || 'all';
+        updateCustomerFilterButtons();
+        if (cachedCustomerOrders && cachedCustomerOrders.length) {
+          renderCustomerOrdersList(cachedCustomerOrders);
+        } else {
+          fetchCustomerOrders();
+        }
+      }
+      window.setCustomerOrdersFilter = setCustomerOrdersFilter;
+
+      function updateCustomerFilterButtons() {
+        const allBtn = document.getElementById('cust-filter-all');
+        const activeBtn = document.getElementById('cust-filter-active');
+        const completedBtn = document.getElementById('cust-filter-completed');
+        const indicator = document.getElementById('cust-filter-indicator');
+
+        if (allBtn) allBtn.classList.toggle('active', currentCustomerOrderFilter === 'all');
+        if (activeBtn) activeBtn.classList.toggle('active', currentCustomerOrderFilter === 'active');
+        if (completedBtn) completedBtn.classList.toggle('active', currentCustomerOrderFilter === 'completed');
+
+        if (indicator) {
+          if (currentCustomerOrderFilter === 'active') {
+            indicator.style.display = 'inline-block';
+            indicator.innerHTML = 'Showing: <strong style="color:var(--ink);">Active Orders in Progress</strong> <button class="btn btn-xs btn-outline" style="margin-left:0.4rem; padding:0.15rem 0.5rem; font-size:0.75rem;" onclick="setCustomerOrdersFilter(\'all\')">Show All</button>';
+          } else if (currentCustomerOrderFilter === 'completed') {
+            indicator.style.display = 'inline-block';
+            indicator.innerHTML = 'Showing: <strong style="color:var(--ink);">Delivered &amp; Past Orders</strong> <button class="btn btn-xs btn-outline" style="margin-left:0.4rem; padding:0.15rem 0.5rem; font-size:0.75rem;" onclick="setCustomerOrdersFilter(\'all\')">Show All</button>';
+          } else {
+            indicator.style.display = 'none';
+          }
+        }
+      }
+      window.updateCustomerFilterButtons = updateCustomerFilterButtons;
+
+      function renderCustomerOrdersList(orders) {
+        const container = document.getElementById('customer-orders-list');
+        if (!container) return;
+
+        updateCustomerFilterButtons();
+
+        if (!orders || !orders.length) {
+          container.innerHTML = '<p style="color:var(--muted); padding:1rem 0;">You have not placed any orders yet. Visit Order Online to select delicious meals or fresh shop products!</p>';
+          return;
+        }
+
+        const filtered = orders.filter((o) => {
+          const status = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+          const isDeliveredOrCancelled = status === 'delivered' || status === 'cancelled';
+          if (currentCustomerOrderFilter === 'active') {
+            return !isDeliveredOrCancelled;
+          }
+          if (currentCustomerOrderFilter === 'completed') {
+            return isDeliveredOrCancelled;
+          }
+          return true;
+        });
+
+        if (!filtered.length) {
+          const msg = currentCustomerOrderFilter === 'active'
+            ? 'No active orders in progress right now. All your orders are completed or delivered!'
+            : currentCustomerOrderFilter === 'completed'
+            ? 'No completed orders found.'
+            : 'No orders found matching the selected filter.';
+          container.innerHTML = `
+            <div style="padding:1.5rem 1rem; text-align:center; color:var(--muted);">
+              <p style="margin-bottom:0.8rem; font-size:0.95rem;">${msg}</p>
+              <button class="btn btn-outline btn-sm" onclick="setCustomerOrdersFilter('all')">Show All Orders</button>
+            </div>
+          `;
+          return;
+        }
+
+        container.innerHTML = filtered.map((o) => {
+          const isShop = o.storeType === 'shop' || (o.orderNumber && String(o.orderNumber).startsWith('SHOP-')) || !!o.shopName;
+          const steps = [
+            { key: 'placed', label: 'Placed' },
+            { key: 'accepted', label: 'Accepted' },
+            { key: 'preparing', label: isShop ? 'Packing' : 'Cooking' },
+            { key: 'out_for_delivery', label: 'On Route' },
+            { key: 'delivered', label: 'Delivered' },
+          ];
+
+          const currentIdx = steps.findIndex((s) => s.key === o.status);
+          const storeTitle = isShop
+            ? `🏪 Shop: <strong>${escapeHtml(o.shopName || o.restaurantName || 'Retail Shop')}</strong>`
+            : `🍽️ Restaurant: <strong>${escapeHtml(o.restaurantName || 'Tomato Kitchen')}</strong>`;
+
+          return `
+            <div style="border:1px solid var(--line); border-radius:10px; padding:1.2rem; margin-bottom:1.2rem; background:#fff;">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:0.8rem;">
+                <div>
+                  <h3 style="font-size:1.1rem; margin-bottom:0.2rem;">Order #${escapeHtml(o.orderNumber || '')}</h3>
+                  <div style="font-size:0.8rem; color:var(--muted);">
+                    ${storeTitle}
+                    ${o.digipin ? `<span class="badge" style="background:#e0f2fe; color:#0369a1; font-size:0.72rem; margin-left:0.3rem;">📍 DIGIPIN: ${escapeHtml(o.digipin)}</span>` : ''}
+                    ${o.riderName ? ` • 🚴 Rider: <strong style="color:var(--ink);">${escapeHtml(o.riderName)}</strong>` : ''}
+                    • ${new Date(o.createdAt).toLocaleString()}
+                  </div>
+                </div>
+                <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                  <span class="badge badge-${escapeHtml(o.status || '')}">${escapeHtml(String(o.status || '').replace(/_/g, ' '))}</span>
+                  <button class="btn btn-outline btn-sm" style="background:#f0fdf4; border-color:#86efac; color:#15803d; font-weight:600;" onclick="openOrderLiveTrackingModal('${o._id}', 'customer')">📍 Live Tracking</button>
+                  <button class="btn btn-outline btn-sm" onclick="viewOrderBill('${o._id}')">🧾 View Bill</button>
+                </div>
+              </div>
+
+              <!-- Tracker -->
+              ${o.status !== 'cancelled' ? `
+                <div class="order-tracker">
+                  ${steps.map((st, i) => `
+                    <div class="track-step ${i < currentIdx ? 'done' : i === currentIdx ? 'current' : ''}">
+                      <div class="track-node">${i < currentIdx ? '✓' : i + 1}</div>
+                      <div class="track-label">${st.label}</div>
+                    </div>
+                  `).join('')}
+                </div>
+              ` : '<div style="padding:0.6rem; color:var(--tomato-dark); font-weight:600;">This order was cancelled.</div>'}
+
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; padding-top:0.8rem; border-top:1px dashed var(--line); font-size:0.85rem; flex-wrap:wrap; gap:0.6rem;">
+                <div style="flex:1; min-width:240px;">
+                  <div style="font-weight:600; color:var(--muted); font-size:0.8rem; margin-bottom:0.35rem;">Ordered Items:</div>
+                  <div style="display:flex; flex-wrap:wrap; gap:0.4rem;">
+                    ${(o.items || []).map((i) => {
+                      const rawId = String(i.foodItemId || i._id || i.id || '');
+                      const match = (allMenuItems || []).find(m => String(m._id || m.id) === rawId || (m.name && m.name.toLowerCase() === (i.name || '').toLowerCase()))
+                        || (allShopItems || []).find(s => String(s._id || s.id) === rawId || (s.name && s.name.toLowerCase() === (i.name || '').toLowerCase()));
+                      const itmId = match ? String(match._id || match.id) : rawId;
+                      const canRate = o.status !== 'cancelled';
+                      return `
+                        <span style="display:inline-flex; align-items:center; gap:0.4rem; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:0.25rem 0.55rem; font-size:0.82rem;">
+                          <span><strong>${escapeHtml(i.name)}</strong> × ${i.quantity}</span>
+                          ${canRate ? `
+                            <button type="button" class="btn-rate-item" data-mode="write" data-item-id="${escapeHtml(itmId)}" data-item-name="${escapeHtml(i.name)}" onclick="handleOrderReviewButtonClick(this)" title="Rate & Review this product">
+                              ⭐ Review
+                            </button>
+                          ` : ''}
+                        </span>
+                      `;
+                    }).join('')}
+                  </div>
+                </div>
+                <div style="text-align:right;">
+                  <div>Payment: <strong style="text-transform:uppercase;">${escapeHtml(o.paymentMethod || 'COD')} (${escapeHtml(o.paymentStatus || 'pending')})</strong></div>
+                  <div>Total: <strong style="font-size:1.05rem; color:var(--green);">₹${Number(o.totalAmount).toFixed(2)}</strong></div>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+      window.renderCustomerOrdersList = renderCustomerOrdersList;
+
+      function handleOrderReviewButtonClick(btn) {
+        if (!btn) return;
+        const itemId = btn.getAttribute('data-item-id') || '';
+        const itemName = btn.getAttribute('data-item-name') || '';
+        const mode = btn.getAttribute('data-mode') || 'write';
+        openProductReviewsModal(itemId, itemName, mode);
+      }
+      window.handleOrderReviewButtonClick = handleOrderReviewButtonClick;
+
+      // =========================================================================
+      // PRODUCT REVIEWS & RATINGS SYSTEM
+      // =========================================================================
+      let currentReviewItemId = null;
+      let currentReviewItemName = '';
+      let currentReviewMode = 'write';
+      let currentSelectedStar = 5;
+      let hasExistingReview = false;
+      let savedReviewRating = null;
+      let savedReviewComment = '';
+
+      const STAR_CAPTIONS = {
+        1: '1 Star - Poor',
+        2: '2 Stars - Fair',
+        3: '3 Stars - Good',
+        4: '4 Stars - Very Good',
+        5: '5 Stars - Excellent'
+      };
+
+      function checkReviewFormChanges() {
+        const submitBtn = document.getElementById('btn-submit-review');
+        const commentInput = document.getElementById('review-comment-input');
+        if (!submitBtn) return;
+
+        // If not eligible (cannot review), keep disabled
+        const notEligibleAlert = document.getElementById('review-not-eligible-alert');
+        if (notEligibleAlert && notEligibleAlert.style.display !== 'none') {
+          submitBtn.disabled = true;
+          submitBtn.style.opacity = '0.5';
+          submitBtn.style.cursor = 'not-allowed';
+          submitBtn.title = 'You can only review items you have ordered in the past.';
+          return;
+        }
+
+        const currentComment = (commentInput ? commentInput.value : '').trim();
+        const currentRating = Number(currentSelectedStar || 5);
+
+        if (hasExistingReview) {
+          const isRatingChanged = currentRating !== savedReviewRating;
+          const isCommentChanged = currentComment !== savedReviewComment;
+
+          if (isRatingChanged || isCommentChanged) {
+            submitBtn.disabled = false;
+            submitBtn.style.opacity = '1';
+            submitBtn.style.cursor = 'pointer';
+            submitBtn.textContent = 'Update Review';
+            submitBtn.title = 'Click to submit your updated rating or review';
+          } else {
+            submitBtn.disabled = true;
+            submitBtn.style.opacity = '0.5';
+            submitBtn.style.cursor = 'not-allowed';
+            submitBtn.textContent = 'Review Submitted';
+            submitBtn.title = 'Change your rating or review to enable updating';
+          }
+        } else {
+          // Brand new review - enabled for verified buyers
+          submitBtn.disabled = false;
+          submitBtn.style.opacity = '1';
+          submitBtn.style.cursor = 'pointer';
+          submitBtn.textContent = 'Submit Review';
+          submitBtn.title = '';
+        }
+      }
+      window.checkReviewFormChanges = checkReviewFormChanges;
+
+      function setStarRatingInput(rating, triggerCheck = true) {
+        currentSelectedStar = Math.min(5, Math.max(1, Number(rating) || 5));
+        const hiddenInput = document.getElementById('review-star-value');
+        if (hiddenInput) hiddenInput.value = currentSelectedStar;
+
+        const starGroup = document.getElementById('interactive-star-group');
+        if (starGroup) {
+          const stars = starGroup.querySelectorAll('.star-btn');
+          stars.forEach((star) => {
+            const val = Number(star.getAttribute('data-val'));
+            if (val <= currentSelectedStar) {
+              star.classList.add('active');
+            } else {
+              star.classList.remove('active');
+            }
+          });
+        }
+
+        const captionEl = document.getElementById('review-star-caption');
+        if (captionEl) {
+          captionEl.textContent = STAR_CAPTIONS[currentSelectedStar] || `${currentSelectedStar} Stars`;
+        }
+
+        if (triggerCheck) {
+          checkReviewFormChanges();
+        }
+      }
+      window.setStarRatingInput = setStarRatingInput;
+
+      async function openProductReviewsModal(itemId, fallbackName = '', mode = 'write') {
+        currentReviewItemName = fallbackName || '';
+        currentReviewMode = mode || 'write';
+
+        // Toggle View-Only vs Write Review form based on mode
+        const formContainer = document.getElementById('review-form-container');
+        const viewOnlyHint = document.getElementById('review-view-only-hint');
+        if (currentReviewMode === 'view-only') {
+          if (formContainer) formContainer.style.display = 'none';
+          if (viewOnlyHint) viewOnlyHint.style.display = 'flex';
+        } else {
+          if (formContainer) formContainer.style.display = 'block';
+          if (viewOnlyHint) viewOnlyHint.style.display = 'none';
+        }
+
+        // If itemId is empty or invalid, try to match by name from catalog
+        if ((!itemId || itemId === 'undefined' || itemId === 'null') && fallbackName) {
+          const match = (allMenuItems || []).find(m => m.name && m.name.toLowerCase() === fallbackName.toLowerCase())
+            || (allShopItems || []).find(s => s.name && s.name.toLowerCase() === fallbackName.toLowerCase());
+          if (match) {
+            itemId = String(match._id || match.id);
+          }
+        }
+
+        currentReviewItemId = itemId || '';
+        openModal('product-reviews-modal');
+        const modalEl = document.getElementById('product-reviews-modal');
+        if (modalEl) {
+          modalEl.classList.add('visible');
+          modalEl.style.display = 'grid';
+          modalEl.style.zIndex = '999995';
+        }
+
+        // Reset fields
+        const prodNameEl = document.getElementById('review-modal-product-name');
+        const storeNameEl = document.getElementById('review-modal-store-name');
+        const avgScoreEl = document.getElementById('review-modal-avg-score');
+        const starsDisplayEl = document.getElementById('review-modal-stars-display');
+        const totalCountEl = document.getElementById('review-modal-total-count');
+        const reviewsContainer = document.getElementById('product-reviews-list-container');
+        const reviewCountBadge = document.getElementById('review-list-count-badge');
+        const hiddenItemId = document.getElementById('review-item-id');
+        const commentInput = document.getElementById('review-comment-input');
+        const statusMsgEl = document.getElementById('review-form-status-msg');
+        const headingEl = document.getElementById('review-form-heading');
+        const submitBtn = document.getElementById('btn-submit-review');
+        const notEligibleAlert = document.getElementById('review-not-eligible-alert');
+        const verifiedOrderPill = document.getElementById('review-verified-order-pill');
+        const verifiedOrderNum = document.getElementById('review-verified-order-num');
+
+        if (hiddenItemId) hiddenItemId.value = itemId || '';
+        if (prodNameEl) prodNameEl.textContent = fallbackName || 'Loading Product...';
+        if (storeNameEl) storeNameEl.textContent = 'Fetching details & verified customer reviews...';
+        if (avgScoreEl) avgScoreEl.textContent = '--';
+        if (starsDisplayEl) starsDisplayEl.textContent = '☆☆☆☆☆';
+        if (totalCountEl) totalCountEl.textContent = 'Loading reviews...';
+        if (commentInput) commentInput.value = '';
+        if (statusMsgEl) statusMsgEl.textContent = '';
+        if (notEligibleAlert) notEligibleAlert.style.display = 'none';
+        if (verifiedOrderPill) verifiedOrderPill.style.display = 'none';
+        if (reviewsContainer) {
+          reviewsContainer.innerHTML = '<p style="color:var(--muted); font-size:0.85rem; text-align:center; padding:1.5rem 0;">Loading reviews from verified customers...</p>';
+        }
+
+        hasExistingReview = false;
+        savedReviewRating = null;
+        savedReviewComment = '';
+        setStarRatingInput(5, false);
+
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.style.opacity = '0.5';
+          submitBtn.textContent = 'Loading...';
+        }
+
+        try {
+          const queryParam = fallbackName ? `?name=${encodeURIComponent(fallbackName)}` : '';
+          const targetUrl = (itemId && itemId !== 'undefined')
+            ? `/api/customer/items/${encodeURIComponent(itemId)}/reviews${queryParam}`
+            : `/api/customer/items/by-name/reviews${queryParam}`;
+
+          const res = await apiFetch(targetUrl);
+          const item = res.item || {};
+          const reviews = res.reviews || [];
+          const totalReviews = res.totalReviews || reviews.length;
+          const avgRating = res.averageRating != null ? Number(res.averageRating).toFixed(1) : null;
+          const canReview = res.canReview;
+          const userReview = res.userReview;
+          const verifiedOrder = res.verifiedOrder;
+
+          if (item._id) {
+            currentReviewItemId = String(item._id);
+            if (hiddenItemId) hiddenItemId.value = String(item._id);
+          }
+          if (item.name) {
+            currentReviewItemName = item.name;
+          }
+
+          if (prodNameEl) prodNameEl.textContent = item.name || fallbackName || 'Product Reviews';
+          if (storeNameEl) {
+            const storeTitle = item.restaurantName || (item.category ? `${item.category}` : 'Verified Tomato Partner');
+            storeNameEl.textContent = `${storeTitle} • ₹${Number(item.price || 0).toFixed(2)}`;
+          }
+
+          if (avgScoreEl) avgScoreEl.textContent = avgRating ? avgRating : 'New';
+          if (starsDisplayEl) {
+            if (avgRating) {
+              const fullStars = Math.round(Number(avgRating));
+              starsDisplayEl.textContent = '★'.repeat(fullStars) + '☆'.repeat(5 - fullStars);
+            } else {
+              starsDisplayEl.textContent = '☆☆☆☆☆';
+            }
+          }
+          if (totalCountEl) {
+            totalCountEl.textContent = `${totalReviews} verified ${totalReviews === 1 ? 'review' : 'reviews'}`;
+          }
+          if (reviewCountBadge) reviewCountBadge.textContent = totalReviews;
+
+          // Configure review form ONLY when mode is 'write'
+          if (currentReviewMode === 'write') {
+            if (!canReview) {
+              if (notEligibleAlert) notEligibleAlert.style.display = 'block';
+              if (verifiedOrderPill) verifiedOrderPill.style.display = 'none';
+              if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.style.opacity = '0.5';
+                submitBtn.style.cursor = 'not-allowed';
+                submitBtn.title = 'You can only review items you have ordered in the past.';
+              }
+              if (commentInput) commentInput.disabled = true;
+            } else {
+              if (notEligibleAlert) notEligibleAlert.style.display = 'none';
+              if (verifiedOrderPill) {
+                verifiedOrderPill.style.display = 'inline-block';
+                if (verifiedOrderNum) verifiedOrderNum.textContent = verifiedOrder?.orderNumber ? `#${verifiedOrder.orderNumber}` : 'Verified';
+              }
+              if (commentInput) commentInput.disabled = false;
+
+              // If user already wrote a review, populate their past review and disable submit until they change it!
+              if (userReview) {
+                hasExistingReview = true;
+                savedReviewRating = Number(userReview.rating) || 5;
+                savedReviewComment = (userReview.comment || '').trim();
+
+                if (headingEl) headingEl.textContent = 'Update Your Review';
+                setStarRatingInput(savedReviewRating, false);
+                if (commentInput) commentInput.value = userReview.comment || '';
+                if (statusMsgEl) {
+                  statusMsgEl.innerHTML = `<span style="color:#059669;">✓ You previously reviewed this item on ${new Date(userReview.updatedAt || userReview.createdAt).toLocaleDateString()}</span>`;
+                }
+
+                // Explicitly disable submit button until user modifies rating or comment
+                if (submitBtn) {
+                  submitBtn.disabled = true;
+                  submitBtn.style.opacity = '0.5';
+                  submitBtn.style.cursor = 'not-allowed';
+                  submitBtn.textContent = 'Review Submitted';
+                  submitBtn.title = 'Change your rating or review to enable updating';
+                }
+              } else {
+                hasExistingReview = false;
+                savedReviewRating = null;
+                savedReviewComment = '';
+
+                if (headingEl) headingEl.textContent = 'Write a Review';
+                if (submitBtn) {
+                  submitBtn.disabled = false;
+                  submitBtn.style.opacity = '1';
+                  submitBtn.style.cursor = 'pointer';
+                  submitBtn.textContent = 'Submit Review';
+                  submitBtn.title = '';
+                }
+              }
+            }
+          }
+
+          // Render reviews list
+          if (!reviews.length) {
+            reviewsContainer.innerHTML = `
+              <div style="background:#fff; border:1px dashed #cbd5e1; border-radius:8px; padding:1.5rem; text-align:center; color:var(--muted); font-size:0.85rem;">
+                No reviews yet for this product. ${canReview ? 'Be the first verified customer to share your thoughts!' : 'Order this product to be the first to review it!'}
+              </div>
+            `;
+          } else {
+            reviewsContainer.innerHTML = reviews.map((r) => {
+              const starsStr = '★'.repeat(r.rating || 5) + '☆'.repeat(5 - (r.rating || 5));
+              const reviewDate = new Date(r.updatedAt || r.createdAt || Date.now()).toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric'
+              });
+              const isEdited = r.updatedAt && r.createdAt && (new Date(r.updatedAt).getTime() - new Date(r.createdAt).getTime() > 2000);
+              const isCurrentUser = userReview && String(r._id) === String(userReview._id);
+
+              return `
+                <div class="review-item-card">
+                  <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:0.35rem; flex-wrap:wrap; gap:0.4rem;">
+                    <div>
+                      <div style="display:flex; align-items:center; gap:0.4rem;">
+                        <strong style="font-size:0.9rem; color:var(--ink);">${escapeHtml(r.customerName || 'Customer')}</strong>
+                        ${isCurrentUser ? '<span style="font-size:0.7rem; background:#dbeafe; color:#1d4ed8; padding:0.1rem 0.4rem; border-radius:4px; font-weight:700;">YOU</span>' : ''}
+                        <span class="review-verified-tag">✓ Verified Purchase</span>
+                      </div>
+                      ${r.orderNumber ? `<div style="font-size:0.72rem; color:var(--muted);">Order #${escapeHtml(r.orderNumber)}</div>` : ''}
+                    </div>
+                    <div style="text-align:right;">
+                      <div style="color:#f59e0b; font-size:0.95rem; letter-spacing:1px;">${starsStr}</div>
+                      <div style="font-size:0.72rem; color:var(--muted);">${reviewDate}${isEdited ? ' <span style="font-size:0.68rem; color:#64748b; font-style:italic;">(updated)</span>' : ''}</div>
+                    </div>
+                  </div>
+                  <p style="font-size:0.85rem; color:#334155; margin:0.3rem 0 0; line-height:1.45;">
+                    ${r.comment ? escapeHtml(r.comment) : '<em style="color:var(--muted);">No written comments provided.</em>'}
+                  </p>
+                </div>
+              `;
+            }).join('');
+          }
+        } catch (err) {
+          console.error('Failed to load product reviews:', err);
+          if (reviewsContainer) {
+            reviewsContainer.innerHTML = `<p style="color:#ef4444; font-size:0.85rem; text-align:center; padding:1rem 0;">Error loading reviews: ${escapeHtml(err.message || 'Server error')}</p>`;
+          }
+        }
+      }
+      window.openProductReviewsModal = openProductReviewsModal;
+
+      async function submitProductReview(event) {
+        if (event) event.preventDefault();
+        const itemId = currentReviewItemId || document.getElementById('review-item-id')?.value;
+        const rating = Number(document.getElementById('review-star-value')?.value || currentSelectedStar || 5);
+        const comment = (document.getElementById('review-comment-input')?.value || '').trim();
+        const statusMsgEl = document.getElementById('review-form-status-msg');
+        const submitBtn = document.getElementById('btn-submit-review');
+
+        let submissionSuccess = false;
+
+        try {
+          if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.style.opacity = '0.6';
+            submitBtn.style.cursor = 'wait';
+            submitBtn.textContent = 'Submitting...';
+          }
+          if (statusMsgEl) statusMsgEl.textContent = 'Submitting your review...';
+
+          const targetUrl = (itemId && itemId !== 'undefined')
+            ? `/api/customer/items/${encodeURIComponent(itemId)}/reviews`
+            : `/api/customer/items/by-name/reviews`;
+
+          const res = await apiFetch(targetUrl, {
+            method: 'POST',
+            body: JSON.stringify({ rating, comment, name: currentReviewItemName }),
+          });
+
+          submissionSuccess = true;
+
+          // Record as saved review state
+          hasExistingReview = true;
+          savedReviewRating = rating;
+          savedReviewComment = comment;
+
+          if (statusMsgEl) {
+            statusMsgEl.innerHTML = `<span style="color:#059669; font-weight:600;">✓ ${escapeHtml(res.message || 'Review submitted successfully!')}</span>`;
+          }
+
+          // Reload customer menu in background so cards get updated ratings
+          if (typeof loadCustomerMenuSection === 'function') {
+            loadCustomerMenuSection();
+          }
+
+          // Re-fetch review modal data to show updated review immediately
+          await openProductReviewsModal(itemId, currentReviewItemName, 'write');
+
+          if (typeof showAutoDismissNotice === 'function') {
+            showAutoDismissNotice({
+              title: '⭐ Review Submitted',
+              message: 'Thank you! Your verified review and rating have been posted.',
+              icon: '⭐',
+            });
+          }
+        } catch (err) {
+          console.error('Submit review error:', err);
+          if (statusMsgEl) {
+            statusMsgEl.innerHTML = `<span style="color:#ef4444; font-weight:600;">⚠️ ${escapeHtml(err.message || 'Failed to submit review')}</span>`;
+          }
+          alert(`Could not submit review: ${err.message || 'Verified purchase required'}`);
+        } finally {
+          if (!submissionSuccess && submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.style.opacity = '1';
+            submitBtn.style.cursor = 'pointer';
+            submitBtn.textContent = hasExistingReview ? 'Update Review' : 'Submit Review';
+          } else {
+            checkReviewFormChanges();
+          }
+        }
+      }
+      window.submitProductReview = submitProductReview;
+
       async function fetchCustomerOrders() {
         const container = document.getElementById('customer-orders-list');
         if (!container) return;
@@ -2793,69 +3944,11 @@
 
         try {
           const data = await apiFetch('/api/customer/orders');
-          const orders = data.orders || [];
-
-          if (!orders.length) {
-            container.innerHTML = '<p style="color:var(--muted); padding:1rem 0;">You have not placed any orders yet. Visit Order Online to select delicious meals!</p>';
-            return;
-          }
-
-          container.innerHTML = orders.map((o) => {
-            const steps = [
-              { key: 'placed', label: 'Placed' },
-              { key: 'accepted', label: 'Accepted' },
-              { key: 'preparing', label: 'Cooking' },
-              { key: 'out_for_delivery', label: 'On Route' },
-              { key: 'delivered', label: 'Delivered' },
-            ];
-
-            const currentIdx = steps.findIndex((s) => s.key === o.status);
-
-            return `
-              <div style="border:1px solid var(--line); border-radius:10px; padding:1.2rem; margin-bottom:1.2rem; background:#fff;">
-                <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:0.8rem;">
-                  <div>
-                    <h3 style="font-size:1.1rem; margin-bottom:0.2rem;">Order #${o.orderNumber}</h3>
-                    <div style="font-size:0.8rem; color:var(--muted);">
-                      Restaurant: <strong>${escapeHtml(o.restaurantName || 'Tomato Kitchen')}</strong>
-                      ${o.digipin ? `<span class="badge" style="background:#e0f2fe; color:#0369a1; font-size:0.72rem; margin-left:0.3rem;">📍 DIGIPIN: ${escapeHtml(o.digipin)}</span>` : ''}
-                      ${o.riderName ? ` • 🚴 Rider: <strong style="color:var(--ink);">${escapeHtml(o.riderName)}</strong>` : ''}
-                      • ${new Date(o.createdAt).toLocaleString()}
-                    </div>
-                  </div>
-                  <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
-                    <span class="badge badge-${o.status}">${o.status.replace(/_/g, ' ')}</span>
-                    <button class="btn btn-outline btn-sm" style="background:#f0fdf4; border-color:#86efac; color:#15803d; font-weight:600;" onclick="openOrderLiveTrackingModal('${o._id}', 'customer')">📍 Live Tracking</button>
-                    <button class="btn btn-outline btn-sm" onclick="viewOrderBill('${o._id}')">🧾 View Bill</button>
-                  </div>
-                </div>
-
-                <!-- Tracker -->
-                ${o.status !== 'cancelled' ? `
-                  <div class="order-tracker">
-                    ${steps.map((st, i) => `
-                      <div class="track-step ${i < currentIdx ? 'done' : i === currentIdx ? 'current' : ''}">
-                        <div class="track-node">${i < currentIdx ? '✓' : i + 1}</div>
-                        <div class="track-label">${st.label}</div>
-                      </div>
-                    `).join('')}
-                  </div>
-                ` : '<div style="padding:0.6rem; color:var(--tomato-dark); font-weight:600;">This order was cancelled.</div>'}
-
-                <div style="display:flex; justify-content:space-between; align-items:center; padding-top:0.8rem; border-top:1px dashed var(--line); font-size:0.85rem;">
-                  <div>
-                    <span>Items: ${(o.items || []).map((i) => `${i.name} (x${i.quantity})`).join(', ')}</span>
-                  </div>
-                  <div>
-                    <span>Payment: <strong style="text-transform:uppercase;">${o.paymentMethod || 'COD'} (${o.paymentStatus})</strong></span> • Total: <strong style="font-size:1rem; color:var(--green);">₹${Number(o.totalAmount).toFixed(2)}</strong>
-                  </div>
-                </div>
-              </div>
-            `;
-          }).join('');
+          cachedCustomerOrders = data.orders || [];
+          renderCustomerOrdersList(cachedCustomerOrders);
         } catch (e) {
           if (!hasExisting) {
-            container.innerHTML = `<p style="color:var(--tomato-dark); padding:1rem 0;">Failed to load orders: ${e.message}</p>`;
+            container.innerHTML = `<p style="color:var(--tomato-dark); padding:1rem 0;">Failed to load orders: ${escapeHtml(e.message)}</p>`;
           } else {
             console.error('Fetch customer orders error:', e);
           }
@@ -2863,6 +3956,7 @@
           container.style.opacity = '1';
         }
       }
+      window.fetchCustomerOrders = fetchCustomerOrders;
 
       // =========================================================================
       // CUSTOMER: ADDRESSES
@@ -5527,6 +6621,29 @@
         if (endInput) endInput.value = todayStr;
         fetchAdminAnalytics(false, true);
       }
+      window.resetAdminAnalyticsDatesToToday = resetAdminAnalyticsDatesToToday;
+
+      function setAdminAnalyticsLastMonth() {
+        const now = new Date();
+        const prevMonthYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+        const prevMonth = now.getMonth() === 0 ? 11 : now.getMonth() - 1;
+        const firstDay = new Date(prevMonthYear, prevMonth, 1);
+        const lastDay = new Date(prevMonthYear, prevMonth + 1, 0);
+
+        const formatYMD = (d) => {
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          return `${y}-${m}-${day}`;
+        };
+
+        const startInput = document.getElementById('admin-analytics-start-date');
+        const endInput = document.getElementById('admin-analytics-end-date');
+        if (startInput) startInput.value = formatYMD(firstDay);
+        if (endInput) endInput.value = formatYMD(lastDay);
+        fetchAdminAnalytics(false, true);
+      }
+      window.setAdminAnalyticsLastMonth = setAdminAnalyticsLastMonth;
 
       function setAdminAnalyticsAllTime() {
         const startInput = document.getElementById('admin-analytics-start-date');
@@ -5535,6 +6652,16 @@
         if (endInput) endInput.value = '';
         fetchAdminAnalytics(true, true);
       }
+      window.setAdminAnalyticsAllTime = setAdminAnalyticsAllTime;
+
+      function clearAdminAnalyticsUserId() {
+        const userInput = document.getElementById('admin-analytics-user-id');
+        if (userInput) {
+          userInput.value = '';
+        }
+        fetchAdminAnalytics(false, true);
+      }
+      window.clearAdminAnalyticsUserId = clearAdminAnalyticsUserId;
 
       // Admin Analytics View
       async function fetchAdminAnalytics(isAllTime = false, force = false) {
@@ -5543,6 +6670,7 @@
 
         const startInput = document.getElementById('admin-analytics-start-date');
         const endInput = document.getElementById('admin-analytics-end-date');
+        const userInput = document.getElementById('admin-analytics-user-id');
         const subtitleEl = document.getElementById('admin-analytics-period-badge');
 
         const todayStr = getAdminTodayDateString();
@@ -5559,8 +6687,9 @@
 
         const startDate = startInput ? startInput.value.trim() : '';
         const endDate = endInput ? endInput.value.trim() : '';
+        const userId = userInput ? userInput.value.trim() : '';
 
-        const cacheKey = `analytics_${isAllTime}_${startDate}_${endDate}`;
+        const cacheKey = `analytics_${isAllTime}_${startDate}_${endDate}_${userId}`;
         const hasExisting = container.children.length > 0 && !container.querySelector('.skeleton-shimmer');
         const now = Date.now();
 
@@ -5576,15 +6705,17 @@
         }
 
         // Build query string
-        let queryParams = '';
+        const params = new URLSearchParams();
         if (isAllTime) {
-          queryParams = '?allTime=true';
-        } else if (startDate || endDate) {
-          const params = new URLSearchParams();
+          params.set('allTime', 'true');
+        } else {
           if (startDate) params.set('startDate', startDate);
           if (endDate) params.set('endDate', endDate);
-          queryParams = `?${params.toString()}`;
         }
+        if (userId) {
+          params.set('userId', userId);
+        }
+        const queryParams = params.toString() ? `?${params.toString()}` : '';
 
         try {
           const data = await apiFetch(`/api/admin/analytics${queryParams}`);
@@ -5603,19 +6734,23 @@
           let periodBadgeClass = 'badge-delivered';
           let periodSubNote = `GMV sold today (${todayStr})`;
 
+          const userFilterBadge = userId
+            ? `<span class="badge badge-accepted" style="font-size:0.75rem; margin-left:0.35rem;">User: ${escapeHtml(userId)}${an.userFilter?.matchedUser ? ` (${escapeHtml(an.userFilter.matchedUser.name)} [${escapeHtml(an.userFilter.matchedUser.role)}])` : ''}</span>`
+            : '';
+
           if (isAllTime) {
             periodBadgeText = 'ALL TIME';
             periodBadgeClass = 'badge-accepted';
             periodSubNote = 'Cumulative platform GMV across all dates';
             if (subtitleEl) {
-              subtitleEl.innerHTML = '<span class="badge badge-accepted" style="font-size:0.75rem;">Lifetime Data</span> Showing all analytics metrics across all time';
+              subtitleEl.innerHTML = `<span class="badge badge-accepted" style="font-size:0.75rem;">Lifetime Data</span>${userFilterBadge} Showing all analytics metrics across all time`;
             }
           } else if (isTodayFilter) {
             periodBadgeText = 'TODAY';
             periodBadgeClass = 'badge-delivered';
             periodSubNote = `GMV sold today (${todayStr})`;
             if (subtitleEl) {
-              subtitleEl.innerHTML = `<span class="badge badge-delivered" style="font-size:0.75rem;">Today: ${todayStr}</span> All fields below reflect activity for today`;
+              subtitleEl.innerHTML = `<span class="badge badge-delivered" style="font-size:0.75rem;">Today: ${todayStr}</span>${userFilterBadge} All fields below reflect activity for today`;
             }
           } else {
             const rangeText = `${startDate || 'Beginning'} to ${endDate || 'Present'}`;
@@ -5623,7 +6758,7 @@
             periodBadgeClass = 'badge-preparing';
             periodSubNote = `GMV for period: ${rangeText}`;
             if (subtitleEl) {
-              subtitleEl.innerHTML = `<span class="badge badge-preparing" style="font-size:0.75rem;">Period: ${rangeText}</span> All fields below reflect activity for selected range`;
+              subtitleEl.innerHTML = `<span class="badge badge-preparing" style="font-size:0.75rem;">Period: ${rangeText}</span>${userFilterBadge} All fields below reflect activity for selected range`;
             }
           }
 
@@ -5816,6 +6951,7 @@
           container.style.opacity = '1';
         }
       }
+      window.fetchAdminAnalytics = fetchAdminAnalytics;
 
       // =========================================================================
       // SETTINGS & PROFILE

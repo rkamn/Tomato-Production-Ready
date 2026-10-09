@@ -16,6 +16,7 @@ import WalletCreditTrack, { IWalletCreditTrack } from './WalletCreditTrack.js';
 import Counter, { ICounter, getNextCounterValue, generateIdFromCounter } from './Counter.js';
 import Shop, { IShop } from './Shop.js';
 import ShopOrder, { IShopOrder } from './ShopOrder.js';
+import Review, { IReview } from './Review.js';
 
 export {
   Employee,
@@ -51,6 +52,8 @@ export {
   IShop,
   ShopOrder,
   IShopOrder,
+  Review,
+  IReview,
 };
 
 export default {
@@ -67,5 +70,6 @@ export default {
   Counter,
   Shop,
   ShopOrder,
+  Review,
 };
 

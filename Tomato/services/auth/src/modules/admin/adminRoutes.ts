@@ -2126,19 +2126,161 @@ const createAdminRouter = () => {
     },
   );
 
-  // 4. Analytics with Date Range Period Filter (Default: Today)
+  // 4. Analytics with Date Range Period Filter (Default: Today) & Optional User ID Filter
   router.get(
     '/analytics',
     requirePermission('dashboard_view'),
     async (req: Request, res: Response) => {
       try {
-        const { startDate, endDate, allTime } = req.query;
+        const { startDate, endDate, allTime, userId } = req.query;
 
         const allOrders = await Order.find().lean();
         const employees = await Employee.find().lean();
         const restaurants = await Restaurant.find().lean();
         const customers = await Customer.find().lean();
         const riders = await Rider.find().lean();
+        const shops = await Shop.find().lean();
+
+        // Optional User ID Filter resolution
+        let targetUser: any = null;
+        let ordersToAnalyze = allOrders;
+        const trimmedUserId = typeof userId === 'string' ? userId.trim() : '';
+
+        if (trimmedUserId) {
+          const isObjId = mongoose.Types.ObjectId.isValid(trimmedUserId);
+          const regex = new RegExp(
+            `^${trimmedUserId.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}$`,
+            'i',
+          );
+
+          const [matchedCust, matchedRest, matchedShop, matchedRider, matchedEmp] =
+            await Promise.all([
+              Customer.findOne({
+                $or: [
+                  ...(isObjId ? [{ _id: trimmedUserId }] : []),
+                  { customerId: regex },
+                  { email: regex },
+                  { phone: trimmedUserId },
+                ],
+              }).lean(),
+              Restaurant.findOne({
+                $or: [
+                  ...(isObjId ? [{ _id: trimmedUserId }] : []),
+                  { restaurantId: regex },
+                  { email: regex },
+                  { phone: trimmedUserId },
+                ],
+              }).lean(),
+              Shop.findOne({
+                $or: [
+                  ...(isObjId ? [{ _id: trimmedUserId }] : []),
+                  { shopId: regex },
+                  { email: regex },
+                  { phone: trimmedUserId },
+                ],
+              }).lean(),
+              Rider.findOne({
+                $or: [
+                  ...(isObjId ? [{ _id: trimmedUserId }] : []),
+                  { riderId: regex },
+                  { email: regex },
+                  { phone: trimmedUserId },
+                ],
+              }).lean(),
+              Employee.findOne({
+                $or: [
+                  ...(isObjId ? [{ _id: trimmedUserId }] : []),
+                  { email: regex },
+                ],
+              }).lean(),
+            ]);
+
+          if (matchedCust) {
+            targetUser = {
+              ...matchedCust,
+              matchedRole: 'customer',
+              displayId: matchedCust.customerId || matchedCust._id?.toString(),
+            };
+          } else if (matchedRest) {
+            targetUser = {
+              ...matchedRest,
+              matchedRole: 'restaurant',
+              displayId: matchedRest.restaurantId || matchedRest._id?.toString(),
+            };
+          } else if (matchedShop) {
+            targetUser = {
+              ...matchedShop,
+              matchedRole: 'shop',
+              displayId: matchedShop.shopId || matchedShop._id?.toString(),
+            };
+          } else if (matchedRider) {
+            targetUser = {
+              ...matchedRider,
+              matchedRole: 'rider',
+              displayId: matchedRider.riderId || matchedRider._id?.toString(),
+            };
+          } else if (matchedEmp) {
+            targetUser = {
+              ...matchedEmp,
+              matchedRole: matchedEmp.role || 'employee',
+              displayId: matchedEmp._id?.toString(),
+            };
+          }
+
+          const targetIdStr = targetUser?._id?.toString() || '';
+          const targetDisplayId = targetUser?.displayId?.toString() || '';
+          const searchLower = trimmedUserId.toLowerCase();
+
+          ordersToAnalyze = allOrders.filter((o: any) => {
+            const custId = o.customerId?.toString() || '';
+            const restId = (o.restaurantId || o.shopId)?.toString() || '';
+            const riderId = o.riderId?.toString() || '';
+            const restCode = (o.restaurantCode || o.shopCode || '')?.toString().toLowerCase();
+            const riderCode = (o.riderCode || '')?.toString().toLowerCase();
+            const custPhone = (o.customerPhone || '')?.toString();
+            const custName = (o.customerName || '')?.toString().toLowerCase();
+            const restName = (o.restaurantName || o.shopName || '')?.toString().toLowerCase();
+            const riderName = (o.riderName || '')?.toString().toLowerCase();
+
+            if (targetUser) {
+              if (targetUser.matchedRole === 'customer') {
+                return custId === targetIdStr || custId === targetDisplayId;
+              }
+              if (
+                targetUser.matchedRole === 'restaurant' ||
+                targetUser.matchedRole === 'shop'
+              ) {
+                return (
+                  restId === targetIdStr ||
+                  restId === targetDisplayId ||
+                  restCode === searchLower
+                );
+              }
+              if (targetUser.matchedRole === 'rider') {
+                return (
+                  riderId === targetIdStr ||
+                  riderId === targetDisplayId ||
+                  riderCode === searchLower
+                );
+              }
+            }
+
+            return (
+              custId === trimmedUserId ||
+              custId === targetIdStr ||
+              restId === trimmedUserId ||
+              restId === targetIdStr ||
+              riderId === trimmedUserId ||
+              riderId === targetIdStr ||
+              restCode === searchLower ||
+              riderCode === searchLower ||
+              custPhone === trimmedUserId ||
+              custName.includes(searchLower) ||
+              restName.includes(searchLower) ||
+              riderName.includes(searchLower)
+            );
+          });
+        }
 
         const isCountableForGMV = (o: any) => {
           if (o.status === 'cancelled') return false;
@@ -2149,7 +2291,7 @@ const createAdminRouter = () => {
           );
         };
 
-        const lifetimeGMV = allOrders
+        const lifetimeGMV = ordersToAnalyze
           .filter(isCountableForGMV)
           .reduce((sum, o) => sum + (o.totalAmount || 0), 0);
 
@@ -2183,7 +2325,7 @@ const createAdminRouter = () => {
         }
 
         // Filter orders by selected date period
-        const filteredOrders = allOrders.filter((o) => {
+        const filteredOrders = ordersToAnalyze.filter((o) => {
           if (!start && !end) return true;
           const cDate = new Date(o.createdAt);
           if (start && cDate < start) return false;
@@ -2405,6 +2547,19 @@ const createAdminRouter = () => {
             paymentDistribution,
             topDishes,
             topRestaurants,
+            userFilter: trimmedUserId
+              ? {
+                  query: trimmedUserId,
+                  matchedUser: targetUser
+                    ? {
+                        id: targetUser.displayId,
+                        name: targetUser.name || targetUser.displayName,
+                        role: targetUser.matchedRole,
+                      }
+                    : null,
+                  matchingOrdersCount: ordersToAnalyze.length,
+                }
+              : null,
           },
         });
       } catch (error) {

@@ -12,7 +12,8 @@ import {
   requireRole,
 } from '../../middleware/authenticate.js';
 import { formatBill } from '../../utils/orderHelpers.js';
-import { OrderStatus } from '../../model/Order.js';
+import Order, { OrderStatus } from '../../model/Order.js';
+import notificationService from '../notification/notificationService.js';
 
 const createShopRouter = () => {
   const router = express.Router();
@@ -510,6 +511,44 @@ const createShopRouter = () => {
         note: note || `Shop changed status to ${status}`,
       });
       await order.save();
+
+      // Also sync to platform Order if matching orderNumber exists
+      const platformOrder = await Order.findOne({ orderNumber: order.orderNumber });
+      if (platformOrder) {
+        platformOrder.status = status;
+        platformOrder.statusHistory.push({
+          status,
+          at: new Date(),
+          by: String(user.userId),
+          note: note || `Shop changed status to ${status}`,
+        });
+        await platformOrder.save();
+
+        if (status === 'accepted') {
+          await notificationService.notifyRidersAndCustomerOnOrderAccepted(platformOrder);
+        } else if (platformOrder.customerId) {
+          const customerMsg: Record<string, string> = {
+            preparing: `Your shop order #${order.orderNumber} is being packaged by the store.`,
+            ready_for_pickup: `Shop order #${order.orderNumber} is packed and waiting for rider pickup.`,
+            cancelled: `Your shop order #${order.orderNumber} was cancelled by the shop.`,
+          };
+          if (customerMsg[status]) {
+            await notificationService.createNotification({
+              userId: String(platformOrder.customerId),
+              role: 'customer',
+              title: `Shop Order: ${status.replace(/_/g, ' ').toUpperCase()}`,
+              message: customerMsg[status],
+              type: 'order',
+              entityId: String(platformOrder._id),
+              metadata: {
+                orderId: String(platformOrder._id),
+                orderNumber: order.orderNumber,
+                status,
+              },
+            });
+          }
+        }
+      }
 
       return res.json({ message: `Shop order status updated to ${status}`, order });
     } catch (error) {

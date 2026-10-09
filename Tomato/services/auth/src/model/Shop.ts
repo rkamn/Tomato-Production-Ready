@@ -68,22 +68,31 @@ const shopSchema: Schema<IShop> = new Schema(
 );
 
 // Cascade delete associated items when a shop is removed
-shopSchema.pre(['deleteOne', 'findOneAndDelete'], { document: false, query: true }, async function () {
-  const doc = await this.model.findOne(this.getQuery()).select('_id');
-  if (doc?._id) {
-    const MenuItemModel = mongoose.models.MenuItem || mongoose.model('MenuItem');
-    await MenuItemModel.deleteMany({ restaurantId: doc._id });
-  }
-});
+shopSchema.pre(
+  ['deleteOne', 'findOneAndDelete'],
+  { document: false, query: true },
+  async function () {
+    const doc = await this.model.findOne(this.getQuery()).select('_id');
+    if (doc?._id) {
+      const MenuItemModel =
+        mongoose.models.MenuItem || mongoose.model('MenuItem');
+      await MenuItemModel.deleteMany({ restaurantId: doc._id });
+    }
+  },
+);
 
-shopSchema.pre('deleteOne', { document: true, query: false }, async function () {
-  if (this._id) {
-    const MenuItemModel = mongoose.models.MenuItem || mongoose.model('MenuItem');
-    await MenuItemModel.deleteMany({ restaurantId: this._id });
-  }
-});
+shopSchema.pre(
+  'deleteOne',
+  { document: true, query: false },
+  async function () {
+    if (this._id) {
+      const MenuItemModel =
+        mongoose.models.MenuItem || mongoose.model('MenuItem');
+      await MenuItemModel.deleteMany({ restaurantId: this._id });
+    }
+  },
+);
 
 const Shop = mongoose.model<IShop>('Shop', shopSchema, 'shop');
 
 export default Shop;
-

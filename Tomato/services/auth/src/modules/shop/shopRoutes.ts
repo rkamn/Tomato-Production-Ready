@@ -15,6 +15,8 @@ import { formatBill } from '../../utils/orderHelpers.js';
 import Order, { OrderStatus } from '../../model/Order.js';
 import notificationService from '../notification/notificationService.js';
 import { productImageUpload } from '../../middleware/upload.js';
+import { validateBankAndPanDetails } from '../../utils/bankHelpers.js';
+import Payment from '../../model/Payment.js';
 
 const createShopRouter = () => {
   const router = express.Router();
@@ -85,7 +87,7 @@ const createShopRouter = () => {
       const updated = await Shop.findByIdAndUpdate(
         user.userId,
         { $set: { isOpen, isOnline: isOpen } },
-        { new: true },
+        { returnDocument: 'after' },
       ).lean();
 
       return res.json({
@@ -111,7 +113,7 @@ const createShopRouter = () => {
         return res.status(401).json({ message: 'Authentication required' });
       const profile = await Shop.findById(user.userId)
         .select(
-          'name shopId digipin email phone shopAddress shopLocation category isApproved isBlocked isOpen isOnline',
+          'name shopId digipin email phone shopAddress shopLocation category isApproved isBlocked isOpen isOnline walletBalance creditPoint bankDetails',
         )
         .lean();
       const cleanName = profile && typeof profile.name === 'string'
@@ -161,7 +163,7 @@ const createShopRouter = () => {
       const updated = await Shop.findByIdAndUpdate(
         user.userId,
         { $set: updates },
-        { new: true },
+        { returnDocument: 'after' },
       );
       return res.json({
         message: 'Shop profile updated',
@@ -301,7 +303,7 @@ const createShopRouter = () => {
           restaurantId: new mongoose.Types.ObjectId(user.userId),
         },
         { $set: updates },
-        { new: true, runValidators: true },
+        { returnDocument: 'after', runValidators: true },
       );
 
       if (!updated)
@@ -661,6 +663,115 @@ const createShopRouter = () => {
       }
     },
   );
+
+  // 10. Shop Bank & PAN Details (Non-editable once approved; only Admin can edit)
+  router.get('/bank-details', async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user?.userId)
+        return res.status(401).json({ message: 'Authentication required' });
+      const shop = await Shop.findById(user.userId)
+        .select('name shopId isApproved walletBalance creditPoint bankDetails')
+        .lean();
+      if (!shop) return res.status(404).json({ message: 'Shop not found' });
+
+      const payouts = await Payment.find({ partnerId: String(user.userId) })
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .lean();
+
+      const isLocked = Boolean(
+        shop.isApproved ||
+          shop.bankDetails?.isApproved ||
+          shop.bankDetails?.isLocked,
+      );
+
+      return res.json({
+        bankDetails: {
+          ...(shop.bankDetails || {}),
+          isLocked,
+        },
+        isApproved: shop.isApproved,
+        walletBalance: shop.walletBalance || 0,
+        payouts,
+      });
+    } catch (error) {
+      console.error('Shop bank details fetch failed:', error);
+      return res.status(500).json({ message: 'Unable to fetch bank details' });
+    }
+  });
+
+  router.put('/bank-details', async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user?.userId)
+        return res.status(401).json({ message: 'Authentication required' });
+
+      const shop = await Shop.findById(user.userId).lean();
+      if (!shop) return res.status(404).json({ message: 'Shop not found' });
+
+      if (
+        shop.isApproved ||
+        shop.bankDetails?.isApproved ||
+        shop.bankDetails?.isLocked
+      ) {
+        return res.status(403).json({
+          message:
+            'Bank details are locked and non-editable once approved. Only the Admin can edit your bank details upon request.',
+        });
+      }
+
+      const validation = validateBankAndPanDetails(req.body);
+      if (!validation.valid || !validation.sanitized) {
+        return res.status(400).json({
+          message: validation.message || 'Invalid bank or PAN details',
+        });
+      }
+
+      const updatedBankDetails = {
+        ...(shop.bankDetails || {}),
+        ...validation.sanitized,
+        isSubmitted: true,
+        isApproved: false,
+        isLocked: false,
+        agreementCommissionPercent:
+          shop.bankDetails?.agreementCommissionPercent ?? 12,
+        adminNote:
+          typeof req.body.adminNote === 'string'
+            ? req.body.adminNote.trim()
+            : shop.bankDetails?.adminNote || '',
+        submittedAt: new Date(),
+      };
+
+      const updatedShop = await Shop.findByIdAndUpdate(
+        user.userId,
+        { $set: { bankDetails: updatedBankDetails } },
+        { returnDocument: 'after' },
+      ).lean();
+
+      try {
+        await Notification.create({
+          userId: 'ADMIN',
+          role: 'admin',
+          title: 'Shop Bank & PAN Details Submitted',
+          message: `${shop.name} (${shop.shopId || shop._id}) submitted bank details & PAN (${validation.sanitized.panNumber}) for verification and approval.`,
+          type: 'system',
+          entityId: String(shop._id),
+        });
+      } catch (notifErr) {
+        console.warn('Admin notification on shop bank submit failed:', notifErr);
+      }
+
+      return res.json({
+        message:
+          'Bank details and PAN card submitted successfully! Pending Admin verification & approval.',
+        bankDetails: updatedShop?.bankDetails || updatedBankDetails,
+      });
+    } catch (error) {
+      console.error('Shop bank details save failed:', error);
+      return res.status(500).json({ message: 'Unable to save bank details' });
+    }
+  });
 
   return router;
 };

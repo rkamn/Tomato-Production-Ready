@@ -31,7 +31,7 @@ export type OrderStatus =
   | 'confirmed';
 
 export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded';
-export type PaymentMethod = 'card' | 'upi' | 'netbanking' | 'cod' | 'gateway_mock';
+export type PaymentMethod = 'card' | 'upi' | 'netbanking' | 'cod' | 'gateway_mock' | 'razorpay';
 
 export interface IOrderStatusHistory {
   status: OrderStatus;
@@ -227,7 +227,7 @@ const orderSchema: Schema<IOrder> = new Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ['card', 'upi', 'netbanking', 'cod', 'gateway_mock'],
+      enum: ['card', 'upi', 'netbanking', 'cod', 'gateway_mock', 'razorpay'],
       default: 'cod',
     },
     paymentTransactionId: {

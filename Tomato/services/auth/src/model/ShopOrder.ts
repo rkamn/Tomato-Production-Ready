@@ -194,7 +194,7 @@ const shopOrderSchema: Schema<IShopOrder> = new Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ['card', 'upi', 'netbanking', 'cod', 'gateway_mock'],
+      enum: ['card', 'upi', 'netbanking', 'cod', 'gateway_mock', 'razorpay'],
       default: 'cod',
     },
     paymentTransactionId: {

@@ -1,5 +1,24 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
+export interface IBankDetails {
+  accountHolderName?: string;
+  bankName?: string;
+  accountNumber?: string;
+  ifscCode?: string;
+  panNumber?: string;
+  panHolderName?: string;
+  upiId?: string;
+  isSubmitted?: boolean;
+  isApproved?: boolean;
+  isLocked?: boolean;
+  agreementCommissionPercent?: number;
+  riderPayoutPerOrder?: number;
+  submittedAt?: Date;
+  approvedAt?: Date;
+  approvedBy?: string;
+  adminNote?: string;
+}
+
 export interface IRestaurant extends Document {
   name: string;
   email?: string;
@@ -23,6 +42,7 @@ export interface IRestaurant extends Document {
   cuisine: string;
   isOnline: boolean;
   isOpen: boolean;
+  bankDetails?: IBankDetails;
   lastLocationUpdated?: Date;
   createdAt?: Date;
   updatedAt?: Date;
@@ -62,6 +82,23 @@ const schema: Schema<IRestaurant> = new Schema(
     cuisine: { type: String, default: 'Multi-cuisine' },
     isOnline: { type: Boolean, default: true },
     isOpen: { type: Boolean, default: true },
+    bankDetails: {
+      accountHolderName: { type: String, default: '', trim: true },
+      bankName: { type: String, default: '', trim: true },
+      accountNumber: { type: String, default: '', trim: true },
+      ifscCode: { type: String, default: '', uppercase: true, trim: true },
+      panNumber: { type: String, default: '', uppercase: true, trim: true },
+      panHolderName: { type: String, default: '', trim: true },
+      upiId: { type: String, default: '', trim: true },
+      isSubmitted: { type: Boolean, default: false },
+      isApproved: { type: Boolean, default: false },
+      isLocked: { type: Boolean, default: false },
+      agreementCommissionPercent: { type: Number, default: 15, min: 0, max: 100 },
+      submittedAt: { type: Date },
+      approvedAt: { type: Date },
+      approvedBy: { type: String, default: '' },
+      adminNote: { type: String, default: '' },
+    },
     lastLocationUpdated: { type: Date, default: Date.now },
   },
   { timestamps: true, collection: 'restaurants' },

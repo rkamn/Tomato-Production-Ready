@@ -92,7 +92,7 @@ export const getNextCounterValue = async (
       $inc: { seq: 1, lastNumber: 1 },
       $set: { name: counterKey, counterType: counterKey },
     },
-    { new: true, upsert: true },
+    { returnDocument: 'after', upsert: true },
   );
 
   const nextVal = counter?.seq ?? counter?.lastNumber ?? (startValue + 1);

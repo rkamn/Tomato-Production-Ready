@@ -156,6 +156,7 @@ export const userResponse = (user: {
 	permissions?: string[];
 	adminRoleTitle?: string;
 	createdBy?: string;
+	bankDetails?: any;
 }) => {
 	const rawCustomerId = user.customerId || (user.role === 'customer' ? `cust-${String(user._id).slice(-4).toLowerCase()}` : '');
 	const rawSubadminId = user.subadminId || (user.role === 'subadmin' ? `sub-${String(user._id).slice(-4).toLowerCase()}` : '');
@@ -212,6 +213,7 @@ export const userResponse = (user: {
 		permissions: user.permissions || [],
 		adminRoleTitle: user.adminRoleTitle || '',
 		createdBy: user.createdBy || '',
+		bankDetails: (user as any).bankDetails || null,
 	};
 };
 
@@ -762,31 +764,31 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 			user = await Restaurant.findByIdAndUpdate(
 				userId,
 				updates,
-				{ new: true, runValidators: true },
+				{ returnDocument: 'after', runValidators: true },
 			).lean();
 		} else if (userRole === 'shop') {
 			user = await Shop.findByIdAndUpdate(
 				userId,
 				updates,
-				{ new: true, runValidators: true },
+				{ returnDocument: 'after', runValidators: true },
 			).lean();
 		} else if (userRole === 'customer') {
 			user = await Customer.findByIdAndUpdate(
 				userId,
 				updates,
-				{ new: true, runValidators: true },
+				{ returnDocument: 'after', runValidators: true },
 			).lean();
 		} else if (userRole === 'deliveryPartner' || (userRole as string) === 'rider') {
 			user = await Rider.findByIdAndUpdate(
 				userId,
 				updates,
-				{ new: true, runValidators: true },
+				{ returnDocument: 'after', runValidators: true },
 			).lean();
 		} else {
 			user = await Employee.findByIdAndUpdate(
 				userId,
 				updates,
-				{ new: true, runValidators: true },
+				{ returnDocument: 'after', runValidators: true },
 			).lean();
 		}
 

@@ -65,20 +65,26 @@
 
           <!-- Customer Store Toggle below WALLET -->
           <div id="customer-sidebar-store-toggle-wrapper" style="display:none; width:100%; margin-top:0.45rem;">
-            <button
-              type="button"
-              id="sidebar-store-toggle-btn"
-              class="duty-toggle-switch store-duty-switch sidebar-mode is-restaurant"
-              onclick="toggleCustomerBrowseMode()"
-              title="Click to toggle between Restaurants and Shops"
-              role="switch"
-              aria-checked="false"
-            >
-              <span class="duty-toggle-track">
-                <span class="duty-toggle-thumb"></span>
-              </span>
-              <span id="sidebar-store-toggle-label" class="duty-toggle-text">🍽️ Restaurant</span>
-            </button>
+            <div class="store-toggle-group store-toggle-sidebar" role="group" aria-label="Switch between Restaurants and Shops">
+              <button
+                type="button"
+                id="sidebar-toggle-store-restaurant"
+                class="store-toggle-btn active"
+                onclick="setCustomerBrowseMode('restaurant')"
+                title="Browse Restaurants &amp; Menus"
+              >
+                🍽️ Restaurant
+              </button>
+              <button
+                type="button"
+                id="sidebar-toggle-store-shop"
+                class="store-toggle-btn"
+                onclick="setCustomerBrowseMode('shop')"
+                title="Browse Shops &amp; Groceries"
+              >
+                🏪 Shop
+              </button>
+            </div>
           </div>
         </div>
 
@@ -252,20 +258,26 @@
 
               <!-- Center: Toggle Button <Restaurant/Shop> -->
               <div style="flex:0 0 auto; display:flex; justify-content:center; align-items:center;">
-                <button
-                  type="button"
-                  id="header-store-toggle-btn"
-                  class="duty-toggle-switch store-duty-switch header-mode is-restaurant"
-                  onclick="toggleCustomerBrowseMode()"
-                  title="Click to switch between Restaurants and Shops"
-                  role="switch"
-                  aria-checked="false"
-                >
-                  <span class="duty-toggle-track">
-                    <span class="duty-toggle-thumb"></span>
-                  </span>
-                  <span id="header-store-toggle-label" class="duty-toggle-text">🍽️ Restaurant</span>
-                </button>
+                <div class="store-toggle-group" role="group" aria-label="Switch between Restaurants and Shops">
+                  <button
+                    type="button"
+                    id="toggle-store-restaurant"
+                    class="store-toggle-btn active"
+                    onclick="setCustomerBrowseMode('restaurant')"
+                    title="Browse Restaurants &amp; Menus"
+                  >
+                    🍽️ Restaurant
+                  </button>
+                  <button
+                    type="button"
+                    id="toggle-store-shop"
+                    class="store-toggle-btn"
+                    onclick="setCustomerBrowseMode('shop')"
+                    title="Browse Shops &amp; Groceries"
+                  >
+                    🏪 Shop
+                  </button>
+                </div>
               </div>
 
               <!-- Right: Search & Cart Button -->
@@ -1195,6 +1207,472 @@
             </div>
           </div>
         </section>
+
+        <!-- =========================================================================
+             VIEW 17: ADMIN BANK & PARTNER PAYOUT SETTLEMENTS PANEL
+             ========================================================================= -->
+        <section id="admin-bank-view" class="view-section">
+          <div class="panel-card" style="margin-bottom:1.25rem;">
+            <div class="panel-header" style="flex-wrap:wrap; gap:1rem;">
+              <div>
+                <h2 class="panel-title">🏦 Bank &amp; Partner Payout Settlements</h2>
+                <p style="font-size:0.84rem; color:var(--muted); margin-top:0.2rem;">
+                  Verify &amp; approve Shop, Restaurant, and Rider bank + PAN details (Account Holder Name must match PAN Card Name), configure commission agreements, and release payouts from Tomato's central account.
+                </p>
+              </div>
+              <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
+                <button
+                  type="button"
+                  id="admin-bank-tab-partners-btn"
+                  class="btn btn-primary btn-sm"
+                  onclick="switchAdminBankTab('partners')"
+                >
+                  🪪 Partner Bank &amp; PAN KYC
+                </button>
+                <button
+                  type="button"
+                  id="admin-bank-tab-settlements-btn"
+                  class="btn btn-outline btn-sm"
+                  onclick="switchAdminBankTab('settlements')"
+                >
+                  💸 Tomato Account &amp; Order Payouts
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-outline btn-sm"
+                  onclick="refreshAdminBankCurrentTab()"
+                >
+                  ↻ Refresh
+                </button>
+              </div>
+            </div>
+
+            <!-- SUB-TAB 1: PARTNER BANK ACCOUNTS & PAN KYC APPROVAL -->
+            <div id="admin-bank-tab-partners" style="display:block;">
+              <!-- KPI Summary Row -->
+              <div id="admin-bank-partners-kpis" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:0.9rem; margin-bottom:1.25rem;">
+                <!-- Rendered via JS -->
+              </div>
+
+              <!-- Filter Bar (Compact Platform Business Analytics Style) -->
+              <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap; margin-bottom:0.9rem;">
+                <div style="display:inline-flex; align-items:center; gap:0.3rem; background:#fcfaf5; border:1px solid var(--line); border-radius:7px; padding:0.22rem 0.5rem;">
+                  <label for="admin-bank-role-filter" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0; white-space:nowrap;">Role:</label>
+                  <select
+                    id="admin-bank-role-filter"
+                    style="padding:0.2rem 0.4rem; border:1px solid #d9d4c8; border-radius:5px; font-size:0.78rem; height:27px; background:#fff; font-family:inherit; outline:none;"
+                    onchange="fetchAdminBankPartners()"
+                  >
+                    <option value="all">All Partners</option>
+                    <option value="restaurant">🏪 Restaurants</option>
+                    <option value="shop">🏬 Shops</option>
+                    <option value="deliveryPartner">🚴 Riders</option>
+                  </select>
+                </div>
+
+                <div style="display:inline-flex; align-items:center; gap:0.3rem; background:#fcfaf5; border:1px solid var(--line); border-radius:7px; padding:0.22rem 0.5rem;">
+                  <label for="admin-bank-status-filter" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0; white-space:nowrap;">KYC:</label>
+                  <select
+                    id="admin-bank-status-filter"
+                    style="padding:0.2rem 0.4rem; border:1px solid #d9d4c8; border-radius:5px; font-size:0.78rem; height:27px; background:#fff; font-family:inherit; outline:none;"
+                    onchange="fetchAdminBankPartners()"
+                  >
+                    <option value="all">All Statuses</option>
+                    <option value="pending_approval">⏳ Pending Approval</option>
+                    <option value="approved">🔒 Approved &amp; Locked</option>
+                    <option value="not_submitted">⚠️ Not Submitted</option>
+                  </select>
+                </div>
+
+                <div style="display:inline-flex; align-items:center; gap:0.25rem; background:#fcfaf5; border:1px solid var(--line); border-radius:7px; padding:0.22rem 0.5rem;">
+                  <label for="admin-bank-partner-id-filter" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0; white-space:nowrap;">User ID:</label>
+                  <input
+                    type="text"
+                    id="admin-bank-partner-id-filter"
+                    list="admin-bank-settlement-id-datalist"
+                    placeholder="REST-1001, SHOP-1002..."
+                    style="padding:0.2rem 0.45rem; border:1px solid #d9d4c8; border-radius:5px; font-size:0.78rem; height:27px; width:145px; background:#fff; font-family:inherit; outline:none;"
+                    oninput="renderAdminBankPartnersTable()"
+                  />
+                  <button
+                    type="button"
+                    class="btn btn-sm"
+                    style="padding:0.1rem 0.25rem; font-size:0.7rem; border:none; background:transparent; color:var(--muted); cursor:pointer; line-height:1;"
+                    onclick="document.getElementById('admin-bank-partner-id-filter').value=''; renderAdminBankPartnersTable();"
+                    title="Clear User ID filter"
+                  >✕</button>
+                </div>
+
+                <div style="display:inline-flex; align-items:center; gap:0.25rem; background:#fcfaf5; border:1px solid var(--line); border-radius:7px; padding:0.22rem 0.5rem;">
+                  <label for="admin-bank-partner-search" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0; white-space:nowrap;">Search:</label>
+                  <input
+                    type="text"
+                    id="admin-bank-partner-search"
+                    placeholder="Name, PAN, IFSC, A/C..."
+                    style="padding:0.2rem 0.45rem; border:1px solid #d9d4c8; border-radius:5px; font-size:0.78rem; height:27px; width:165px; background:#fff; font-family:inherit; outline:none;"
+                    oninput="renderAdminBankPartnersTable()"
+                  />
+                  <button
+                    type="button"
+                    class="btn btn-sm"
+                    style="padding:0.1rem 0.25rem; font-size:0.7rem; border:none; background:transparent; color:var(--muted); cursor:pointer; line-height:1;"
+                    onclick="document.getElementById('admin-bank-partner-search').value=''; renderAdminBankPartnersTable();"
+                    title="Clear search"
+                  >✕</button>
+                </div>
+              </div>
+
+              <!-- Partners Bank Table -->
+              <div id="admin-bank-partners-table-container">
+                <!-- Rendered via JS -->
+              </div>
+            </div>
+
+            <!-- SUB-TAB 2: TOMATO CENTRAL ACCOUNT & ORDER PAYOUT SETTLEMENTS -->
+            <div id="admin-bank-tab-settlements" style="display:none;">
+              <!-- Tomato Central Account Banner -->
+              <div style="background:linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color:#fff; border-radius:12px; padding:0.85rem 1.15rem; margin-bottom:0.95rem; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.75rem;">
+                <div>
+                  <div style="font-size:0.7rem; text-transform:uppercase; letter-spacing:0.08em; color:#94a3b8; font-weight:700;">🏦 Tomato Central Escrow &amp; Settlement Account</div>
+                  <div style="font-size:0.95rem; font-weight:700; margin-top:0.15rem;">All Customer Order Payments Are Received by Tomato First</div>
+                  <div style="font-size:0.78rem; color:#cbd5e1; margin-top:0.15rem;">
+                    Based on the partner agreement commission % and rider delivery payout agreement, Admin configures and approves payouts to Shops, Restaurants, and Riders.
+                  </div>
+                </div>
+                <div style="background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:0.45rem 0.8rem; text-align:right;">
+                  <div style="font-size:0.68rem; color:#94a3b8; text-transform:uppercase;">Collection Table</div>
+                  <div style="font-size:0.84rem; font-weight:700; color:#38bdf8;">MongoDB: <code>payments</code></div>
+                </div>
+              </div>
+
+              <!-- KPI Summary Row -->
+              <div id="admin-bank-settlements-kpis" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(165px, 1fr)); gap:0.7rem; margin-bottom:0.9rem;">
+                <!-- Rendered via JS -->
+              </div>
+
+              <!-- Compact Platform Business Analytics-Style Filter Toolbar -->
+              <div style="margin-bottom:0.9rem;">
+                <div id="admin-bank-settlements-period-badge" style="font-size:0.78rem; color:var(--muted); margin-bottom:0.45rem;">
+                  <span class="badge badge-accepted" style="font-size:0.7rem; padding:0.18rem 0.5rem;">All Time</span> All fields &amp; settlements below reflect payout activity across all dates
+                </div>
+
+                <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
+                  <!-- From — To Date Pill -->
+                  <div style="display:inline-flex; align-items:center; gap:0.28rem; background:#fcfaf5; border:1px solid var(--line); border-radius:7px; padding:0.22rem 0.5rem;">
+                    <label for="admin-bank-settlement-from-date" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0; white-space:nowrap;">From:</label>
+                    <input
+                      type="date"
+                      id="admin-bank-settlement-from-date"
+                      style="padding:0.18rem 0.38rem; border:1px solid #d9d4c8; border-radius:5px; font-size:0.78rem; height:27px; width:124px; background:#fff; font-family:inherit; outline:none;"
+                      onchange="fetchAdminBankSettlements()"
+                      onkeydown="if(event.key === 'Enter') { event.preventDefault(); fetchAdminBankSettlements(); }"
+                    />
+                    <span style="color:var(--muted); font-size:0.78rem; font-weight:bold;">—</span>
+                    <label for="admin-bank-settlement-to-date" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0; white-space:nowrap;">To:</label>
+                    <input
+                      type="date"
+                      id="admin-bank-settlement-to-date"
+                      style="padding:0.18rem 0.38rem; border:1px solid #d9d4c8; border-radius:5px; font-size:0.78rem; height:27px; width:124px; background:#fff; font-family:inherit; outline:none;"
+                      onchange="fetchAdminBankSettlements()"
+                      onkeydown="if(event.key === 'Enter') { event.preventDefault(); fetchAdminBankSettlements(); }"
+                    />
+                  </div>
+
+                  <!-- User ID Pill (Shop / Restaurant / Rider ID) -->
+                  <div style="display:inline-flex; align-items:center; gap:0.25rem; background:#fcfaf5; border:1px solid var(--line); border-radius:7px; padding:0.22rem 0.5rem;">
+                    <label for="admin-bank-settlement-filter-by-id" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0; white-space:nowrap;">User ID:</label>
+                    <input
+                      type="text"
+                      id="admin-bank-settlement-filter-by-id"
+                      list="admin-bank-settlement-id-datalist"
+                      placeholder="REST-1001, SHOP-1002..."
+                      style="padding:0.18rem 0.42rem; border:1px solid #d9d4c8; border-radius:5px; font-size:0.78rem; height:27px; width:148px; background:#fff; font-family:inherit; outline:none;"
+                      onchange="fetchAdminBankSettlements()"
+                      onkeydown="if(event.key === 'Enter') { event.preventDefault(); fetchAdminBankSettlements(); }"
+                      oninput="renderAdminBankSettlementsTable()"
+                    />
+                    <datalist id="admin-bank-settlement-id-datalist"></datalist>
+                    <button
+                      type="button"
+                      class="btn btn-sm"
+                      style="padding:0.1rem 0.25rem; font-size:0.7rem; border:none; background:transparent; color:var(--muted); cursor:pointer; line-height:1;"
+                      onclick="clearAdminBankSettlementUserId()"
+                      title="Clear User ID filter"
+                    >✕</button>
+                  </div>
+
+                  <!-- Quick Period & Search Buttons -->
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-sm"
+                    style="padding:0.3rem 0.65rem; font-size:0.76rem; height:31px; white-space:nowrap;"
+                    onclick="fetchAdminBankSettlements()"
+                    title="Search &amp; control all payout settlement fields for selected period"
+                  >🔍 Search Payouts</button>
+                  <button
+                    type="button"
+                    class="btn btn-outline btn-sm"
+                    style="padding:0.3rem 0.55rem; font-size:0.76rem; height:31px; white-space:nowrap;"
+                    onclick="resetAdminBankSettlementDatesToToday()"
+                    title="Filter payout settlements for today's date"
+                  >📅 Today</button>
+                  <button
+                    type="button"
+                    class="btn btn-outline btn-sm"
+                    style="padding:0.3rem 0.55rem; font-size:0.76rem; height:31px; white-space:nowrap;"
+                    onclick="setAdminBankSettlementLastMonth()"
+                    title="View payout settlements for last month"
+                  >🗓️ Last Month</button>
+                  <button
+                    type="button"
+                    class="btn btn-outline btn-sm"
+                    style="padding:0.3rem 0.55rem; font-size:0.76rem; height:31px; white-space:nowrap;"
+                    onclick="setAdminBankSettlementAllTime()"
+                    title="View all-time payout settlements"
+                  >All Time</button>
+                </div>
+
+                <!-- Secondary Compact Inline Filter Pills -->
+                <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap; margin-top:0.4rem;">
+                  <div style="display:inline-flex; align-items:center; gap:0.25rem; background:#fcfaf5; border:1px solid var(--line); border-radius:7px; padding:0.22rem 0.5rem;">
+                    <label for="admin-bank-settlement-type-filter" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0; white-space:nowrap;">Source:</label>
+                    <select
+                      id="admin-bank-settlement-type-filter"
+                      style="padding:0.18rem 0.38rem; border:1px solid #d9d4c8; border-radius:5px; font-size:0.78rem; height:27px; background:#fff; font-family:inherit; outline:none;"
+                      onchange="fetchAdminBankSettlements()"
+                    >
+                      <option value="all">All Orders</option>
+                      <option value="restaurant">🏪 Restaurants</option>
+                      <option value="shop">🏬 Shops</option>
+                    </select>
+                  </div>
+
+                  <div style="display:inline-flex; align-items:center; gap:0.25rem; background:#fcfaf5; border:1px solid var(--line); border-radius:7px; padding:0.22rem 0.5rem;">
+                    <label for="admin-bank-settlement-partner-select" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0; white-space:nowrap;">Partner:</label>
+                    <select
+                      id="admin-bank-settlement-partner-select"
+                      style="padding:0.18rem 0.38rem; border:1px solid #d9d4c8; border-radius:5px; font-size:0.78rem; height:27px; width:165px; background:#fff; font-family:inherit; outline:none;"
+                      onchange="onAdminBankPartnerSelectChange(this.value)"
+                    >
+                      <option value="">All Partners</option>
+                    </select>
+                  </div>
+
+                  <div style="display:inline-flex; align-items:center; gap:0.25rem; background:#fcfaf5; border:1px solid var(--line); border-radius:7px; padding:0.22rem 0.5rem;">
+                    <label for="admin-bank-settlement-status-filter" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0; white-space:nowrap;">Status:</label>
+                    <select
+                      id="admin-bank-settlement-status-filter"
+                      style="padding:0.18rem 0.38rem; border:1px solid #d9d4c8; border-radius:5px; font-size:0.78rem; height:27px; background:#fff; font-family:inherit; outline:none;"
+                      onchange="fetchAdminBankSettlements()"
+                    >
+                      <option value="all">All States</option>
+                      <option value="pending">⏳ Pending</option>
+                      <option value="paid">✅ Settled</option>
+                    </select>
+                  </div>
+
+                  <div style="display:inline-flex; align-items:center; gap:0.25rem; background:#fcfaf5; border:1px solid var(--line); border-radius:7px; padding:0.22rem 0.5rem;">
+                    <label for="admin-bank-settlement-search" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0; white-space:nowrap;">Search:</label>
+                    <input
+                      type="text"
+                      id="admin-bank-settlement-search"
+                      placeholder="Order #, Name, UTR..."
+                      style="padding:0.18rem 0.42rem; border:1px solid #d9d4c8; border-radius:5px; font-size:0.78rem; height:27px; width:145px; background:#fff; font-family:inherit; outline:none;"
+                      oninput="renderAdminBankSettlementsTable()"
+                    />
+                    <button
+                      type="button"
+                      class="btn btn-sm"
+                      style="padding:0.1rem 0.25rem; font-size:0.7rem; border:none; background:transparent; color:var(--muted); cursor:pointer; line-height:1;"
+                      onclick="document.getElementById('admin-bank-settlement-search').value=''; renderAdminBankSettlementsTable();"
+                      title="Clear search"
+                    >✕</button>
+                  </div>
+
+                  <button
+                    type="button"
+                    class="btn btn-outline btn-sm"
+                    style="padding:0.3rem 0.55rem; font-size:0.75rem; height:31px; white-space:nowrap;"
+                    onclick="clearAdminBankSettlementDates()"
+                    title="Reset all filters"
+                  >✕ Clear</button>
+                </div>
+              </div>
+
+              <!-- Settlements Table -->
+              <div id="admin-bank-settlements-table-container">
+                <!-- Rendered via JS -->
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- =========================================================================
+             VIEW 18: PARTNER BANK & PAN KYC + PAYOUTS PANEL (SHOP / RESTAURANT / RIDER)
+             ========================================================================= -->
+        <section id="partner-bank-view" class="view-section">
+          <div class="panel-card" style="max-width:860px;">
+            <div class="panel-header" style="flex-wrap:wrap; gap:0.75rem;">
+              <div>
+                <h2 class="panel-title">🏦 Bank Details, PAN KYC &amp; Payout Agreement</h2>
+                <p style="font-size:0.84rem; color:var(--muted); margin-top:0.2rem;">
+                  Submit your Bank Account, IFSC Code, and PAN Card details to receive order payouts from Tomato. Your <strong>Bank Account Holder Name must exactly match the Name on your PAN Card</strong> for account approval.
+                </p>
+              </div>
+              <span id="partner-bank-status-badge" class="badge badge-pending">Checking Status...</span>
+            </div>
+
+            <!-- LOCKED / APPROVAL NOTICE BANNER -->
+            <div id="partner-bank-lock-banner" style="display:none; margin-bottom:1.2rem; padding:1rem 1.15rem; border-radius:12px; background:#f0fdf4; border:1px solid #86efac; color:#14532d;">
+              <div style="display:flex; align-items:flex-start; gap:0.75rem;">
+                <span style="font-size:1.35rem;">🔒</span>
+                <div>
+                  <div style="font-weight:700; font-size:0.95rem;">Bank &amp; PAN Details Approved &amp; Locked</div>
+                  <div style="font-size:0.84rem; margin-top:0.2rem;">
+                    Your bank details and PAN KYC have been verified and approved by Tomato Admin. For security, bank details are <strong>non-editable once approved</strong>. If you need to update your bank account, please raise a request to Admin via <strong>Help &amp; Support</strong>.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- APPROVAL REQUIREMENT WARNING BANNER -->
+            <div id="partner-bank-pending-banner" style="display:none; margin-bottom:1.2rem; padding:1rem 1.15rem; border-radius:12px; background:#fffbeb; border:1px solid #fde68a; color:#92400e;">
+              <div style="display:flex; align-items:flex-start; gap:0.75rem;">
+                <span style="font-size:1.35rem;">⚠️</span>
+                <div>
+                  <div style="font-weight:700; font-size:0.95rem;">Mandatory for Partner Approval &amp; Payouts</div>
+                  <div style="font-size:0.84rem; margin-top:0.2rem;">
+                    Shops, Restaurants, and Riders are approved <strong>only after</strong> submitting valid Bank Details, IFSC Code, Bank Account Holder Name, and PAN Card where the <strong>Bank Account Holder Name matches the PAN Card Name</strong>.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- AGREEMENT SUMMARY STRIP -->
+            <div id="partner-bank-agreement-strip" style="background:#f8fafc; border:1px solid var(--border); border-radius:12px; padding:0.9rem 1.1rem; margin-bottom:1.25rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem;">
+              <div>
+                <div style="font-size:0.75rem; font-weight:700; text-transform:uppercase; color:var(--muted);">Tomato Payout Agreement</div>
+                <div id="partner-bank-agreement-text" style="font-size:0.92rem; font-weight:700; color:var(--ink); margin-top:0.15rem;">
+                  All customer order payments are collected by Tomato and settled to your verified bank account.
+                </div>
+              </div>
+              <div id="partner-bank-admin-note" style="font-size:0.8rem; color:var(--muted);"></div>
+            </div>
+
+            <form id="partner-bank-form" onsubmit="savePartnerBankDetails(event)">
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                <div class="form-group">
+                  <label for="partner-bank-holder-name">Bank Account Holder Name *</label>
+                  <input
+                    type="text"
+                    id="partner-bank-holder-name"
+                    class="form-control"
+                    placeholder="Exact name as per bank passbook/cheque"
+                    required
+                    oninput="checkPartnerBankNameMatchLive()"
+                  />
+                </div>
+                <div class="form-group">
+                  <label for="partner-pan-holder-name">Name on PAN Card *</label>
+                  <input
+                    type="text"
+                    id="partner-pan-holder-name"
+                    class="form-control"
+                    placeholder="Exact name printed on PAN card"
+                    required
+                    oninput="checkPartnerBankNameMatchLive()"
+                  />
+                </div>
+              </div>
+
+              <!-- Live Name Match Indicator -->
+              <div id="partner-bank-name-match-indicator" style="margin-bottom:1rem; padding:0.6rem 0.9rem; border-radius:8px; font-size:0.83rem; font-weight:600; display:none;"></div>
+
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                <div class="form-group">
+                  <label for="partner-pan-number">PAN Card Number (10 Characters) *</label>
+                  <input
+                    type="text"
+                    id="partner-pan-number"
+                    class="form-control"
+                    placeholder="e.g. ABCDE1234F"
+                    maxlength="10"
+                    style="text-transform:uppercase; font-family:monospace;"
+                    required
+                  />
+                </div>
+                <div class="form-group">
+                  <label for="partner-bank-name">Bank Name *</label>
+                  <input
+                    type="text"
+                    id="partner-bank-name"
+                    class="form-control"
+                    placeholder="e.g. HDFC Bank, SBI, ICICI Bank"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                <div class="form-group">
+                  <label for="partner-bank-account-number">Bank Account Number *</label>
+                  <input
+                    type="text"
+                    id="partner-bank-account-number"
+                    class="form-control"
+                    placeholder="Enter bank account number"
+                    style="font-family:monospace;"
+                    required
+                  />
+                </div>
+                <div class="form-group">
+                  <label for="partner-bank-ifsc">IFSC Code (11 Characters) *</label>
+                  <input
+                    type="text"
+                    id="partner-bank-ifsc"
+                    class="form-control"
+                    placeholder="e.g. HDFC0001234"
+                    maxlength="11"
+                    style="text-transform:uppercase; font-family:monospace;"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="partner-bank-upi">UPI ID (Optional for Instant Settlement)</label>
+                <input
+                  type="text"
+                  id="partner-bank-upi"
+                  class="form-control"
+                  placeholder="e.g. merchant@okaxis"
+                />
+              </div>
+
+              <div class="form-group">
+                <label id="partner-bank-note-label" for="partner-bank-note">
+                  Admin Verification / Agreement Note (FSSAI Registration No. &amp; Expiry / Driving Licence No. &amp; Expiry) *
+                </label>
+                <input
+                  type="text"
+                  id="partner-bank-note"
+                  class="form-control"
+                  placeholder="Shop/Restaurant: FSSAI Reg No & Expiry | Rider: Driving Licence No & Expiry"
+                  required
+                />
+                <small id="partner-bank-note-hint" style="display:block; margin-top:0.35rem; font-size:0.78rem; color:#b45309; font-weight:600;">
+                  📌 Note: Rider must share Driving Licence Number &amp; Expiry. Shop and Restaurant must share FSSAI Registration Number &amp; Expiry.
+                </small>
+              </div>
+
+              <div id="partner-bank-submit-row" style="margin-top:1.25rem; display:flex; justify-content:flex-end; gap:0.75rem;">
+                <button type="submit" id="partner-bank-submit-btn" class="btn btn-primary">
+                  💾 Submit Bank &amp; PAN Details for Verification
+                </button>
+              </div>
+            </form>
+          </div>
+        </section>
       </main>
     </div>
 
@@ -1298,14 +1776,30 @@
         </div>
 
         <div class="gateway-tabs">
-          <button type="button" class="gateway-tab active" onclick="switchGatewayTab('card')">💳 Card</button>
-          <button type="button" class="gateway-tab" onclick="switchGatewayTab('upi')">📱 UPI</button>
-          <button type="button" class="gateway-tab" onclick="switchGatewayTab('netbanking')">🏦 NetBanking</button>
+          <button type="button" class="gateway-tab active" onclick="switchGatewayTab('razorpay')">⚡ Razorpay (UPI / Card / NetBanking)</button>
           <button type="button" class="gateway-tab" onclick="switchGatewayTab('cod')">💵 COD</button>
+          <button type="button" class="gateway-tab" onclick="switchGatewayTab('card')">💳 Direct Card</button>
+          <button type="button" class="gateway-tab" onclick="switchGatewayTab('upi')">📱 Direct UPI</button>
+        </div>
+
+        <!-- Razorpay Tab (Default Active) -->
+        <div id="tab-razorpay" class="gateway-panel active">
+          <div style="background:#fff; border:1px solid #bfdbfe; border-radius:8px; padding:1.2rem; text-align:center;">
+            <div style="display:inline-flex; align-items:center; gap:0.5rem; background:#eff6ff; color:#1d4ed8; padding:0.35rem 0.9rem; border-radius:20px; font-size:0.82rem; font-weight:700; margin-bottom:0.8rem;">
+              <span>⚡ Powered by Razorpay</span>
+              <span style="background:#dbeafe; padding:0.1rem 0.45rem; border-radius:4px; font-size:0.72rem; color:#1e40af;">Test Gateway (rzp_test)</span>
+            </div>
+            <p style="font-size:0.92rem; color:var(--ink); margin:0 0 0.5rem 0; font-weight:600;">
+              Instant Online Payment via Google Pay, PhonePe, Paytm, UPI QR, Cards &amp; NetBanking
+            </p>
+            <p style="font-size:0.8rem; color:var(--muted); margin:0;">
+              Clicking <strong>Authorize &amp; Pay</strong> will open the official Razorpay Checkout popup for test payment completion.
+            </p>
+          </div>
         </div>
 
         <!-- Card Tab -->
-        <div id="tab-card" class="gateway-panel active">
+        <div id="tab-card" class="gateway-panel">
           <div class="form-group">
             <label>Card Number</label>
             <input id="gw-card-num" type="text" placeholder="4111 2222 3333 4444" maxlength="19" />
@@ -2163,6 +2657,238 @@
       </div>
     </div>
 
+    <!-- =====================================================================
+         ADMIN: VIEW / EDIT PARTNER BANK DETAILS & APPROVE AGREEMENT MODAL
+         ===================================================================== -->
+    <div id="admin-bank-edit-modal" class="modal-overlay">
+      <div class="modal-box" style="max-width:740px; max-height:92vh; overflow-y:auto;">
+        <div class="modal-header">
+          <div>
+            <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--tomato); font-weight:700;">🏦 Admin Bank &amp; KYC Verification</span>
+            <h2 id="admin-bank-modal-title" style="font-size:1.25rem; margin-top:0.2rem;">Verify / Edit Partner Bank &amp; PAN Details</h2>
+          </div>
+          <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('admin-bank-edit-modal')">&times;</button>
+        </div>
+
+        <form id="admin-bank-edit-form" onsubmit="saveAdminPartnerBankDetails(event)">
+          <input type="hidden" id="admin-bank-edit-user-id" />
+          <input type="hidden" id="admin-bank-edit-user-role" />
+
+          <!-- Partner Info Banner -->
+          <div id="admin-bank-modal-partner-summary" style="background:#f8fafc; border:1px solid var(--border); border-radius:10px; padding:0.75rem 1rem; margin-bottom:1rem; font-size:0.86rem;"></div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.9rem;">
+            <div class="form-group">
+              <label for="admin-bank-holder-name">Bank Account Holder Name *</label>
+              <input
+                type="text"
+                id="admin-bank-holder-name"
+                class="form-control"
+                placeholder="Account Holder Name"
+                required
+                oninput="checkAdminBankNameMatchLive()"
+              />
+            </div>
+            <div class="form-group">
+              <label for="admin-pan-holder-name">Name on PAN Card *</label>
+              <input
+                type="text"
+                id="admin-pan-holder-name"
+                class="form-control"
+                placeholder="Name on PAN Card"
+                required
+                oninput="checkAdminBankNameMatchLive()"
+              />
+            </div>
+          </div>
+
+          <div id="admin-bank-name-match-indicator" style="margin-bottom:0.9rem; padding:0.55rem 0.85rem; border-radius:8px; font-size:0.82rem; font-weight:600; display:none;"></div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.9rem;">
+            <div class="form-group">
+              <label for="admin-pan-number">PAN Card Number (10 Chars) *</label>
+              <input
+                type="text"
+                id="admin-pan-number"
+                class="form-control"
+                maxlength="10"
+                style="text-transform:uppercase; font-family:monospace;"
+                placeholder="ABCDE1234F"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label for="admin-bank-name">Bank Name *</label>
+              <input
+                type="text"
+                id="admin-bank-name"
+                class="form-control"
+                placeholder="e.g. HDFC Bank, SBI"
+                required
+              />
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.9rem;">
+            <div class="form-group">
+              <label for="admin-bank-account-number">Bank Account Number *</label>
+              <input
+                type="text"
+                id="admin-bank-account-number"
+                class="form-control"
+                style="font-family:monospace;"
+                placeholder="Account Number"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label for="admin-bank-ifsc">IFSC Code (11 Chars) *</label>
+              <input
+                type="text"
+                id="admin-bank-ifsc"
+                class="form-control"
+                maxlength="11"
+                style="text-transform:uppercase; font-family:monospace;"
+                placeholder="HDFC0001234"
+                required
+              />
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.9rem;">
+            <div class="form-group">
+              <label for="admin-bank-upi">UPI ID (Optional)</label>
+              <input
+                type="text"
+                id="admin-bank-upi"
+                class="form-control"
+                placeholder="partner@upi"
+              />
+            </div>
+            <div class="form-group" id="admin-bank-commission-group">
+              <label for="admin-bank-commission">Tomato Agreement Commission (%)</label>
+              <input
+                type="number"
+                id="admin-bank-commission"
+                class="form-control"
+                min="0"
+                max="100"
+                step="0.5"
+                value="15"
+              />
+            </div>
+            <div class="form-group" id="admin-bank-rider-payout-group" style="display:none;">
+              <label for="admin-bank-rider-payout">Rider Payout Agreement per Order (₹)</label>
+              <input
+                type="number"
+                id="admin-bank-rider-payout"
+                class="form-control"
+                min="0"
+                step="1"
+                value="40"
+              />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label id="admin-bank-note-label" for="admin-bank-note">Admin Verification / Agreement Note</label>
+            <input
+              type="text"
+              id="admin-bank-note"
+              class="form-control"
+              placeholder="Shop/Restaurant: FSSAI Reg No & Expiry | Rider: Driving Licence No & Expiry"
+            />
+            <small id="admin-bank-note-hint" style="display:block; margin-top:0.35rem; font-size:0.78rem; color:#b45309; font-weight:600;">
+              📌 Rider must share Driving Licence Number &amp; Expiry. Shop and Restaurant must share FSSAI Registration Number &amp; Expiry.
+            </small>
+          </div>
+
+          <div style="background:#f0fdf4; border:1px solid #86efac; border-radius:10px; padding:0.75rem 1rem; margin-bottom:1rem; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.75rem;">
+            <label style="display:flex; align-items:center; gap:0.55rem; font-weight:700; color:#14532d; cursor:pointer; margin:0;">
+              <input type="checkbox" id="admin-bank-approve-checkbox" checked style="width:18px; height:18px;" />
+              <span>Approve Partner &amp; Lock Bank Details (Non-Editable by Partner)</span>
+            </label>
+            <label style="display:flex; align-items:center; gap:0.45rem; font-size:0.82rem; color:#15803d; cursor:pointer; margin:0;">
+              <input type="checkbox" id="admin-bank-lock-checkbox" checked />
+              <span>Keep Locked for Partner</span>
+            </label>
+          </div>
+
+          <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:0.65rem;">
+            <button type="button" class="btn btn-outline" onclick="closeModal('admin-bank-edit-modal')">Cancel</button>
+            <button type="submit" class="btn btn-primary">💾 Save Bank Details &amp; Apply Approval</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- =====================================================================
+         ADMIN: CONFIGURE ORDER SETTLEMENT AGREEMENT & PAYOUT MODAL
+         ===================================================================== -->
+    <div id="admin-settlement-agreement-modal" class="modal-overlay">
+      <div class="modal-box" style="max-width:560px;">
+        <div class="modal-header">
+          <div>
+            <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--tomato); font-weight:700;">💸 Tomato Central Account Settlement</span>
+            <h2 style="font-size:1.2rem; margin-top:0.2rem;">Configure Order Payout Agreement</h2>
+          </div>
+          <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('admin-settlement-agreement-modal')">&times;</button>
+        </div>
+
+        <form id="admin-settlement-agreement-form" onsubmit="saveAdminSettlementAgreement(event)">
+          <input type="hidden" id="admin-settlement-payment-id" />
+
+          <div id="admin-settlement-order-summary" style="background:#f8fafc; border:1px solid var(--border); border-radius:10px; padding:0.75rem 1rem; margin-bottom:1rem; font-size:0.86rem;"></div>
+
+          <div class="form-group">
+            <label for="admin-settlement-commission-input">Shop / Restaurant Agreement Commission (%)</label>
+            <input
+              type="number"
+              id="admin-settlement-commission-input"
+              class="form-control"
+              min="0"
+              max="100"
+              step="0.5"
+              required
+              oninput="previewAdminSettlementBreakdown()"
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="admin-settlement-rider-payout-input">Rider Delivery Payout Amount (₹)</label>
+            <input
+              type="number"
+              id="admin-settlement-rider-payout-input"
+              class="form-control"
+              min="0"
+              step="1"
+              required
+              oninput="previewAdminSettlementBreakdown()"
+            />
+          </div>
+
+          <div id="admin-settlement-breakdown-preview" style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:0.85rem 1rem; margin-bottom:1rem; font-size:0.85rem; color:#1e3a8a;"></div>
+
+          <div class="form-group">
+            <label for="admin-settlement-note-input">Admin Settlement Note</label>
+            <input
+              type="text"
+              id="admin-settlement-note-input"
+              class="form-control"
+              placeholder="Optional note for payout calculation"
+            />
+          </div>
+
+          <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:0.65rem;">
+            <button type="button" class="btn btn-outline" onclick="closeModal('admin-settlement-agreement-modal')">Cancel</button>
+            <button type="submit" class="btn btn-primary">💾 Update Payout Agreement</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Razorpay Checkout SDK -->
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
     <!-- SCRIPT -->
     <script src="../javascript/loginDashboard.js"></script>
   </body>

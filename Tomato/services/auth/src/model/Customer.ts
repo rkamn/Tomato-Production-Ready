@@ -14,6 +14,7 @@ export interface ICustomer extends Document {
   walletBalance: number;
   creditPoint: number;
   customerId: string;
+  dob?: string;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -43,6 +44,7 @@ const schema: Schema<ICustomer> = new Schema(
     walletBalance: { type: Number, default: 0, min: 0 },
     creditPoint: { type: Number, default: 0, min: 0 },
     customerId: { type: String, unique: true, sparse: true, trim: true },
+    dob: { type: String, default: '', trim: true },
   },
   { timestamps: true, collection: 'customers' },
 );

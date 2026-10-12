@@ -1,26 +1,193 @@
 import express, { Request, Response } from 'express';
 import mongoose from 'mongoose';
+import crypto from 'node:crypto';
+import axios from 'axios';
 import Address from '../../model/Address.js';
 import MenuItem, { FoodItem } from '../../model/MenuItem.js';
 import Notification from '../../model/Notification.js';
 import Order, { IOrder } from '../../model/Order.js';
 import Counter, { getNextCounterValue } from '../../model/Counter.js';
 import Restaurant from '../../model/Restaurant.js';
+import Shop from '../../model/Shop.js';
+import ShopOrder from '../../model/ShopOrder.js';
 import Customer from '../../model/Customer.js';
+import Review from '../../model/Review.js';
+import Coupon, {
+  COUPON_TYPE_LABELS,
+  ensureDefaultCouponsSeeded,
+} from '../../model/Coupon.js';
 import {
   authenticate,
   AuthenticatedRequest,
   requireRole,
 } from '../../middleware/authenticate.js';
-import notificationService from '../notification/notificationService.js';
+import { notificationService, arattaiNotificationService } from '../notification/index.js';
 import {
   formatBill,
   buildOrderLiveTrackingData,
 } from '../../utils/orderHelpers.js';
+import {
+  syncOrderToTomatoPayment,
+  resolvePartnerPincode,
+  resolveAddressPincode,
+  getServiceablePincodes,
+} from '../../utils/bankHelpers.js';
+import {
+  MAX_COUPONS_PER_ORDER,
+  doesUserMatchTargetIdentifier,
+  evaluateCouponsForCart,
+  recordCouponRedemptions,
+} from '../../utils/couponHelpers.js';
 
 const createCustomerRouter = () => {
   const router = express.Router();
   router.use(authenticate, requireRole('customer'));
+
+  router.get('/serviceable-pincodes', async (_req: Request, res: Response) => {
+    try {
+      const pincodes = await getServiceablePincodes();
+      return res.json({ pincodes });
+    } catch (error) {
+      console.error('Customer serviceable pincodes fetch failed:', error);
+      return res.status(500).json({ message: 'Unable to fetch serviceable pincodes' });
+    }
+  });
+
+  // Get available coupons for customer billing (maximum 2 coupons can be availed at a time)
+  router.get('/coupons', async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user?.userId) {
+        return res.status(401).json({ message: 'Authentication required' });
+      }
+
+      await ensureDefaultCouponsSeeded();
+      const now = new Date();
+      const [customer, previousOrdersCount, activeCoupons] = await Promise.all([
+        Customer.findById(user.userId).lean(),
+        Order.countDocuments({
+          customerId: new mongoose.Types.ObjectId(user.userId),
+          status: { $ne: 'cancelled' },
+        }),
+        Coupon.find({ isActive: true }).sort({ createdAt: -1 }).lean(),
+      ]);
+
+      const userContext = {
+        userId: String(user.userId),
+        customerId:
+          (customer as any)?.customerId ||
+          `cust-${String(user.userId).slice(-4).toLowerCase()}`,
+        email: customer?.email || '',
+        phone: customer?.phone || '',
+        name: customer?.name || '',
+      };
+
+      // Filter out coupons targeted exclusively to another specific user
+      const visibleCoupons = activeCoupons
+        .filter((c) => {
+          if (c.validUntil && new Date(c.validUntil) < now) return false;
+          if (c.totalUsageLimit > 0 && c.usedCount >= c.totalUsageLimit) return false;
+          if (
+            c.couponType === 'specific_user' ||
+            (c.couponType === 'settlement' && String(c.targetUserIdentifier || '').trim())
+          ) {
+            return doesUserMatchTargetIdentifier(c.targetUserIdentifier, userContext);
+          }
+          return true;
+        })
+        .map((c) => {
+          const userUses = (c.usedBy || []).filter(
+            (u) => String(u.userId) === String(user.userId),
+          ).length;
+          const remainingForUser =
+            c.usageLimitPerUser > 0 ? Math.max(0, c.usageLimitPerUser - userUses) : 999;
+          const isNewUserEligible = c.couponType !== 'new_user' || previousOrdersCount === 0;
+          return {
+            id: String(c._id),
+            code: c.code,
+            title: c.title,
+            description: c.description,
+            couponType: c.couponType,
+            couponTypeLabel: COUPON_TYPE_LABELS[c.couponType] || c.couponType,
+            discountType: c.discountType,
+            discountValue: c.discountValue,
+            maxDiscountAmount: c.maxDiscountAmount,
+            minOrderAmount: c.minOrderAmount,
+            targetItemCategory: c.targetItemCategory || '',
+            occasionName: c.occasionName || '',
+            targetUserIdentifier: c.targetUserIdentifier || '',
+            applicableStoreType: c.applicableStoreType || 'all',
+            usageLimitPerUser: c.usageLimitPerUser,
+            userUses,
+            remainingForUser,
+            isEligibleForUser: remainingForUser > 0 && isNewUserEligible,
+            ineligibleReason: !isNewUserEligible
+              ? 'Valid only for new users on their 1st order'
+              : remainingForUser <= 0
+              ? 'Already redeemed maximum allowed times'
+              : '',
+            validUntil: c.validUntil,
+          };
+        });
+
+      return res.json({
+        coupons: visibleCoupons,
+        maxCouponsAllowed: MAX_COUPONS_PER_ORDER,
+        isNewUser: previousOrdersCount === 0,
+      });
+    } catch (error) {
+      console.error('Customer coupons fetch failed:', error);
+      return res.status(500).json({ message: 'Unable to fetch available coupons' });
+    }
+  });
+
+  // Validate up to 2 coupons against customer's current cart items during billing
+  router.post('/coupons/validate', async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user?.userId) {
+        return res.status(401).json({ message: 'Authentication required' });
+      }
+
+      const rawCodes = Array.isArray(req.body?.couponCodes)
+        ? req.body.couponCodes
+        : req.body?.couponCode
+        ? [req.body.couponCode]
+        : [];
+      const items = Array.isArray(req.body?.items) ? req.body.items : [];
+      const isShopOrder = Boolean(req.body?.isShopOrder);
+
+      if (rawCodes.length > MAX_COUPONS_PER_ORDER) {
+        return res.status(400).json({
+          valid: false,
+          message: `Maximum ${MAX_COUPONS_PER_ORDER} coupons can be availed at a time by any user.`,
+          maxCouponsAllowed: MAX_COUPONS_PER_ORDER,
+        });
+      }
+
+      const result = await evaluateCouponsForCart({
+        couponCodes: rawCodes,
+        userId: String(user.userId),
+        isShopOrder,
+        items,
+      });
+
+      if (!result.valid) {
+        return res.status(400).json({
+          ...result,
+          maxCouponsAllowed: MAX_COUPONS_PER_ORDER,
+        });
+      }
+
+      return res.json({
+        ...result,
+        maxCouponsAllowed: MAX_COUPONS_PER_ORDER,
+      });
+    } catch (error) {
+      console.error('Customer coupon validation failed:', error);
+      return res.status(500).json({ message: 'Unable to validate coupon' });
+    }
+  });
 
   router.get('/overview', (req: Request, res: Response) => {
     const user = (req as AuthenticatedRequest).user;
@@ -54,19 +221,96 @@ const createCustomerRouter = () => {
   // 1. View all restaurants
   router.get('/restaurants', async (_req: Request, res: Response) => {
     try {
-      const restaurants = await Restaurant.find({
-        isBlocked: { $ne: true },
+      const [restaurants, serviceablePincodes] = await Promise.all([
+        Restaurant.find({
+          isBlocked: { $ne: true },
+        })
+          .select(
+            'name restaurantId digipin pincode email phone image restaurantAddress restaurantLocation cuisine isApproved isOpen isOnline',
+          )
+          .lean(),
+        getServiceablePincodes(),
+      ]);
+
+      const restObjIds = restaurants.map((r) => r._id);
+      const restItems = await FoodItem.find({
+        restaurantId: { $in: restObjIds },
+        isActive: true,
       })
-        .select(
-          'name restaurantId digipin email phone image restaurantAddress restaurantLocation cuisine isApproved isOpen isOnline',
-        )
+        .select('_id restaurantId')
         .lean();
 
+      const itemObjIds = restItems.map((i) => i._id);
+      const allTargetIds = [...restObjIds, ...itemObjIds];
+
+      const reviewStats = allTargetIds.length
+        ? await Review.aggregate([
+            { $match: { productId: { $in: allTargetIds } } },
+            {
+              $group: {
+                _id: '$productId',
+                avgRating: { $avg: '$rating' },
+                totalReviews: { $sum: 1 },
+              },
+            },
+          ])
+        : [];
+
+      const statByProductId = new Map<string, { avgRating: number; totalReviews: number }>(
+        reviewStats.map((s: any) => [
+          String(s._id),
+          {
+            avgRating: Number(s.avgRating || 0),
+            totalReviews: Number(s.totalReviews || 0),
+          },
+        ]),
+      );
+
+      const itemsByRestId = new Map<string, string[]>();
+      for (const itm of restItems) {
+        const rKey = String(itm.restaurantId);
+        if (!itemsByRestId.has(rKey)) itemsByRestId.set(rKey, []);
+        itemsByRestId.get(rKey)!.push(String(itm._id));
+      }
+
       return res.json({
+        serviceablePincodes,
         restaurants: restaurants.map((r) => {
+          const restKey = String(r._id);
           const restId = r.restaurantId || '';
           const displayName = r.name;
-          const isOpen = r.isOpen ?? r.isOnline ?? true;
+          const partnerPin = resolvePartnerPincode(r);
+          const isApproved = r.isApproved ?? true;
+          const isServiceable = Boolean(
+            isApproved && partnerPin && serviceablePincodes.includes(partnerPin),
+          );
+          const isOpen = Boolean((r.isOpen ?? r.isOnline ?? true) && isServiceable);
+
+          const itemIdsForRest = itemsByRestId.get(restKey) || [];
+          const itemAverages: number[] = [];
+          let itemReviewsSum = 0;
+
+          for (const iId of itemIdsForRest) {
+            const st = statByProductId.get(iId);
+            if (st && st.totalReviews > 0 && st.avgRating > 0) {
+              itemAverages.push(Math.round(st.avgRating * 10) / 10);
+              itemReviewsSum += st.totalReviews;
+            }
+          }
+
+          const directRestStat = statByProductId.get(restKey);
+          const directReviewsCount = directRestStat?.totalReviews || 0;
+
+          let rating: number | null = null;
+          if (itemAverages.length > 0) {
+            const sumOfItemAvgs = itemAverages.reduce((acc, v) => acc + v, 0);
+            rating = Math.round((sumOfItemAvgs / itemAverages.length) * 10) / 10;
+          } else if (directRestStat && directRestStat.totalReviews > 0 && directRestStat.avgRating > 0) {
+            rating = Math.round(directRestStat.avgRating * 10) / 10;
+          }
+
+          const reviewCount = directReviewsCount + itemReviewsSum;
+
           return {
             id: r._id,
             _id: r._id,
@@ -74,15 +318,20 @@ const createCustomerRouter = () => {
             restaurantId: restId,
             displayName,
             digipin: r.digipin || '',
+            pincode: partnerPin,
+            isServiceable,
             email: r.email,
             phone: r.phone,
             image: r.image,
             address: r.restaurantAddress || 'Bengaluru Food Quarter',
             location: r.restaurantLocation || { lat: 12.9716, lng: 77.5946 },
             cuisine: r.cuisine || 'North Indian, Continental, Fast Food',
-            isApproved: r.isApproved ?? true,
+            isApproved,
             isOpen,
             isOnline: isOpen,
+            rating,
+            reviewCount,
+            directReviewCount: directReviewsCount,
           };
         }),
       });
@@ -92,17 +341,164 @@ const createCustomerRouter = () => {
     }
   });
 
-  // 2. View menu items (across all restaurants or filtered by restaurant)
+  // 1b. View all shops
+  router.get('/shops', async (_req: Request, res: Response) => {
+    try {
+      const [shops, serviceablePincodes] = await Promise.all([
+        Shop.find({
+          isBlocked: { $ne: true },
+        })
+          .select(
+            'name shopId digipin pincode email phone image shopAddress shopLocation category isApproved isOpen isOnline',
+          )
+          .lean(),
+        getServiceablePincodes(),
+      ]);
+
+      return res.json({
+        serviceablePincodes,
+        shops: shops.map((s) => {
+          const shopCode = s.shopId || '';
+          const displayName = s.name;
+          const partnerPin = resolvePartnerPincode(s);
+          const isApproved = s.isApproved ?? true;
+          const isServiceable = Boolean(
+            isApproved && partnerPin && serviceablePincodes.includes(partnerPin),
+          );
+          const isOpen = Boolean((s.isOpen ?? s.isOnline ?? true) && isServiceable);
+          return {
+            id: s._id,
+            _id: s._id,
+            name: s.name,
+            shopId: shopCode,
+            displayName,
+            digipin: s.digipin || '',
+            pincode: partnerPin,
+            isServiceable,
+            email: s.email,
+            phone: s.phone,
+            image: s.image,
+            address: s.shopAddress || 'Bengaluru Retail Hub',
+            location: s.shopLocation || { lat: 12.9784, lng: 77.6408 },
+            category: s.category || 'Retail, Supermarket & Groceries',
+            cuisine: s.category || 'Retail, Supermarket & Groceries',
+            isApproved,
+            isOpen,
+            isOnline: isOpen,
+          };
+        }),
+      });
+    } catch (error) {
+      console.error('Fetch shops failed:', error);
+      return res.status(500).json({ message: 'Unable to fetch shops' });
+    }
+  });
+
+  // 2. View menu items (across restaurants, shops, or specific store)
   router.get('/menu', async (req: Request, res: Response) => {
     try {
-      const { restaurantId, category, search } = req.query;
+      const { restaurantId, shopId, type, category, search } = req.query;
       const query: Record<string, unknown> = { isActive: true };
 
       if (
+        typeof shopId === 'string' &&
+        mongoose.isValidObjectId(shopId)
+      ) {
+        query.restaurantId = new mongoose.Types.ObjectId(shopId);
+      } else if (
         typeof restaurantId === 'string' &&
         mongoose.isValidObjectId(restaurantId)
       ) {
         query.restaurantId = new mongoose.Types.ObjectId(restaurantId);
+      } else if (type === 'shop') {
+        const shops = await Shop.find({ isBlocked: { $ne: true } })
+          .select('_id name')
+          .lean();
+        const shopIds = shops.map((s) => s._id);
+
+        // Check if any shop items exist; if none, seed initial items for the first shop
+        const existingShopItems = await FoodItem.countDocuments({
+          restaurantId: { $in: shopIds },
+        });
+        const targetShop = shops[0];
+        if (existingShopItems === 0 && targetShop) {
+          const initialShopProducts = [
+            {
+              restaurantId: targetShop._id,
+              restaurantName: targetShop.name,
+              name: 'Organic Cold-Pressed Almond Milk (500ml)',
+              category: 'Dairy & Plant Milks',
+              description: 'Fresh unsweetened pure almond milk, zero preservatives.',
+              dietary: 'vegan' as const,
+              quantity: 25,
+              price: 180,
+              isActive: true,
+            },
+            {
+              restaurantId: targetShop._id,
+              restaurantName: targetShop.name,
+              name: 'Artisan Multigrain Sourdough Loaf',
+              category: 'Bakery & Fresh Breads',
+              description: 'Naturally fermented 24-hour slow-baked crusty artisan bread.',
+              dietary: 'veg' as const,
+              quantity: 15,
+              price: 150,
+              isActive: true,
+            },
+            {
+              restaurantId: targetShop._id,
+              restaurantName: targetShop.name,
+              name: 'Extra Virgin Greek Olive Oil (500ml)',
+              category: 'Cooking & Pantry',
+              description: 'First cold-pressed unfiltered Koroneiki olive oil.',
+              dietary: 'veg' as const,
+              quantity: 20,
+              price: 420,
+              isActive: true,
+            },
+            {
+              restaurantId: targetShop._id,
+              restaurantName: targetShop.name,
+              name: 'Himalayan Pink Rock Salt (1kg)',
+              category: 'Spices & Seasonings',
+              description: '100% natural unrefined mineral-rich gourmet pink salt.',
+              dietary: 'veg' as const,
+              quantity: 50,
+              price: 95,
+              isActive: true,
+            },
+            {
+              restaurantId: targetShop._id,
+              restaurantName: targetShop.name,
+              name: 'Farm-Fresh Free-Range Eggs (Pack of 12)',
+              category: 'Daily Essentials',
+              description: 'Antibiotic-free pasture-raised fresh grade-A brown eggs.',
+              dietary: 'non-veg' as const,
+              quantity: 40,
+              price: 130,
+              isActive: true,
+            },
+            {
+              restaurantId: targetShop._id,
+              restaurantName: targetShop.name,
+              name: 'Organic Rolled Oats (1kg)',
+              category: 'Breakfast Cereals',
+              description: 'Whole grain gluten-free high-fiber certified organic oats.',
+              dietary: 'veg' as const,
+              quantity: 30,
+              price: 210,
+              isActive: true,
+            },
+          ];
+          await FoodItem.insertMany(initialShopProducts);
+        }
+
+        query.restaurantId = { $in: shopIds };
+      } else if (type === 'restaurant') {
+        const restaurants = await Restaurant.find({ isBlocked: { $ne: true } })
+          .select('_id')
+          .lean();
+        query.restaurantId = { $in: restaurants.map((r) => r._id) };
       }
 
       if (typeof category === 'string' && category.trim()) {
@@ -119,21 +515,65 @@ const createCustomerRouter = () => {
 
       const menu = await FoodItem.find(query).sort({ createdAt: -1 }).lean();
 
-      const restaurantIds = [
+      const storeIds = [
         ...new Set(menu.map((m) => String(m.restaurantId)).filter(Boolean)),
       ];
-      const restaurants = await Restaurant.find({ _id: { $in: restaurantIds } })
-        .select('name restaurantAddress')
-        .lean();
-      const restaurantMap = new Map(restaurants.map((r) => [String(r._id), r]));
+
+      const productIds = menu.map((m) => m._id);
+
+      const [restaurants, shops, reviewStats] = await Promise.all([
+        Restaurant.find({ _id: { $in: storeIds } })
+          .select('name restaurantAddress')
+          .lean(),
+        Shop.find({ _id: { $in: storeIds } })
+          .select('name shopAddress')
+          .lean(),
+        Review.aggregate([
+          { $match: { productId: { $in: productIds } } },
+          {
+            $group: {
+              _id: '$productId',
+              avgRating: { $avg: '$rating' },
+              totalReviews: { $sum: 1 },
+            },
+          },
+        ]),
+      ]);
+
+      const restMap = new Map(restaurants.map((r) => [String(r._id), r]));
+      const shopMap = new Map(shops.map((s) => [String(s._id), s]));
+      const reviewMap = new Map(
+        reviewStats.map((stat: any) => [
+          String(stat._id),
+          {
+            rating: Math.round(stat.avgRating * 10) / 10,
+            reviewCount: stat.totalReviews,
+          },
+        ]),
+      );
 
       const enrichedMenu = menu.map((item) => {
-        const rest = restaurantMap.get(String(item.restaurantId));
+        const storeIdStr = String(item.restaurantId);
+        const rest = restMap.get(storeIdStr);
+        const shop = shopMap.get(storeIdStr);
+        const isShop = Boolean(shop);
+        const rev = reviewMap.get(String(item._id));
+
         return {
           ...item,
+          rating: rev?.rating ?? null,
+          reviewCount: rev?.reviewCount ?? 0,
           restaurantName:
-            item.restaurantName || rest?.name || 'Partner Kitchen',
-          restaurantAddress: rest?.restaurantAddress || 'Bengaluru Central',
+            item.restaurantName ||
+            (isShop ? shop?.name : rest?.name) ||
+            (isShop ? 'Partner Shop' : 'Partner Kitchen'),
+          restaurantAddress:
+            (isShop ? shop?.shopAddress : rest?.restaurantAddress) ||
+            'Bengaluru Central',
+          shopName: shop?.name || (isShop ? item.restaurantName : undefined),
+          shopAddress: shop?.shopAddress,
+          isShopItem: isShop,
+          storeType: isShop ? 'shop' : 'restaurant',
         };
       });
 
@@ -141,6 +581,594 @@ const createCustomerRouter = () => {
     } catch (error) {
       console.error('Customer menu fetch failed:', error);
       return res.status(500).json({ message: 'Unable to fetch menu' });
+    }
+  });
+
+  // 2b. Get reviews for a specific menu/product item
+  router.get('/items/:itemId/reviews', async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user?.userId) {
+        return res.status(401).json({ message: 'Authentication required' });
+      }
+
+      const itemId = String(req.params.itemId || '');
+      const queryName = typeof req.query.name === 'string' ? req.query.name.trim() : '';
+
+      let item: any = mongoose.isValidObjectId(itemId)
+        ? await FoodItem.findById(itemId).lean()
+        : null;
+
+      if (!item && queryName) {
+        item = await FoodItem.findOne({ name: new RegExp(`^${queryName}$`, 'i') }).lean();
+      }
+
+      const userObjId = new mongoose.Types.ObjectId(user.userId);
+
+      // Check if this customer has purchased/ordered this item in past non-cancelled orders
+      const orderSearchConditions: Record<string, unknown>[] = [];
+      if (item) {
+        orderSearchConditions.push({ 'items.foodItemId': item._id });
+        orderSearchConditions.push({ 'items.name': item.name });
+      } else {
+        if (mongoose.isValidObjectId(itemId)) {
+          orderSearchConditions.push({ 'items.foodItemId': new mongoose.Types.ObjectId(itemId) });
+        }
+        if (queryName) {
+          orderSearchConditions.push({ 'items.name': new RegExp(`^${queryName}$`, 'i') });
+        }
+      }
+
+      const pastOrder = orderSearchConditions.length
+        ? await Order.findOne({
+            customerId: userObjId,
+            status: { $ne: 'cancelled' },
+            $or: orderSearchConditions,
+          })
+            .sort({ createdAt: -1 })
+            .lean()
+        : null;
+
+      // If item is not in active catalog but customer ordered it, use snapshot from order
+      if (!item && pastOrder) {
+        const orderItem = (pastOrder.items || []).find((it: any) =>
+          (mongoose.isValidObjectId(itemId) && String(it.foodItemId) === itemId) ||
+          (queryName && String(it.name || '').toLowerCase() === queryName.toLowerCase())
+        );
+        if (orderItem) {
+          item = {
+            _id: orderItem.foodItemId || (mongoose.isValidObjectId(itemId) ? new mongoose.Types.ObjectId(itemId) : new mongoose.Types.ObjectId()),
+            name: orderItem.name,
+            price: orderItem.price,
+            category: 'Ordered Dish',
+            restaurantId: pastOrder.restaurantId,
+            restaurantName: pastOrder.restaurantName,
+          };
+        }
+      }
+
+      if (!item) {
+        return res.status(404).json({ message: 'Product or food item not found' });
+      }
+
+      const targetProductId = item._id;
+      const rawReviews = await Review.find({
+        $or: [
+          { productId: targetProductId },
+          { productName: item.name },
+        ],
+      })
+        .sort({ updatedAt: -1, createdAt: -1 })
+        .lean();
+
+      // Multiple users can review the same product.
+      // If the same user submitted or updated their review, keep only their latest overridden review.
+      const seenCustomerIds = new Set<string>();
+      const reviews: any[] = [];
+      for (const r of rawReviews) {
+        const custIdStr = String(r.customerId);
+        if (!seenCustomerIds.has(custIdStr)) {
+          seenCustomerIds.add(custIdStr);
+          reviews.push(r);
+        }
+      }
+
+      const totalReviews = reviews.length;
+      const averageRating = totalReviews
+        ? Math.round(
+            (reviews.reduce((sum, r) => sum + (r.rating || 0), 0) / totalReviews) *
+              10,
+          ) / 10
+        : null;
+
+      const ratingDistribution: Record<number, number> = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+      for (const r of reviews) {
+        const star = Math.min(5, Math.max(1, Math.round(r.rating || 0)));
+        ratingDistribution[star] = (ratingDistribution[star] || 0) + 1;
+      }
+
+      const canReview = Boolean(pastOrder);
+      const userReview =
+        reviews.find((r) => String(r.customerId) === String(user.userId)) ||
+        null;
+
+      return res.json({
+        item: {
+          id: item._id,
+          _id: item._id,
+          name: item.name,
+          category: item.category,
+          price: item.price,
+          image: item.image,
+          restaurantName: item.restaurantName,
+        },
+        reviews,
+        totalReviews,
+        averageRating,
+        ratingDistribution,
+        canReview,
+        cannotReviewReason: canReview
+          ? null
+          : 'You can only review and rate items you have ordered in the past.',
+        userReview,
+        verifiedOrder: pastOrder
+          ? {
+              orderId: pastOrder._id,
+              orderNumber: pastOrder.orderNumber,
+              createdAt: pastOrder.createdAt,
+            }
+          : null,
+      });
+    } catch (error) {
+      console.error('Fetch item reviews failed:', error);
+      return res.status(500).json({ message: 'Unable to fetch reviews' });
+    }
+  });
+
+  // 2c. Submit or update review for an item (verified order required)
+  router.post('/items/:itemId/reviews', async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user?.userId) {
+        return res.status(401).json({ message: 'Authentication required' });
+      }
+
+      const itemId = String(req.params.itemId || '');
+      const bodyName = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+
+      const rating = Number(req.body?.rating);
+      if (isNaN(rating) || rating < 1 || rating > 5) {
+        return res
+          .status(400)
+          .json({ message: 'Rating must be an integer between 1 and 5' });
+      }
+
+      const comment =
+        typeof req.body?.comment === 'string' ? req.body.comment.trim() : '';
+
+      let item: any = mongoose.isValidObjectId(itemId)
+        ? await FoodItem.findById(itemId).lean()
+        : null;
+
+      if (!item && bodyName) {
+        item = await FoodItem.findOne({ name: new RegExp(`^${bodyName}$`, 'i') }).lean();
+      }
+
+      const userObjId = new mongoose.Types.ObjectId(user.userId);
+      const orderSearchConditions: Record<string, unknown>[] = [];
+      if (item) {
+        orderSearchConditions.push({ 'items.foodItemId': item._id });
+        orderSearchConditions.push({ 'items.name': item.name });
+      } else {
+        if (mongoose.isValidObjectId(itemId)) {
+          orderSearchConditions.push({ 'items.foodItemId': new mongoose.Types.ObjectId(itemId) });
+        }
+        if (bodyName) {
+          orderSearchConditions.push({ 'items.name': new RegExp(`^${bodyName}$`, 'i') });
+        }
+      }
+
+      const pastOrder = orderSearchConditions.length
+        ? await Order.findOne({
+            customerId: userObjId,
+            status: { $ne: 'cancelled' },
+            $or: orderSearchConditions,
+          })
+            .sort({ createdAt: -1 })
+            .lean()
+        : null;
+
+      if (!item && pastOrder) {
+        const orderItem = (pastOrder.items || []).find((it: any) =>
+          (mongoose.isValidObjectId(itemId) && String(it.foodItemId) === itemId) ||
+          (bodyName && String(it.name || '').toLowerCase() === bodyName.toLowerCase())
+        );
+        if (orderItem) {
+          item = {
+            _id: orderItem.foodItemId || (mongoose.isValidObjectId(itemId) ? new mongoose.Types.ObjectId(itemId) : new mongoose.Types.ObjectId()),
+            name: orderItem.name,
+            price: orderItem.price,
+            category: 'Ordered Dish',
+            restaurantId: pastOrder.restaurantId,
+            restaurantName: pastOrder.restaurantName,
+          };
+        }
+      }
+
+      if (!item) {
+        return res.status(404).json({ message: 'Product or food item not found' });
+      }
+
+      if (!pastOrder) {
+        return res.status(403).json({
+          message:
+            'Verified purchase required: You can only review products you have ordered in the past.',
+        });
+      }
+
+      const customer = await Customer.findById(user.userId).lean();
+      const customerName =
+        customer?.name || (user as any).name || 'Customer';
+
+      // Check if this customer already reviewed this product (by productId or productName)
+      const existingReview = await Review.findOne({
+        customerId: userObjId,
+        $or: [
+          { productId: item._id },
+          { productName: new RegExp(`^${String(item.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+        ],
+      });
+
+      let review;
+      let isOverride = false;
+
+      if (existingReview) {
+        // OVERRIDE the user's previous review
+        isOverride = true;
+        existingReview.productId = item._id;
+        existingReview.productName = item.name;
+        if (item.restaurantId) existingReview.storeId = item.restaurantId;
+        if (item.restaurantName) existingReview.storeName = item.restaurantName;
+        existingReview.storeType = (item as any).isShopItem ? 'shop' : 'restaurant';
+        existingReview.customerName = customerName;
+        existingReview.rating = Math.round(rating);
+        existingReview.comment = comment;
+        existingReview.orderId = pastOrder._id;
+        existingReview.orderNumber = pastOrder.orderNumber;
+        review = await existingReview.save();
+      } else {
+        // Create new review for this user
+        review = await Review.create({
+          productId: item._id,
+          productName: item.name,
+          storeId: item.restaurantId,
+          storeName: item.restaurantName || '',
+          storeType: (item as any).isShopItem ? 'shop' : 'restaurant',
+          customerId: userObjId,
+          customerName,
+          rating: Math.round(rating),
+          comment,
+          orderId: pastOrder._id,
+          orderNumber: pastOrder.orderNumber,
+        });
+      }
+
+      // Clean up any historical duplicate entries for this customer on this product to ensure exactly 1 review per user
+      await Review.deleteMany({
+        _id: { $ne: review._id },
+        customerId: userObjId,
+        $or: [
+          { productId: item._id },
+          { productName: new RegExp(`^${String(item.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+        ],
+      });
+
+      return res.status(200).json({
+        message: isOverride
+          ? 'Your review has been updated and overridden!'
+          : 'Review saved successfully!',
+        review,
+      });
+    } catch (error) {
+      console.error('Submit review failed:', error);
+      return res.status(500).json({ message: 'Unable to submit review' });
+    }
+  });
+
+  // 2d. Get current customer's reviews
+  router.get('/reviews/my-reviews', async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user?.userId) {
+        return res.status(401).json({ message: 'Authentication required' });
+      }
+
+      const reviews = await Review.find({
+        customerId: new mongoose.Types.ObjectId(user.userId),
+      })
+        .sort({ updatedAt: -1 })
+        .lean();
+
+      return res.json({ reviews });
+    } catch (error) {
+      console.error('Customer my-reviews fetch failed:', error);
+      return res.status(500).json({ message: 'Unable to fetch your reviews' });
+    }
+  });
+
+  // 2e. Get reviews & rating for a specific restaurant
+  router.get('/restaurants/:restaurantId/reviews', async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user?.userId) {
+        return res.status(401).json({ message: 'Authentication required' });
+      }
+
+      const restaurantIdParam = String(req.params.restaurantId || '');
+      const queryName = typeof req.query.name === 'string' ? req.query.name.trim() : '';
+
+      let restaurant: any = mongoose.isValidObjectId(restaurantIdParam)
+        ? await Restaurant.findById(restaurantIdParam).lean()
+        : null;
+
+      if (!restaurant && queryName) {
+        const escapedName = queryName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        restaurant = await Restaurant.findOne({ name: new RegExp(`^${escapedName}`, 'i') }).lean();
+      }
+
+      if (!restaurant) {
+        return res.status(404).json({ message: 'Restaurant not found' });
+      }
+
+      const restObjId = restaurant._id;
+      const userObjId = new mongoose.Types.ObjectId(user.userId);
+
+      // Find all items belonging to this restaurant
+      const restItems = await FoodItem.find({ restaurantId: restObjId }).lean();
+      const itemIds = restItems.map((i) => i._id);
+      const itemNames = restItems.map((i) => i.name).filter(Boolean);
+
+      // Check if customer has purchased from this specific restaurant
+      const escapedRestName = (String(restaurant.name || '').split('/')[0] || '')
+        .trim()
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const orderOrConditions: Record<string, unknown>[] = [{ restaurantId: restObjId }];
+      if (escapedRestName) {
+        orderOrConditions.push({ restaurantName: new RegExp(escapedRestName, 'i') });
+      }
+      if (itemIds.length > 0) {
+        orderOrConditions.push({ 'items.foodItemId': { $in: itemIds } });
+      }
+      if (itemNames.length > 0) {
+        orderOrConditions.push({ 'items.name': { $in: itemNames } });
+      }
+
+      const pastOrder = await Order.findOne({
+        customerId: userObjId,
+        status: { $ne: 'cancelled' },
+        $or: orderOrConditions,
+      })
+        .sort({ createdAt: -1 })
+        .lean();
+
+      // Compute average of each item's average rating
+      const itemReviewStats = itemIds.length
+        ? await Review.aggregate([
+            { $match: { productId: { $in: itemIds } } },
+            {
+              $group: {
+                _id: '$productId',
+                avgRating: { $avg: '$rating' },
+                totalReviews: { $sum: 1 },
+              },
+            },
+          ])
+        : [];
+
+      const itemAverages: number[] = [];
+      for (const st of itemReviewStats) {
+        if (st.totalReviews > 0 && st.avgRating > 0) {
+          itemAverages.push(Math.round(Number(st.avgRating) * 10) / 10);
+        }
+      }
+
+      // Fetch all reviews for this restaurant (direct restaurant reviews + item reviews for this restaurant)
+      const reviewOrConditions: Record<string, unknown>[] = [
+        { productId: restObjId },
+        { storeId: restObjId },
+      ];
+      if (itemIds.length > 0) {
+        reviewOrConditions.push({ productId: { $in: itemIds } });
+      }
+
+      const rawReviews = await Review.find({ $or: reviewOrConditions })
+        .sort({ updatedAt: -1, createdAt: -1 })
+        .lean();
+
+      // Deduplicate per (productId, customerId)
+      const seenKeys = new Set<string>();
+      const reviews: any[] = [];
+      const directRestReviews: any[] = [];
+
+      for (const r of rawReviews) {
+        const key = `${String(r.productId)}_${String(r.customerId)}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          const isDirectRestaurantReview = String(r.productId) === String(restObjId);
+          const enriched = {
+            ...r,
+            isRestaurantReview: isDirectRestaurantReview,
+            reviewedTargetName: isDirectRestaurantReview ? restaurant.name : r.productName,
+          };
+          reviews.push(enriched);
+          if (isDirectRestaurantReview) {
+            directRestReviews.push(enriched);
+          }
+        }
+      }
+
+      let averageRating: number | null = null;
+      if (itemAverages.length > 0) {
+        const sumOfItemAvgs = itemAverages.reduce((acc, v) => acc + v, 0);
+        averageRating = Math.round((sumOfItemAvgs / itemAverages.length) * 10) / 10;
+      } else if (directRestReviews.length > 0) {
+        const sumDirect = directRestReviews.reduce((acc, r) => acc + Number(r.rating || 0), 0);
+        averageRating = Math.round((sumDirect / directRestReviews.length) * 10) / 10;
+      }
+
+      const totalReviews = reviews.length;
+      const canReview = Boolean(pastOrder);
+      const userReview =
+        directRestReviews.find((r) => String(r.customerId) === String(user.userId)) || null;
+
+      return res.json({
+        restaurant: {
+          id: restaurant._id,
+          _id: restaurant._id,
+          name: restaurant.name,
+          cuisine: restaurant.cuisine || 'Multi-Cuisine Restaurant',
+          address: restaurant.restaurantAddress || 'Bengaluru Food Quarter',
+          totalMenuItems: restItems.length,
+          ratedItemsCount: itemAverages.length,
+        },
+        reviews,
+        totalReviews,
+        averageRating,
+        ratedItemsCount: itemAverages.length,
+        canReview,
+        cannotReviewReason: canReview
+          ? null
+          : 'Only customers who have purchased from this restaurant can submit a review.',
+        userReview,
+        verifiedOrder: pastOrder
+          ? {
+              orderId: pastOrder._id,
+              orderNumber: pastOrder.orderNumber,
+              createdAt: pastOrder.createdAt,
+            }
+          : null,
+      });
+    } catch (error) {
+      console.error('Fetch restaurant reviews failed:', error);
+      return res.status(500).json({ message: 'Unable to fetch restaurant reviews' });
+    }
+  });
+
+  // 2f. Submit or update review for a specific restaurant (verified purchase from that restaurant required)
+  router.post('/restaurants/:restaurantId/reviews', async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user?.userId) {
+        return res.status(401).json({ message: 'Authentication required' });
+      }
+
+      const restaurantIdParam = String(req.params.restaurantId || '');
+      const bodyName = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+
+      const rating = Number(req.body?.rating);
+      if (isNaN(rating) || rating < 1 || rating > 5) {
+        return res.status(400).json({ message: 'Rating must be an integer between 1 and 5' });
+      }
+
+      const comment = typeof req.body?.comment === 'string' ? req.body.comment.trim() : '';
+
+      let restaurant: any = mongoose.isValidObjectId(restaurantIdParam)
+        ? await Restaurant.findById(restaurantIdParam).lean()
+        : null;
+
+      if (!restaurant && bodyName) {
+        const escapedName = bodyName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        restaurant = await Restaurant.findOne({ name: new RegExp(`^${escapedName}`, 'i') }).lean();
+      }
+
+      if (!restaurant) {
+        return res.status(404).json({ message: 'Restaurant not found' });
+      }
+
+      const restObjId = restaurant._id;
+      const userObjId = new mongoose.Types.ObjectId(user.userId);
+
+      const restItems = await FoodItem.find({ restaurantId: restObjId }).select('_id name').lean();
+      const itemIds = restItems.map((i) => i._id);
+      const itemNames = restItems.map((i) => i.name).filter(Boolean);
+
+      const escapedRestName = (String(restaurant.name || '').split('/')[0] || '')
+        .trim()
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const orderOrConditions: Record<string, unknown>[] = [{ restaurantId: restObjId }];
+      if (escapedRestName) {
+        orderOrConditions.push({ restaurantName: new RegExp(escapedRestName, 'i') });
+      }
+      if (itemIds.length > 0) {
+        orderOrConditions.push({ 'items.foodItemId': { $in: itemIds } });
+      }
+      if (itemNames.length > 0) {
+        orderOrConditions.push({ 'items.name': { $in: itemNames } });
+      }
+
+      const pastOrder = await Order.findOne({
+        customerId: userObjId,
+        status: { $ne: 'cancelled' },
+        $or: orderOrConditions,
+      })
+        .sort({ createdAt: -1 })
+        .lean();
+
+      if (!pastOrder) {
+        return res.status(403).json({
+          message:
+            'Verified purchase required: Only customers who have purchased from this restaurant can submit a review.',
+        });
+      }
+
+      const customer = await Customer.findById(user.userId).lean();
+      const customerName = customer?.name || (user as any).name || 'Customer';
+
+      const existingReview = await Review.findOne({
+        customerId: userObjId,
+        productId: restObjId,
+      });
+
+      let review;
+      let isOverride = false;
+
+      if (existingReview) {
+        isOverride = true;
+        existingReview.productName = restaurant.name;
+        existingReview.storeId = restObjId;
+        existingReview.storeName = restaurant.name;
+        existingReview.storeType = 'restaurant';
+        existingReview.customerName = customerName;
+        existingReview.rating = Math.round(rating);
+        existingReview.comment = comment;
+        existingReview.orderId = pastOrder._id;
+        existingReview.orderNumber = pastOrder.orderNumber;
+        review = await existingReview.save();
+      } else {
+        review = await Review.create({
+          productId: restObjId,
+          productName: restaurant.name,
+          storeId: restObjId,
+          storeName: restaurant.name,
+          storeType: 'restaurant',
+          customerId: userObjId,
+          customerName,
+          rating: Math.round(rating),
+          comment,
+          orderId: pastOrder._id,
+          orderNumber: pastOrder.orderNumber,
+        });
+      }
+
+      return res.status(200).json({
+        message: isOverride
+          ? 'Your restaurant review has been updated!'
+          : 'Restaurant review saved successfully!',
+        review,
+      });
+    } catch (error) {
+      console.error('Submit restaurant review failed:', error);
+      return res.status(500).json({ message: 'Unable to submit restaurant review' });
     }
   });
 
@@ -261,7 +1289,7 @@ const createCustomerRouter = () => {
       const address = await Address.findOneAndUpdate(
         { _id: new mongoose.Types.ObjectId(addressId), userId: user.userId },
         { $set: update },
-        { new: true, runValidators: true },
+        { returnDocument: 'after', runValidators: true },
       );
 
       if (!address)
@@ -295,7 +1323,7 @@ const createCustomerRouter = () => {
         const address = await Address.findOneAndUpdate(
           { _id: new mongoose.Types.ObjectId(addressId), userId: user.userId },
           { $set: { isDefault: true } },
-          { new: true },
+          { returnDocument: 'after' },
         );
 
         if (!address)
@@ -353,7 +1381,99 @@ const createCustomerRouter = () => {
     },
   );
 
-  // 4. Payment Gateway integration endpoint
+  // 4a. Razorpay - Get Public Key ID
+  router.get('/payment/razorpay/key', (_req: Request, res: Response) => {
+    const keyId = process.env.RAZORPAY_KEY_ID || 'rzp_test_TjUFioCQLtVxJn';
+    return res.json({ keyId });
+  });
+
+  // 4b. Razorpay - Create Order on Razorpay Gateway
+  router.post('/payment/razorpay/order', async (req: Request, res: Response) => {
+    try {
+      const { amount, receipt } = req.body;
+      const numAmount = Number(amount);
+      if (!numAmount || numAmount <= 0) {
+        return res.status(400).json({ message: 'Valid payment amount is required' });
+      }
+
+      const keyId = process.env.RAZORPAY_KEY_ID || 'rzp_test_TjUFioCQLtVxJn';
+      const keySecret = process.env.RAZORPAY_KEY_SECRET || '1zFOIza2vJGCB6g2PeqFs12t';
+      const authHeader = 'Basic ' + Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+
+      // Amount in paise (1 INR = 100 paise)
+      const amountPaise = Math.round(numAmount * 100);
+
+      const rzpRes = await axios.post(
+        'https://api.razorpay.com/v1/orders',
+        {
+          amount: amountPaise,
+          currency: 'INR',
+          receipt: receipt || `rcpt_${Date.now()}`,
+        },
+        {
+          headers: {
+            Authorization: authHeader,
+            'Content-Type': 'application/json',
+          },
+          timeout: 10000,
+        }
+      );
+
+      return res.json({
+        success: true,
+        orderId: rzpRes.data.id,
+        amount: rzpRes.data.amount,
+        currency: rzpRes.data.currency,
+        keyId,
+      });
+    } catch (err: any) {
+      console.error('Razorpay order creation failed:', err.response?.data || err.message);
+      return res.status(500).json({
+        message: 'Unable to initiate Razorpay order',
+        error: err.response?.data?.error?.description || err.message,
+      });
+    }
+  });
+
+  // 4c. Razorpay - Verify Payment Signature
+  router.post('/payment/razorpay/verify', async (req: Request, res: Response) => {
+    try {
+      const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+
+      if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+        return res.status(400).json({ message: 'Missing Razorpay verification parameters' });
+      }
+
+      const keySecret = process.env.RAZORPAY_KEY_SECRET || '1zFOIza2vJGCB6g2PeqFs12t';
+
+      const generatedSignature = crypto
+        .createHmac('sha256', keySecret)
+        .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+        .digest('hex');
+
+      if (generatedSignature !== razorpay_signature) {
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          message: 'Razorpay payment signature verification failed',
+        });
+      }
+
+      return res.json({
+        success: true,
+        verified: true,
+        message: 'Payment verified successfully via Razorpay',
+        transactionId: razorpay_payment_id,
+        orderId: razorpay_order_id,
+        paymentMethod: 'razorpay',
+      });
+    } catch (err: any) {
+      console.error('Razorpay verification error:', err);
+      return res.status(500).json({ message: 'Payment verification failed', error: err.message });
+    }
+  });
+
+  // 4d. Payment Gateway integration endpoint (Fallback / Simulation)
   router.post('/payment/process', async (req: Request, res: Response) => {
     try {
       const { amount, paymentMethod, cardDetails, upiId } = req.body;
@@ -466,47 +1586,101 @@ const createCustomerRouter = () => {
 
       const restaurantIdStr =
         typeof req.body?.restaurantId === 'string' ? req.body.restaurantId : '';
-      let restaurantUser: any = null;
+      const shopIdStr =
+        typeof req.body?.shopId === 'string' ? req.body.shopId : '';
+      const isExplicitShop = Boolean(req.body?.isShopOrder);
 
-      if (restaurantIdStr && mongoose.isValidObjectId(restaurantIdStr)) {
-        restaurantUser = await Restaurant.findById(restaurantIdStr);
+      let restaurantUser: any = null;
+      let shopUser: any = null;
+      let isShopOrder = isExplicitShop;
+
+      // 1. Resolve explicit shopId if provided
+      if (shopIdStr && mongoose.isValidObjectId(shopIdStr)) {
+        shopUser = await Shop.findById(shopIdStr);
+        if (shopUser) isShopOrder = true;
       }
 
-      if (!restaurantUser && sanitizedItems[0]) {
-        const itemDoc = await FoodItem.findById(sanitizedItems[0].foodItemId);
-        if (itemDoc?.restaurantId) {
-          restaurantUser = await Restaurant.findById(itemDoc.restaurantId);
+      // 2. Resolve restaurantIdStr (which might be a restaurant or a shop)
+      if (!shopUser && restaurantIdStr && mongoose.isValidObjectId(restaurantIdStr)) {
+        restaurantUser = await Restaurant.findById(restaurantIdStr);
+        if (!restaurantUser) {
+          shopUser = await Shop.findById(restaurantIdStr);
+          if (shopUser) isShopOrder = true;
         }
       }
 
-      if (!restaurantUser) {
-        restaurantUser = await Restaurant.findOne();
+      // 3. Fallback to first item's store if neither provided
+      if (!restaurantUser && !shopUser && sanitizedItems[0]) {
+        const itemDoc = await FoodItem.findById(sanitizedItems[0].foodItemId);
+        if (itemDoc?.restaurantId) {
+          restaurantUser = await Restaurant.findById(itemDoc.restaurantId);
+          if (!restaurantUser) {
+            shopUser = await Shop.findById(itemDoc.restaurantId);
+            if (shopUser) isShopOrder = true;
+          }
+        }
       }
 
-      if (
-        restaurantUser &&
-        (restaurantUser.isOpen === false || restaurantUser.isOnline === false)
-      ) {
-        return res.status(400).json({
-          message: `${restaurantUser.name} is currently closed and not accepting orders. Please choose another restaurant or try again later.`,
-        });
+      const serviceablePincodes = await getServiceablePincodes();
+
+      if (isShopOrder) {
+        if (!shopUser) {
+          shopUser = await Shop.findOne({ isBlocked: { $ne: true } });
+        }
+        if (shopUser) {
+          const shopPin = resolvePartnerPincode(shopUser);
+          if (shopUser.isApproved === false || !shopPin || !serviceablePincodes.includes(shopPin)) {
+            return res.status(400).json({
+              message: `Shop "${shopUser.name}" pincode (${shopPin || 'N/A'}) is not in the serviceable range or shop is not approved to provide service.`,
+              code: 'STORE_NOT_SERVICEABLE',
+            });
+          }
+          if (shopUser.isOpen === false || shopUser.isOnline === false) {
+            return res.status(400).json({
+              message: `${shopUser.name} is currently closed and not accepting orders. Please choose another shop or try again later.`,
+            });
+          }
+        }
+      } else {
+        if (!restaurantUser) {
+          restaurantUser = await Restaurant.findOne({ isBlocked: { $ne: true } });
+        }
+        if (restaurantUser) {
+          const restPin = resolvePartnerPincode(restaurantUser);
+          if (restaurantUser.isApproved === false || !restPin || !serviceablePincodes.includes(restPin)) {
+            return res.status(400).json({
+              message: `Restaurant "${restaurantUser.name}" pincode (${restPin || 'N/A'}) is not in the serviceable range or restaurant is not approved to provide service.`,
+              code: 'STORE_NOT_SERVICEABLE',
+            });
+          }
+          if (restaurantUser.isOpen === false || restaurantUser.isOnline === false) {
+            return res.status(400).json({
+              message: `${restaurantUser.name} is currently closed and not accepting orders. Please choose another restaurant or try again later.`,
+            });
+          }
+        }
       }
 
-      const restaurantId = restaurantUser
+      const storeId = isShopOrder
+        ? (shopUser?._id as mongoose.Types.ObjectId)
+        : restaurantUser
         ? (restaurantUser._id as mongoose.Types.ObjectId)
         : undefined;
-      const restaurantCode = restaurantUser?.restaurantId || '';
-      const digipin = restaurantUser?.digipin || '';
-      const restaurantName = restaurantUser
-        ? restaurantUser.name
-        : 'Tomato Partner Restaurant';
-      const restaurantAddress =
-        restaurantUser?.restaurantAddress ||
-        '12 Indiranagar 100ft Road, Bengaluru, 560038';
-      const restaurantLocation = restaurantUser?.restaurantLocation || {
-        lat: 12.9716,
-        lng: 77.5946,
-      };
+      const storeCode = isShopOrder
+        ? (shopUser?.shopId || 'shop-1001')
+        : (restaurantUser?.restaurantId || '');
+      const digipin = isShopOrder
+        ? (shopUser?.digipin || '')
+        : (restaurantUser?.digipin || '');
+      const storeName = isShopOrder
+        ? (shopUser?.name || 'Tomato Partner Shop')
+        : (restaurantUser ? restaurantUser.name : 'Tomato Partner Restaurant');
+      const storeAddress = isShopOrder
+        ? (shopUser?.shopAddress || '45 CMH Road, Indiranagar, Bengaluru, 560038')
+        : (restaurantUser?.restaurantAddress || '12 Indiranagar 100ft Road, Bengaluru, 560038');
+      const storeLocation = isShopOrder
+        ? (shopUser?.shopLocation || { lat: 12.9784, lng: 77.6408 })
+        : (restaurantUser?.restaurantLocation || { lat: 12.9716, lng: 77.5946 });
 
       let deliveryAddress = req.body?.deliveryAddress;
       const addressId = req.body?.addressId;
@@ -544,13 +1718,65 @@ const createCustomerRouter = () => {
             phone: customer?.phone || '+91 99000 00001',
             line1: 'Customer delivery address',
             city: 'Bengaluru',
-            postalCode: '560001',
+            postalCode: '',
             coordinates: [77.5946, 12.9716],
           };
         }
       }
 
-      const paymentMethod = ['card', 'upi', 'netbanking', 'cod'].includes(
+      const customerPincode = resolveAddressPincode(deliveryAddress);
+      if (!customerPincode || !serviceablePincodes.includes(customerPincode)) {
+        return res.status(400).json({
+          message: `Your area${customerPincode ? ` (Pincode: ${customerPincode})` : ''} is out of serviceable range. Delivery services are currently available only in pincodes: ${serviceablePincodes.join(', ') || 'None'}.`,
+          code: 'AREA_OUT_OF_SERVICEABLE_RANGE',
+          customerPincode: customerPincode || '',
+          serviceablePincodes,
+        });
+      }
+
+      // Evaluate up to 2 coupons during billing
+      const rawCouponCodes: string[] = Array.isArray(req.body?.couponCodes)
+        ? req.body.couponCodes
+        : req.body?.couponCode
+        ? [String(req.body.couponCode)]
+        : [];
+
+      if (rawCouponCodes.length > MAX_COUPONS_PER_ORDER) {
+        return res.status(400).json({
+          message: `Maximum ${MAX_COUPONS_PER_ORDER} coupons can be availed at a time per order.`,
+          code: 'MAX_COUPONS_EXCEEDED',
+        });
+      }
+
+      const couponEval = await evaluateCouponsForCart({
+        couponCodes: rawCouponCodes,
+        userId: String(user.userId),
+        isShopOrder,
+        items: sanitizedItems,
+      });
+
+      if (rawCouponCodes.length > 0 && !couponEval.valid) {
+        return res.status(400).json({
+          message: couponEval.message || 'One or more selected coupons are invalid for this order.',
+          code: 'INVALID_COUPON',
+          rejectedCoupons: couponEval.rejectedCoupons,
+        });
+      }
+
+      const discountAmount = Number(couponEval.totalDiscount || 0);
+      const appliedCoupons = couponEval.appliedCoupons.map((ac) => ({
+        code: ac.code,
+        title: ac.title,
+        couponType: ac.couponType,
+        discountAmount: ac.discountAmount,
+      }));
+      const couponCodes = appliedCoupons.map((ac) => ac.code);
+      const finalTotalAmount = Math.max(
+        1,
+        Number((subtotal + tax + deliveryFee - discountAmount).toFixed(2)),
+      );
+
+      const paymentMethod = ['card', 'upi', 'netbanking', 'cod', 'razorpay'].includes(
         req.body?.paymentMethod,
       )
         ? req.body.paymentMethod
@@ -568,8 +1794,9 @@ const createCustomerRouter = () => {
         1000,
       );
       await getNextCounterValue('orderId', 1000);
-      const orderNumber = `TOM-${dateStr}-${orderNumberSuffix}`;
-      const billNumber = `BILL-TOM-${dateStr}-${orderNumberSuffix}`;
+      const prefix = isShopOrder ? 'SHOP' : 'TOM';
+      const orderNumber = `${prefix}-${dateStr}-${orderNumberSuffix}`;
+      const billNumber = `BILL-${prefix}-${dateStr}-${orderNumberSuffix}`;
 
       const orderData: Record<string, unknown> = {
         orderNumber,
@@ -577,16 +1804,19 @@ const createCustomerRouter = () => {
         customerId: new mongoose.Types.ObjectId(user.userId),
         customerName: customer?.name || 'Customer',
         customerPhone: customer?.phone || '',
-        restaurantCode,
+        restaurantCode: storeCode,
         digipin,
-        restaurantName,
-        restaurantAddress,
-        restaurantLocation,
+        restaurantName: storeName,
+        restaurantAddress: storeAddress,
+        restaurantLocation: storeLocation,
         items: sanitizedItems,
         subtotal,
         tax,
         deliveryFee,
-        totalAmount,
+        discountAmount,
+        couponCodes,
+        appliedCoupons,
+        totalAmount: finalTotalAmount,
         deliveryAddress,
         paymentStatus,
         paymentMethod,
@@ -597,13 +1827,13 @@ const createCustomerRouter = () => {
             status: 'placed',
             at: new Date(),
             by: String(user.userId),
-            note: `Order placed and paid via ${paymentMethod.toUpperCase()}`,
+            note: `Order placed to ${isShopOrder ? 'shop' : 'restaurant'} and paid via ${paymentMethod.toUpperCase()}${couponCodes.length ? ` (Coupons: ${couponCodes.join(', ')}, Saved ₹${discountAmount})` : ''}`,
           },
         ],
       };
 
-      if (restaurantId) {
-        orderData.restaurantId = restaurantId;
+      if (storeId) {
+        orderData.restaurantId = storeId;
       }
       if (paymentStatus === 'paid') {
         orderData.paidAt = new Date();
@@ -611,10 +1841,94 @@ const createCustomerRouter = () => {
 
       const order = (await Order.create(orderData)) as unknown as IOrder;
 
-      await notificationService.notifyRestaurantOnOrderPlaced(order);
+      // Record coupon usage if any coupons were applied
+      if (couponEval.appliedCoupons.length > 0) {
+        await recordCouponRedemptions({
+          appliedCoupons: couponEval.appliedCoupons,
+          userId: String(user.userId),
+          customerCode: (customer as any)?.customerId || '',
+          customerName: customer?.name || 'Customer',
+          orderNumber,
+        });
+      }
+
+      // Record order payment into Tomato's centralized payments ledger
+      await syncOrderToTomatoPayment(order, isShopOrder);
+
+      // If this is a shop order, also create in ShopOrder collection & notify shop
+      if (isShopOrder && shopUser) {
+        await ShopOrder.create({
+          orderNumber,
+          billNumber,
+          customerId: new mongoose.Types.ObjectId(user.userId),
+          customerName: customer?.name || 'Customer',
+          customerPhone: customer?.phone || '',
+          shopId: shopUser._id,
+          shopCode: storeCode,
+          digipin,
+          shopName: storeName,
+          shopAddress: storeAddress,
+          shopLocation: storeLocation,
+          items: sanitizedItems,
+          subtotal,
+          tax,
+          deliveryFee,
+          discountAmount,
+          couponCodes,
+          appliedCoupons,
+          totalAmount: finalTotalAmount,
+          deliveryAddress,
+          paymentStatus,
+          paymentMethod,
+          paymentTransactionId,
+          status: 'placed',
+          statusHistory: [
+            {
+              status: 'placed',
+              at: new Date(),
+              by: String(user.userId),
+              note: `Order placed to shop and paid via ${paymentMethod.toUpperCase()}${couponCodes.length ? ` (Coupons: ${couponCodes.join(', ')}, Saved ₹${discountAmount})` : ''}`,
+            },
+          ],
+          ...(paymentStatus === 'paid' ? { paidAt: new Date() } : {}),
+        });
+
+        await Notification.create({
+          userId: shopUser._id,
+          role: 'shop',
+          title: 'New Customer Order Received',
+          message: `New Order #${orderNumber} received for ₹${totalAmount} from ${customer?.name || 'Customer'}.`,
+          type: 'order',
+          entityId: String(order._id),
+        });
+      } else {
+        await notificationService.notifyRestaurantOnOrderPlaced(order);
+      }
+
+      // Dispatch real-time mobile notification to customer via Arattai
+      const customerPhone =
+        (req.body?.deliveryAddress && typeof req.body.deliveryAddress.phone === 'string'
+          ? req.body.deliveryAddress.phone
+          : '') ||
+        (typeof req.body?.phone === 'string' ? req.body.phone : '') ||
+        customer?.phone;
+
+      if (customerPhone) {
+        arattaiNotificationService
+          .notifyOrderUpdate({
+            phoneNumber: customerPhone,
+            customerName: customer?.name || 'Customer',
+            orderNumber,
+            status: 'placed',
+            amount: totalAmount,
+          })
+          .catch((err) => console.error('[Arattai Order Notification Error]:', err));
+      }
 
       return res.status(201).json({
-        message: 'Order placed successfully and sent to restaurant',
+        message: isShopOrder
+          ? 'Order placed successfully and sent to shop'
+          : 'Order placed successfully and sent to restaurant',
         order,
       });
     } catch (error) {

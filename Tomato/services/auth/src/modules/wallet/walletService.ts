@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import Customer, { ICustomer } from '../../model/Customer.js';
 import Restaurant, { IRestaurant } from '../../model/Restaurant.js';
+import Shop, { IShop } from '../../model/Shop.js';
 import Rider, { IRider } from '../../model/Rider.js';
 import Employee, { IEmployee } from '../../model/Employee.js';
 import WalletCreditTrack from '../../model/WalletCreditTrack.js';
@@ -29,6 +30,7 @@ const getAdminWalletSnapshot = async (adminId: string) => {
 type Recipient =
   | { model: 'customer'; record: ICustomer }
   | { model: 'restaurant'; record: IRestaurant }
+  | { model: 'shop'; record: IShop }
   | { model: 'rider'; record: IRider };
 
 const RECIPIENT_PROJECTION =
@@ -38,7 +40,7 @@ const adjustRecipientCredit = (
   recipient: Recipient,
   amount: number,
   projection = RECIPIENT_PROJECTION,
-): Promise<ICustomer | IRestaurant | IRider | null> => {
+): Promise<ICustomer | IRestaurant | IShop | IRider | null> => {
   const update = { $inc: { creditPoint: amount } };
   const options = { returnDocument: 'after' as const };
 
@@ -51,6 +53,12 @@ const adjustRecipientCredit = (
       ).select(projection);
     case 'restaurant':
       return Restaurant.findByIdAndUpdate(
+        recipient.record._id,
+        update,
+        options,
+      ).select(projection);
+    case 'shop':
+      return Shop.findByIdAndUpdate(
         recipient.record._id,
         update,
         options,
@@ -170,9 +178,10 @@ export const transferCreditPoints = async (
       { [accountField]: lookupId },
     ],
   });
-  const [customer, restaurant, rider, currentAdmin] = await Promise.all([
+  const [customer, restaurant, shop, rider, currentAdmin] = await Promise.all([
     Customer.findOne(byAccountId('customerId')).select(RECIPIENT_PROJECTION),
     Restaurant.findOne(byAccountId('restaurantId')).select(RECIPIENT_PROJECTION),
+    Shop.findOne(byAccountId('shopId')).select(RECIPIENT_PROJECTION),
     Rider.findOne(byAccountId('riderId')).select(RECIPIENT_PROJECTION),
     Employee.findOne({ _id: adminId, role: 'admin' }).select(
       'name role email phone',
@@ -184,6 +193,7 @@ export const transferCreditPoints = async (
     ...(restaurant
       ? [{ model: 'restaurant' as const, record: restaurant }]
       : []),
+    ...(shop ? [{ model: 'shop' as const, record: shop }] : []),
     ...(rider ? [{ model: 'rider' as const, record: rider }] : []),
   ];
 
@@ -200,12 +210,12 @@ export const transferCreditPoints = async (
   const recipient = recipients[0];
   if (
     !recipient ||
-    !['customer', 'restaurant', 'deliveryPartner'].includes(
+    !['customer', 'restaurant', 'shop', 'deliveryPartner'].includes(
       recipient.record.role,
     )
   ) {
     throw new WalletServiceError(
-      'Credits can only be transferred to customer, rider, or restaurant wallets',
+      'Credits can only be transferred to customer, rider, shop, or restaurant wallets',
       400,
     );
   }
@@ -233,7 +243,7 @@ export const transferCreditPoints = async (
     );
   }
 
-  let updatedRecipient: ICustomer | IRestaurant | IRider | null = null;
+  let updatedRecipient: ICustomer | IRestaurant | IShop | IRider | null = null;
   try {
     updatedRecipient = await adjustRecipientCredit(recipient, creditPoints);
 

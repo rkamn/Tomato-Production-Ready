@@ -31,13 +31,20 @@ export type OrderStatus =
   | 'confirmed';
 
 export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded';
-export type PaymentMethod = 'card' | 'upi' | 'netbanking' | 'cod' | 'gateway_mock';
+export type PaymentMethod = 'card' | 'upi' | 'netbanking' | 'cod' | 'gateway_mock' | 'razorpay';
 
 export interface IOrderStatusHistory {
   status: OrderStatus;
   at: Date;
   by?: string;
   note?: string;
+}
+
+export interface IAppliedOrderCoupon {
+  code: string;
+  title?: string;
+  couponType?: string;
+  discountAmount: number;
 }
 
 export interface IOrder extends Document {
@@ -63,6 +70,9 @@ export interface IOrder extends Document {
   subtotal: number;
   tax: number;
   deliveryFee: number;
+  discountAmount?: number;
+  couponCodes?: string[];
+  appliedCoupons?: IAppliedOrderCoupon[];
   totalAmount: number;
   deliveryAddress?: IOrderAddress;
   paymentStatus: PaymentStatus;
@@ -210,6 +220,26 @@ const orderSchema: Schema<IOrder> = new Schema(
       type: Number,
       default: 40,
     },
+    discountAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    couponCodes: {
+      type: [String],
+      default: [],
+    },
+    appliedCoupons: {
+      type: [
+        {
+          code: { type: String, default: '' },
+          title: { type: String, default: '' },
+          couponType: { type: String, default: '' },
+          discountAmount: { type: Number, default: 0 },
+        },
+      ],
+      default: [],
+    },
     totalAmount: {
       type: Number,
       required: true,
@@ -227,7 +257,7 @@ const orderSchema: Schema<IOrder> = new Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ['card', 'upi', 'netbanking', 'cod', 'gateway_mock'],
+      enum: ['card', 'upi', 'netbanking', 'cod', 'gateway_mock', 'razorpay'],
       default: 'cod',
     },
     paymentTransactionId: {

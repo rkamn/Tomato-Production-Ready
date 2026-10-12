@@ -18,6 +18,11 @@ import {
   buildOrderLiveTrackingData,
   createNotificationForRole,
 } from '../../utils/orderHelpers.js';
+import {
+  validateBankAndPanDetails,
+  syncOrderToTomatoPayment,
+} from '../../utils/bankHelpers.js';
+import Payment from '../../model/Payment.js';
 
 const createRiderRouter = () => {
   const router = express.Router();
@@ -76,7 +81,7 @@ const createRiderRouter = () => {
             lastLocationUpdated: new Date(),
           },
         },
-        { new: true },
+        { returnDocument: 'after' },
       ).lean();
 
       const displayName = updated ? updated.name : '';
@@ -135,7 +140,7 @@ const createRiderRouter = () => {
             lastLocationUpdated: new Date(),
           },
         },
-        { new: true },
+        { returnDocument: 'after' },
       ).lean();
 
       return res.json({
@@ -318,6 +323,7 @@ const createRiderRouter = () => {
         });
 
         await order.save();
+        await syncOrderToTomatoPayment(order);
 
         await notificationService.notifyOnRiderAccepted(
           order,
@@ -390,6 +396,7 @@ const createRiderRouter = () => {
         });
 
         await order.save();
+        await syncOrderToTomatoPayment(order);
 
         await notificationService.notifyOnDelivered(order);
 
@@ -459,6 +466,114 @@ const createRiderRouter = () => {
       }
     },
   );
+
+  // 7. Rider Bank & PAN Details (Non-editable once approved; only Admin can edit)
+  router.get('/bank-details', async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user?.userId)
+        return res.status(401).json({ message: 'Authentication required' });
+      const rider = await Rider.findById(user.userId)
+        .select('name riderId isApproved walletBalance creditPoint bankDetails')
+        .lean();
+      if (!rider) return res.status(404).json({ message: 'Rider not found' });
+
+      const payouts = await Payment.find({ riderId: String(user.userId) })
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .lean();
+
+      const isLocked = Boolean(
+        rider.isApproved ||
+          rider.bankDetails?.isApproved ||
+          rider.bankDetails?.isLocked,
+      );
+
+      return res.json({
+        bankDetails: {
+          ...(rider.bankDetails || {}),
+          isLocked,
+        },
+        isApproved: rider.isApproved,
+        walletBalance: rider.walletBalance || 0,
+        payouts,
+      });
+    } catch (error) {
+      console.error('Rider bank details fetch failed:', error);
+      return res.status(500).json({ message: 'Unable to fetch bank details' });
+    }
+  });
+
+  router.put('/bank-details', async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user?.userId)
+        return res.status(401).json({ message: 'Authentication required' });
+
+      const rider = await Rider.findById(user.userId).lean();
+      if (!rider) return res.status(404).json({ message: 'Rider not found' });
+
+      if (
+        rider.isApproved ||
+        rider.bankDetails?.isApproved ||
+        rider.bankDetails?.isLocked
+      ) {
+        return res.status(403).json({
+          message:
+            'Bank details are locked and non-editable once approved. Only the Admin can edit your bank details upon request.',
+        });
+      }
+
+      const validation = validateBankAndPanDetails(req.body);
+      if (!validation.valid || !validation.sanitized) {
+        return res.status(400).json({
+          message: validation.message || 'Invalid bank or PAN details',
+        });
+      }
+
+      const updatedBankDetails = {
+        ...(rider.bankDetails || {}),
+        ...validation.sanitized,
+        isSubmitted: true,
+        isApproved: false,
+        isLocked: false,
+        riderPayoutPerOrder: rider.bankDetails?.riderPayoutPerOrder ?? 40,
+        adminNote:
+          typeof req.body.adminNote === 'string'
+            ? req.body.adminNote.trim()
+            : rider.bankDetails?.adminNote || '',
+        submittedAt: new Date(),
+      };
+
+      const updatedRider = await Rider.findByIdAndUpdate(
+        user.userId,
+        { $set: { bankDetails: updatedBankDetails } },
+        { returnDocument: 'after' },
+      ).lean();
+
+      try {
+        await Notification.create({
+          userId: 'ADMIN',
+          role: 'admin',
+          title: 'Rider Bank & PAN Details Submitted',
+          message: `${rider.name} (${rider.riderId || rider._id}) submitted bank details & PAN (${validation.sanitized.panNumber}) for verification and approval.`,
+          type: 'system',
+          entityId: String(rider._id),
+        });
+      } catch (notifErr) {
+        console.warn('Admin notification on rider bank submit failed:', notifErr);
+      }
+
+      return res.json({
+        message:
+          'Bank details and PAN card submitted successfully! Pending Admin verification & approval.',
+        bankDetails: updatedRider?.bankDetails || updatedBankDetails,
+      });
+    } catch (error) {
+      console.error('Rider bank details save failed:', error);
+      return res.status(500).json({ message: 'Unable to save bank details' });
+    }
+  });
 
   return router;
 };

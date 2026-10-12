@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import Notification, { INotification } from '../../model/Notification.js';
 import Rider from '../../model/Rider.js';
 import { IOrder } from '../../model/Order.js';
+import arattaiNotificationService from './arattaiService.js';
 
 export interface NearbyRiderCandidate {
   riderId: string;
@@ -274,6 +275,19 @@ class NotificationService {
           status: 'accepted',
         },
       });
+
+      const customerPhone = order.customerPhone || (order.deliveryAddress as any)?.phone;
+      if (customerPhone) {
+        arattaiNotificationService
+          .notifyOrderUpdate({
+            phoneNumber: customerPhone,
+            customerName: order.customerName || 'Customer',
+            orderNumber: order.orderNumber,
+            status: 'accepted',
+            amount: order.totalAmount,
+          })
+          .catch((err) => console.error('[Arattai Order Accepted Alert Error]:', err));
+      }
     }
 
     // 2. Find all nearest riders within 2km circle from restaurant
@@ -426,6 +440,20 @@ class NotificationService {
           status: 'out_for_delivery',
         },
       });
+
+      const customerPhone = order.customerPhone || (order.deliveryAddress as any)?.phone;
+      if (customerPhone) {
+        arattaiNotificationService
+          .notifyOrderUpdate({
+            phoneNumber: customerPhone,
+            customerName: order.customerName || 'Customer',
+            orderNumber: order.orderNumber,
+            status: 'out_for_delivery',
+            amount: order.totalAmount,
+            riderName,
+          })
+          .catch((err) => console.error('[Arattai Rider Assigned Alert Error]:', err));
+      }
     }
 
     // Notify Restaurant
@@ -468,6 +496,19 @@ class NotificationService {
           status: 'delivered',
         },
       });
+
+      const customerPhone = order.customerPhone || (order.deliveryAddress as any)?.phone;
+      if (customerPhone) {
+        arattaiNotificationService
+          .notifyOrderUpdate({
+            phoneNumber: customerPhone,
+            customerName: order.customerName || 'Customer',
+            orderNumber: order.orderNumber,
+            status: 'delivered',
+            amount: order.totalAmount,
+          })
+          .catch((err) => console.error('[Arattai Order Delivered Alert Error]:', err));
+      }
     }
 
     // Notify Restaurant

@@ -14,6 +14,15 @@ import Notification, { INotification } from './Notification.js';
 import Address, { IAddress } from './Address.js';
 import WalletCreditTrack, { IWalletCreditTrack } from './WalletCreditTrack.js';
 import Counter, { ICounter, getNextCounterValue, generateIdFromCounter } from './Counter.js';
+import Shop, { IShop } from './Shop.js';
+import ShopOrder, { IShopOrder } from './ShopOrder.js';
+import Review, { IReview } from './Review.js';
+import Complaint, {
+  IComplaint,
+  ComplaintStatus,
+  ComplaintPriority,
+  cleanupExpiredClosedComplaints,
+} from './Complaint.js';
 
 export {
   Employee,
@@ -45,6 +54,17 @@ export {
   ICounter,
   getNextCounterValue,
   generateIdFromCounter,
+  Shop,
+  IShop,
+  ShopOrder,
+  IShopOrder,
+  Review,
+  IReview,
+  Complaint,
+  IComplaint,
+  ComplaintStatus,
+  ComplaintPriority,
+  cleanupExpiredClosedComplaints,
 };
 
 export default {
@@ -59,5 +79,9 @@ export default {
   Address,
   WalletCreditTrack,
   Counter,
+  Shop,
+  ShopOrder,
+  Review,
+  Complaint,
 };
 

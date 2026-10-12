@@ -6,9 +6,15 @@ import Employee, { IEmployee, USER_ROLES, UserRole } from '../../model/Employee.
 import Restaurant, { IRestaurant } from '../../model/Restaurant.js';
 import Customer, { ICustomer } from '../../model/Customer.js';
 import Rider, { IRider } from '../../model/Rider.js';
+import Shop, { IShop } from '../../model/Shop.js';
 import Notification from '../../model/Notification.js';
 import Counter, { getNextCounterValue, generateIdFromCounter } from '../../model/Counter.js';
 import { AuthenticatedRequest } from '../../middleware/authenticate.js';
+import {
+	extractPincodeFromText,
+	resolvePartnerPincode,
+	getServiceablePincodes,
+} from '../../utils/bankHelpers.js';
 
 const getPublicBaseUrl = () => process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 5050}`;
 
@@ -80,6 +86,11 @@ export const generateAdminId = (): Promise<string> =>
 		Boolean(await Employee.exists({ adminId: { $in: [id, id.toUpperCase()] } })),
 	);
 
+export const generateShopId = (): Promise<string> =>
+	generateIdFromCounter('shopId', 'shop', 1000, async (id: string) =>
+		Boolean(await Shop.exists({ shopId: { $in: [id, id.toUpperCase()] } })),
+	);
+
 export const createToken = (user: {
 	_id: { toString: () => string };
 	email?: string;
@@ -92,6 +103,7 @@ export const createToken = (user: {
 	customerId?: string;
 	subadminId?: string;
 	adminId?: string;
+	shopId?: string;
 }) => {
 	const jwtSecret = process.env.JWT_SECRET || 'tomato-local-development-secret';
 
@@ -106,6 +118,7 @@ export const createToken = (user: {
 			permissions: user.permissions || [],
 			adminRoleTitle: user.adminRoleTitle || '',
 			restaurantId: formatUserId(user.restaurantId),
+			shopId: formatUserId((user as any).shopId),
 			riderId: formatUserId(user.riderId),
 			customerId: formatUserId(user.customerId),
 			subadminId: formatUserId(user.subadminId),
@@ -128,14 +141,19 @@ export const userResponse = (user: {
 	walletBalance?: number;
 	creditPoint?: number;
 	restaurantId?: string;
+	shopId?: string;
 	riderId?: string;
 	customerId?: string;
 	subadminId?: string;
 	adminId?: string;
 	digipin?: string;
+	pincode?: string;
 	restaurantAddress?: string;
+	shopAddress?: string;
 	restaurantLocation?: { lat: number; lng: number };
+	shopLocation?: { lat: number; lng: number };
 	cuisine?: string;
+	category?: string;
 	deliveryVehicle?: string;
 	currentLocation?: { lat: number; lng: number };
 	isOnline?: boolean;
@@ -144,17 +162,21 @@ export const userResponse = (user: {
 	permissions?: string[];
 	adminRoleTitle?: string;
 	createdBy?: string;
+	dob?: string;
+	bankDetails?: any;
 }) => {
 	const rawCustomerId = user.customerId || (user.role === 'customer' ? `cust-${String(user._id).slice(-4).toLowerCase()}` : '');
 	const rawSubadminId = user.subadminId || (user.role === 'subadmin' ? `sub-${String(user._id).slice(-4).toLowerCase()}` : '');
 	const rawAdminId = (user as any).adminId || (user.role === 'admin' ? ((user as any).adminId || `adm-${String(user._id).slice(-4).toLowerCase()}`) : '');
 	const rawRestaurantId = user.restaurantId || (user.role === 'restaurant' ? `rest-${String(user._id).slice(-4).toLowerCase()}` : '');
+	const rawShopId = (user as any).shopId || (user.role === 'shop' ? `shop-${String(user._id).slice(-4).toLowerCase()}` : '');
 	const rawRiderId = user.riderId || (user.role === 'deliveryPartner' || (user.role as string) === 'rider' ? `ride-${String(user._id).slice(-4).toLowerCase()}` : '');
 
 	const customerId = formatUserId(rawCustomerId);
 	const subadminId = formatUserId(rawSubadminId);
 	const adminId = formatUserId(rawAdminId);
 	const restaurantId = formatUserId(rawRestaurantId);
+	const shopId = formatUserId(rawShopId);
 	const riderId = formatUserId(rawRiderId);
 
 	const cleanName = typeof user.name === 'string' ? (user.name.split('/')[0] ?? '').trim() : '';
@@ -167,6 +189,7 @@ export const userResponse = (user: {
 		displayName,
 		email: user.email,
 		phone: user.phone,
+		dob: (user as any).dob || '',
 		image: user.image || '',
 		role: user.role,
 		isApproved: user.isApproved ?? true,
@@ -178,14 +201,19 @@ export const userResponse = (user: {
 				creditPoint: user.creditPoint ?? 0,
 			}),
 		restaurantId,
+		shopId,
 		riderId,
 		customerId,
 		subadminId,
 		adminId,
 		digipin: user.digipin || '',
-		restaurantAddress: user.restaurantAddress || '',
-		restaurantLocation: user.restaurantLocation || { lat: 12.9716, lng: 77.5946 },
-		cuisine: user.cuisine || '',
+		pincode: resolvePartnerPincode(user),
+		restaurantAddress: user.restaurantAddress || user.shopAddress || '',
+		shopAddress: user.shopAddress || user.restaurantAddress || '',
+		restaurantLocation: user.restaurantLocation || user.shopLocation || { lat: 12.9716, lng: 77.5946 },
+		shopLocation: user.shopLocation || user.restaurantLocation || { lat: 12.9716, lng: 77.5946 },
+		cuisine: user.cuisine || user.category || '',
+		category: user.category || user.cuisine || '',
 		deliveryVehicle: user.deliveryVehicle || '',
 		currentLocation: user.currentLocation || { lat: 12.9716, lng: 77.5946 },
 		isOnline: user.isOnline ?? true,
@@ -194,6 +222,7 @@ export const userResponse = (user: {
 		permissions: user.permissions || [],
 		adminRoleTitle: user.adminRoleTitle || '',
 		createdBy: user.createdBy || '',
+		bankDetails: (user as any).bankDetails || null,
 	};
 };
 
@@ -223,17 +252,17 @@ export const registerUser = async (req: Request, res: Response) => {
 		return res.status(400).json({ message: 'Enter a valid mobile number' });
 	}
 
-	// Validate restaurant location or DIGIPIN at registration
+	// Validate restaurant or shop location or DIGIPIN at registration
 	let restaurantLocation: { lat: number; lng: number } = { lat: 12.9716, lng: 77.5946 };
 	let digipin = typeof req.body?.digipin === 'string' ? req.body.digipin.trim().toUpperCase() : '';
-	const rawLat = req.body?.restaurantLocation?.lat ?? req.body?.lat;
-	const rawLng = req.body?.restaurantLocation?.lng ?? req.body?.lng;
+	const rawLat = req.body?.restaurantLocation?.lat ?? req.body?.shopLocation?.lat ?? req.body?.lat;
+	const rawLng = req.body?.restaurantLocation?.lng ?? req.body?.shopLocation?.lng ?? req.body?.lng;
 	const hasCoords = rawLat !== undefined && rawLng !== undefined && !isNaN(Number(rawLat)) && !isNaN(Number(rawLng));
 
-	if (role === 'restaurant') {
+	if (role === 'restaurant' || role === 'shop') {
 		if (!digipin && !hasCoords) {
 			return res.status(400).json({
-				message: 'Restaurant pickup location is required. Please share current GPS coordinates or DIGIPIN.',
+				message: `${role === 'shop' ? 'Shop' : 'Restaurant'} pickup location is required. Please share current GPS coordinates or DIGIPIN.`,
 			});
 		}
 		if (hasCoords) {
@@ -252,19 +281,71 @@ export const registerUser = async (req: Request, res: Response) => {
 			],
 		};
 
-		const [existingEmployee, existingRestaurant, existingCustomer, existingRider] = await Promise.all([
+		const [existingEmployee, existingRestaurant, existingCustomer, existingRider, existingShop] = await Promise.all([
 			Employee.findOne(duplicateQuery),
 			Restaurant.findOne(duplicateQuery),
 			Customer.findOne(duplicateQuery),
 			Rider.findOne(duplicateQuery),
+			Shop.findOne(duplicateQuery),
 		]);
 
-		if (existingEmployee || existingRestaurant || existingCustomer || existingRider) {
+		if (existingEmployee || existingRestaurant || existingCustomer || existingRider || existingShop) {
 			return res.status(409).json({ message: 'An account with that email or mobile number already exists' });
+		}
+
+		if (role === 'shop') {
+			const shopId = await generateShopId();
+			const shopAddress = typeof req.body?.shopAddress === 'string'
+				? req.body.shopAddress.trim()
+				: typeof req.body?.restaurantAddress === 'string'
+					? req.body.restaurantAddress.trim()
+					: '';
+			const pincode = extractPincodeFromText(req.body?.pincode || shopAddress || digipin);
+			const category = typeof req.body?.category === 'string'
+				? req.body.category.trim()
+				: typeof req.body?.cuisine === 'string'
+					? req.body.cuisine.trim()
+					: 'Retail, Supermarket & Groceries';
+
+			const shopPayload: Record<string, unknown> = {
+				name,
+				passwordHash: await hashPassword(password),
+				role: 'shop',
+				isApproved: false,
+				isBlocked: false,
+				shopId,
+				digipin,
+				pincode,
+				shopAddress,
+				shopLocation: restaurantLocation,
+				category,
+				isOpen: true,
+				isOnline: true,
+			};
+			if (email) shopPayload.email = email;
+			if (phone) shopPayload.phone = phone;
+
+			const shop = await Shop.create(shopPayload) as unknown as IShop;
+
+			await Notification.create({
+				userId: String(shop._id),
+				role: 'shop',
+				title: 'Welcome to Tomato',
+				message: `Your shop registration (${shop.name}) has been submitted and is pending admin approval.`,
+				type: 'service',
+			});
+
+			return res.status(201).json({
+				token: createToken(shop as any),
+				user: userResponse(shop as any),
+				message: 'Registration received. Awaiting admin approval.',
+			});
 		}
 
 		if (role === 'restaurant') {
 			const restaurantId = await generateRestaurantId();
+			const restAddr = typeof req.body?.restaurantAddress === 'string' ? req.body.restaurantAddress.trim() : '';
+			const pincode = extractPincodeFromText(req.body?.pincode || restAddr || digipin);
 			const restaurantPayload: Record<string, unknown> = {
 				name,
 				passwordHash: await hashPassword(password),
@@ -273,7 +354,8 @@ export const registerUser = async (req: Request, res: Response) => {
 				isBlocked: false,
 				restaurantId,
 				digipin,
-				restaurantAddress: typeof req.body?.restaurantAddress === 'string' ? req.body.restaurantAddress.trim() : '',
+				pincode,
+				restaurantAddress: restAddr,
 				restaurantLocation,
 				cuisine: typeof req.body?.cuisine === 'string' ? req.body.cuisine.trim() : 'Multi-cuisine',
 				isOpen: true,
@@ -433,6 +515,7 @@ export const loginUser = async (req: Request, res: Response) => {
 			user = await Customer.findOne(emailQuery).select('+passwordHash');
 			if (!user) user = await Rider.findOne(emailQuery).select('+passwordHash');
 			if (!user) user = await Restaurant.findOne(emailQuery).select('+passwordHash');
+			if (!user) user = await Shop.findOne(emailQuery).select('+passwordHash');
 			if (!user) user = await Employee.findOne(emailQuery).select('+passwordHash');
 		} else {
 			const digits = rawValue.replace(/\D/g, '');
@@ -460,6 +543,7 @@ export const loginUser = async (req: Request, res: Response) => {
 			user = await Customer.findOne(phoneQuery).select('+passwordHash');
 			if (!user) user = await Rider.findOne(phoneQuery).select('+passwordHash');
 			if (!user) user = await Restaurant.findOne(phoneQuery).select('+passwordHash');
+			if (!user) user = await Shop.findOne(phoneQuery).select('+passwordHash');
 			if (!user) user = await Employee.findOne(phoneQuery).select('+passwordHash');
 		}
 
@@ -500,6 +584,7 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
 			user = await Customer.findOne(emailQuery);
 			if (!user) user = await Rider.findOne(emailQuery);
 			if (!user) user = await Restaurant.findOne(emailQuery);
+			if (!user) user = await Shop.findOne(emailQuery);
 			if (!user) user = await Employee.findOne(emailQuery);
 		} else {
 			const digits = rawValue.replace(/\D/g, '');
@@ -526,6 +611,7 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
 			user = await Customer.findOne(phoneQuery);
 			if (!user) user = await Rider.findOne(phoneQuery);
 			if (!user) user = await Restaurant.findOne(phoneQuery);
+			if (!user) user = await Shop.findOne(phoneQuery);
 			if (!user) user = await Employee.findOne(phoneQuery);
 		}
 
@@ -581,6 +667,13 @@ export const resetPassword = async (req: Request, res: Response) => {
 		}
 
 		if (!user) {
+			user = await Shop.findOne({
+				resetPasswordTokenHash: hashResetToken(token),
+				resetPasswordExpiresAt: { $gt: new Date() },
+			}).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+		}
+
+		if (!user) {
 			user = await Employee.findOne({
 				resetPasswordTokenHash: hashResetToken(token),
 				resetPasswordExpiresAt: { $gt: new Date() },
@@ -616,11 +709,21 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 	const nextImage = typeof req.body?.image === 'string' ? req.body.image.trim() : uploadedFile;
 	const nextEmail = nextEmailRaw ? normalizeEmail(nextEmailRaw) : undefined;
 	const nextPhone = nextPhoneRaw ? normalizePhone(nextPhoneRaw) : undefined;
-	const nextAddress = typeof req.body?.restaurantAddress === 'string' ? req.body.restaurantAddress.trim() : undefined;
-	const nextCuisine = typeof req.body?.cuisine === 'string' ? req.body.cuisine.trim() : undefined;
+	const nextAddress = typeof req.body?.restaurantAddress === 'string'
+		? req.body.restaurantAddress.trim()
+		: typeof req.body?.shopAddress === 'string'
+			? req.body.shopAddress.trim()
+			: undefined;
+	const nextPincode = typeof req.body?.pincode === 'string' ? req.body.pincode.trim() : undefined;
+	const nextCuisine = typeof req.body?.cuisine === 'string'
+		? req.body.cuisine.trim()
+		: typeof req.body?.category === 'string'
+			? req.body.category.trim()
+			: undefined;
 	const nextVehicle = typeof req.body?.deliveryVehicle === 'string' ? req.body.deliveryVehicle.trim() : undefined;
+	const nextDob = typeof req.body?.dob === 'string' ? req.body.dob.trim() : undefined;
 
-	if (!nextName && !nextEmail && !nextPhone && !nextImage && !nextAddress && !nextCuisine && !nextVehicle) {
+	if (!nextName && !nextEmail && !nextPhone && !nextImage && !nextAddress && nextPincode === undefined && !nextCuisine && !nextVehicle && nextDob === undefined) {
 		return res.status(400).json({
 			message: 'No profile changes provided',
 		});
@@ -636,11 +739,32 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 		if (nextEmail) updates.email = nextEmail;
 		if (nextPhone) updates.phone = nextPhone;
 		if (nextImage) updates.image = nextImage;
-		if (nextAddress !== undefined) updates.restaurantAddress = nextAddress;
-		if (nextCuisine !== undefined) updates.cuisine = nextCuisine;
+		if (nextDob !== undefined) updates.dob = nextDob;
+		if (nextAddress !== undefined) {
+			updates.restaurantAddress = nextAddress;
+			updates.shopAddress = nextAddress;
+		}
+		if (nextPincode !== undefined || nextAddress !== undefined) {
+			const resolvedPin = extractPincodeFromText(nextPincode || nextAddress || '');
+			if (resolvedPin) {
+				updates.pincode = resolvedPin;
+			} else if (nextPincode !== undefined) {
+				updates.pincode = nextPincode;
+			}
+		}
+		if (nextCuisine !== undefined) {
+			updates.cuisine = nextCuisine;
+			updates.category = nextCuisine;
+		}
 		if (nextVehicle !== undefined) updates.deliveryVehicle = nextVehicle;
 
 		const userRole = req.user?.role;
+		if ((userRole === 'restaurant' || userRole === 'shop') && updates.pincode !== undefined) {
+			const serviceable = await getServiceablePincodes();
+			if (!updates.pincode || !serviceable.includes(String(updates.pincode))) {
+				updates.isApproved = false;
+			}
+		}
 
 		const duplicateFilter = {
 			$and: [
@@ -654,14 +778,15 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 			],
 		};
 
-		const [dupEmp, dupRest, dupCust, dupRider] = await Promise.all([
+		const [dupEmp, dupRest, dupCust, dupRider, dupShop] = await Promise.all([
 			nextEmail || nextPhone ? Employee.findOne(duplicateFilter) : null,
 			nextEmail || nextPhone ? Restaurant.findOne(duplicateFilter) : null,
 			nextEmail || nextPhone ? Customer.findOne(duplicateFilter) : null,
 			nextEmail || nextPhone ? Rider.findOne(duplicateFilter) : null,
+			nextEmail || nextPhone ? Shop.findOne(duplicateFilter) : null,
 		]);
 
-		if (dupEmp || dupRest || dupCust || dupRider) {
+		if (dupEmp || dupRest || dupCust || dupRider || dupShop) {
 			return res.status(409).json({ message: 'An account with that email or mobile number already exists' });
 		}
 
@@ -670,25 +795,31 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 			user = await Restaurant.findByIdAndUpdate(
 				userId,
 				updates,
-				{ new: true, runValidators: true },
+				{ returnDocument: 'after', runValidators: true },
+			).lean();
+		} else if (userRole === 'shop') {
+			user = await Shop.findByIdAndUpdate(
+				userId,
+				updates,
+				{ returnDocument: 'after', runValidators: true },
 			).lean();
 		} else if (userRole === 'customer') {
 			user = await Customer.findByIdAndUpdate(
 				userId,
 				updates,
-				{ new: true, runValidators: true },
+				{ returnDocument: 'after', runValidators: true },
 			).lean();
 		} else if (userRole === 'deliveryPartner' || (userRole as string) === 'rider') {
 			user = await Rider.findByIdAndUpdate(
 				userId,
 				updates,
-				{ new: true, runValidators: true },
+				{ returnDocument: 'after', runValidators: true },
 			).lean();
 		} else {
 			user = await Employee.findByIdAndUpdate(
 				userId,
 				updates,
-				{ new: true, runValidators: true },
+				{ returnDocument: 'after', runValidators: true },
 			).lean();
 		}
 

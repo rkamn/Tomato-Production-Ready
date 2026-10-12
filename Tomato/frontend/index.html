@@ -86,6 +86,15 @@
                   <button
                     class="role-option"
                     type="button"
+                    data-role="shop"
+                    data-label="Shop"
+                    role="menuitem"
+                  >
+                    Shop<small>Retail &amp; grocery shop partner</small>
+                  </button>
+                  <button
+                    class="role-option"
+                    type="button"
                     data-role="restaurant"
                     data-label="Restaurant"
                     role="menuitem"
@@ -143,13 +152,21 @@
               <label for="restaurant-address">Restaurant Address (Pickup Point)</label>
               <input id="restaurant-address" name="restaurantAddress" type="text" placeholder="12 MG Road / Indiranagar, Bengaluru" />
 
+              <div style="margin-top:0.65rem;">
+                <label for="restaurant-pincode" id="restaurant-pincode-label">Restaurant Pincode (Serviceable Area) <span style="color:var(--tomato);">*Required</span></label>
+                <input id="restaurant-pincode" name="pincode" type="text" maxlength="10" placeholder="e.g. 560038" />
+                <small style="color:var(--muted); font-size:0.73rem; display:block; margin-top:0.2rem;">
+                  Must match an Admin-approved serviceable delivery pincode for account approval.
+                </small>
+              </div>
+
               <div style="margin-top:0.8rem;">
                 <label for="restaurant-digipin">Restaurant Location / DIGIPIN <span style="color:var(--tomato);">*Required</span></label>
                 <div style="display:flex; gap:0.4rem; margin-top:0.25rem;">
                   <input id="restaurant-digipin" name="digipin" type="text" placeholder="e.g. DGP-560038-A1" style="flex:1;" />
                   <button type="button" id="btn-detect-rest-gps" style="width:auto; padding:0 0.75rem; font-size:0.75rem; min-height:2.6rem;" onclick="detectRestaurantGPS()">📍 GPS Pin</button>
                 </div>
-                <small style="color:var(--muted); font-size:0.75rem; display:block; margin-top:0.3rem;">
+                <small id="rest-helper-note" style="color:var(--muted); font-size:0.75rem; display:block; margin-top:0.3rem;">
                   Used for order pickup by delivery riders. Each restaurant will receive a unique <strong>&lt;name&gt;/restaurantId</strong>.
                 </small>
                 <input type="hidden" id="restaurant-lat" name="lat" />

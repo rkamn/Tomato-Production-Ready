@@ -19,6 +19,9 @@ import {
   buildOrderLiveTrackingData,
   createNotificationForRole,
 } from '../../utils/orderHelpers.js';
+import { productImageUpload } from '../../middleware/upload.js';
+import { validateBankAndPanDetails } from '../../utils/bankHelpers.js';
+import Payment from '../../model/Payment.js';
 
 const createRestaurantRouter = () => {
   const router = express.Router();
@@ -86,7 +89,7 @@ const createRestaurantRouter = () => {
       const updated = await Restaurant.findByIdAndUpdate(
         user.userId,
         { $set: { isOpen, isOnline: isOpen } },
-        { new: true },
+        { returnDocument: 'after' },
       ).lean();
 
       return res.json({
@@ -112,7 +115,7 @@ const createRestaurantRouter = () => {
         return res.status(401).json({ message: 'Authentication required' });
       const profile = await Restaurant.findById(user.userId)
         .select(
-          'name restaurantId digipin email phone restaurantAddress restaurantLocation cuisine isApproved isBlocked isOpen isOnline',
+          'name restaurantId digipin email phone restaurantAddress restaurantLocation cuisine isApproved isBlocked isOpen isOnline walletBalance creditPoint bankDetails',
         )
         .lean();
       const cleanName = profile && typeof profile.name === 'string' ? (profile.name.split('/')[0] ?? '').trim() : '';
@@ -163,7 +166,7 @@ const createRestaurantRouter = () => {
       const updated = await Restaurant.findByIdAndUpdate(
         user.userId,
         { $set: updates },
-        { new: true },
+        { returnDocument: 'after' },
       );
       return res.json({
         message: 'Restaurant profile updated',
@@ -263,6 +266,19 @@ const createRestaurantRouter = () => {
     }
   });
 
+  router.post('/upload-image', productImageUpload.single('image'), (req: Request, res: Response) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: 'No image file uploaded' });
+      }
+      const imageUrl = `/uploads/${req.file.filename}`;
+      return res.json({ message: 'Image uploaded successfully', imageUrl });
+    } catch (error: any) {
+      console.error('Restaurant image upload error:', error);
+      return res.status(500).json({ message: error.message || 'Image upload failed' });
+    }
+  });
+
   router.put('/menu/:itemId', async (req: Request, res: Response) => {
     try {
       const user = (req as AuthenticatedRequest).user;
@@ -298,7 +314,7 @@ const createRestaurantRouter = () => {
           restaurantId: new mongoose.Types.ObjectId(user.userId),
         },
         { $set: updates },
-        { new: true, runValidators: true },
+        { returnDocument: 'after', runValidators: true },
       );
 
       if (!updated)
@@ -498,6 +514,115 @@ const createRestaurantRouter = () => {
       }
     },
   );
+
+  // 7. Restaurant Bank & PAN Details (Non-editable once approved; only Admin can edit)
+  router.get('/bank-details', async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user?.userId)
+        return res.status(401).json({ message: 'Authentication required' });
+      const rest = await Restaurant.findById(user.userId)
+        .select('name restaurantId isApproved walletBalance creditPoint bankDetails')
+        .lean();
+      if (!rest) return res.status(404).json({ message: 'Restaurant not found' });
+
+      const payouts = await Payment.find({ partnerId: String(user.userId) })
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .lean();
+
+      const isLocked = Boolean(
+        rest.isApproved ||
+          rest.bankDetails?.isApproved ||
+          rest.bankDetails?.isLocked,
+      );
+
+      return res.json({
+        bankDetails: {
+          ...(rest.bankDetails || {}),
+          isLocked,
+        },
+        isApproved: rest.isApproved,
+        walletBalance: rest.walletBalance || 0,
+        payouts,
+      });
+    } catch (error) {
+      console.error('Restaurant bank details fetch failed:', error);
+      return res.status(500).json({ message: 'Unable to fetch bank details' });
+    }
+  });
+
+  router.put('/bank-details', async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user?.userId)
+        return res.status(401).json({ message: 'Authentication required' });
+
+      const rest = await Restaurant.findById(user.userId).lean();
+      if (!rest) return res.status(404).json({ message: 'Restaurant not found' });
+
+      if (
+        rest.isApproved ||
+        rest.bankDetails?.isApproved ||
+        rest.bankDetails?.isLocked
+      ) {
+        return res.status(403).json({
+          message:
+            'Bank details are locked and non-editable once approved. Only the Admin can edit your bank details upon request.',
+        });
+      }
+
+      const validation = validateBankAndPanDetails(req.body);
+      if (!validation.valid || !validation.sanitized) {
+        return res.status(400).json({
+          message: validation.message || 'Invalid bank or PAN details',
+        });
+      }
+
+      const updatedBankDetails = {
+        ...(rest.bankDetails || {}),
+        ...validation.sanitized,
+        isSubmitted: true,
+        isApproved: false,
+        isLocked: false,
+        agreementCommissionPercent:
+          rest.bankDetails?.agreementCommissionPercent ?? 15,
+        adminNote:
+          typeof req.body.adminNote === 'string'
+            ? req.body.adminNote.trim()
+            : rest.bankDetails?.adminNote || '',
+        submittedAt: new Date(),
+      };
+
+      const updatedRest = await Restaurant.findByIdAndUpdate(
+        user.userId,
+        { $set: { bankDetails: updatedBankDetails } },
+        { returnDocument: 'after' },
+      ).lean();
+
+      try {
+        await Notification.create({
+          userId: 'ADMIN',
+          role: 'admin',
+          title: 'Restaurant Bank & PAN Details Submitted',
+          message: `${rest.name} (${rest.restaurantId || rest._id}) submitted bank details & PAN (${validation.sanitized.panNumber}) for verification and approval.`,
+          type: 'system',
+          entityId: String(rest._id),
+        });
+      } catch (notifErr) {
+        console.warn('Admin notification on restaurant bank submit failed:', notifErr);
+      }
+
+      return res.json({
+        message:
+          'Bank details and PAN card submitted successfully! Pending Admin verification & approval.',
+        bankDetails: updatedRest?.bankDetails || updatedBankDetails,
+      });
+    } catch (error) {
+      console.error('Restaurant bank details save failed:', error);
+      return res.status(500).json({ message: 'Unable to save bank details' });
+    }
+  });
 
   return router;
 };

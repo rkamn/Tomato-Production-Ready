@@ -5,6 +5,8 @@ import Customer from "../model/Customer.js";
 import Restaurant from "../model/Restaurant.js";
 import Rider from "../model/Rider.js";
 import Counter from "../model/Counter.js";
+import Shop from "../model/Shop.js";
+import ShopOrder from "../model/ShopOrder.js";
 import { hashPassword } from "../modules/auth/authController.js";
 
 try {
@@ -281,6 +283,7 @@ export const migrateCountersAndDropOldCounterTables = async () => {
             { key: 'restaurantId', desc: 'Restaurant Partner ID counter alias' },
             { key: 'subadminId', desc: 'Operations Sub-Admin User ID counter' },
             { key: 'adminId', desc: 'Platform Administrator User ID counter' },
+            { key: 'shopId', desc: 'Retail Shop Partner ID counter' },
             { key: 'orderId', desc: 'Platform Order Number ID counter' },
         ];
 
@@ -351,6 +354,43 @@ export const connectDB = async (attempts = 3) => {
             await ensureIdentifierIndex(Restaurant, 'restaurantId');
             await ensureCollectionIndexes(Rider);
             await ensureIdentifierIndex(Rider, 'riderId');
+
+            // Ensure 'shop' collection exists in Tomato_clone database
+            if (mongoose.connection.db) {
+                const collections = await mongoose.connection.db.listCollections({ name: 'shop' }).toArray();
+                if (collections.length === 0) {
+                    await mongoose.connection.db.createCollection('shop');
+                    console.log("[DB Setup] 'shop' collection created in Tomato_clone database.");
+                }
+            }
+            await ensureCollectionIndexes(Shop as any);
+            await ensureIdentifierIndex(Shop as any, 'shopId');
+            await Shop.syncIndexes().catch(() => undefined);
+            await ShopOrder.syncIndexes().catch(() => undefined);
+
+            // Ensure a default active Shop partner exists for testing
+            const shopCount = await Shop.countDocuments();
+            if (shopCount === 0) {
+                const passHash = await hashPassword('Shop@12345');
+                await Shop.create({
+                    name: 'Tomato Supermart & Daily Essentials',
+                    email: 'shop@tomato.com',
+                    phone: '+919876543299',
+                    role: 'shop',
+                    shopId: 'shop-1001',
+                    passwordHash: passHash,
+                    isApproved: true,
+                    isBlocked: false,
+                    shopAddress: '45 CMH Road, Indiranagar, Bengaluru, 560038',
+                    shopLocation: { lat: 12.9784, lng: 77.6408 },
+                    digipin: 'DGP-1298-7764',
+                    category: 'Retail, Supermarket & Groceries',
+                    isOpen: true,
+                    isOnline: true,
+                });
+                console.log("[DB Setup] Default Shop partner (shop@tomato.com) created in 'shop' collection.");
+            }
+
             console.log("Connected to MongoDB (Tomato_clone database ready)");
             return;
         } catch (error) {

@@ -101,4 +101,55 @@ router.put('/read-all', authenticate, async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * Test Arattai Notification Dispatch to an Indian Mobile Number
+ * POST /api/notifications/arattai/test
+ */
+router.post('/arattai/test', authenticate, async (req: Request, res: Response) => {
+  try {
+    const { phone, message, templateId, params } = req.body;
+    const user = (req as AuthenticatedRequest).user;
+
+    const targetPhone = phone || user?.phone;
+    if (!targetPhone) {
+      return res.status(400).json({ message: 'Indian mobile phone number is required (e.g. 9876543210 or +919876543210)' });
+    }
+
+    const { arattaiNotificationService } = await import('./arattaiService.js');
+    const result = await arattaiNotificationService.sendNotification({
+      phoneNumber: targetPhone,
+      templateId,
+      params,
+      message: message || `Tomato Alert: Test notification dispatched successfully via Arattai API.`,
+    });
+
+    return res.json({
+      message: result.success
+        ? 'Arattai notification processed successfully'
+        : 'Arattai notification dispatch failed',
+      result,
+    });
+  } catch (err: any) {
+    console.error('Arattai test error:', err);
+    return res.status(500).json({ message: 'Arattai test failed', error: err.message });
+  }
+});
+
+/**
+ * Inbound Webhook from Arattai Business Platform
+ * POST /api/notifications/arattai/webhook
+ */
+router.post('/arattai/webhook', async (req: Request, res: Response) => {
+  try {
+    const webhookData = req.body;
+    console.log('[Arattai Inbound Webhook Received]:', JSON.stringify(webhookData, null, 2));
+
+    // Acknowledge receipt to Arattai platform immediately
+    return res.status(200).json({ status: 'success', received: true });
+  } catch (err: any) {
+    console.error('Arattai webhook processing error:', err);
+    return res.status(500).json({ status: 'error' });
+  }
+});
+
 export default router;

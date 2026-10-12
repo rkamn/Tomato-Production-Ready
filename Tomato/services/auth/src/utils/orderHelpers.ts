@@ -26,7 +26,15 @@ export const formatBill = (
   const sgst = Number((subtotal * 0.025).toFixed(2));
   const tax = Number((cgst + sgst).toFixed(2));
   const deliveryFee = order.deliveryFee ?? 40;
-  const totalAmount = order.totalAmount || subtotal + tax + deliveryFee;
+  const discountAmount = Number(order.discountAmount || 0);
+  const couponCodes = Array.isArray(order.couponCodes) ? order.couponCodes : [];
+  const appliedCoupons = Array.isArray(order.appliedCoupons)
+    ? order.appliedCoupons
+    : [];
+  const totalAmount =
+    order.totalAmount !== undefined
+      ? order.totalAmount
+      : Math.max(0, Number((subtotal + tax + deliveryFee - discountAmount).toFixed(2)));
 
   return {
     invoiceNumber: order.billNumber || `BILL-${order.orderNumber}`,
@@ -60,6 +68,9 @@ export const formatBill = (
     sgst,
     tax,
     deliveryFee,
+    discountAmount,
+    couponCodes,
+    appliedCoupons,
     totalAmount,
     paymentMethod: order.paymentMethod || 'cod',
     paymentStatus: order.paymentStatus || 'pending',

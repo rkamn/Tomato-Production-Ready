@@ -13,6 +13,12 @@ import Rider, { IRider } from '../../model/Rider.js';
 import Payment from '../../model/Payment.js';
 import WalletCreditTrack from '../../model/WalletCreditTrack.js';
 import Complaint, { cleanupExpiredClosedComplaints } from '../../model/Complaint.js';
+import Coupon, {
+  COUPON_TYPES,
+  COUPON_TYPE_LABELS,
+  CouponType,
+  ensureDefaultCouponsSeeded,
+} from '../../model/Coupon.js';
 import {
   authenticate,
   AuthenticatedRequest,
@@ -44,11 +50,353 @@ import {
   checkPartnerCanBeApproved,
   syncOrderToTomatoPayment,
   adjustTomatoCentralBankBalance,
+  extractPincodeFromText,
+  resolvePartnerPincode,
+  getServiceablePincodes,
+  addServiceablePincodes,
+  removeServiceablePincode,
 } from '../../utils/bankHelpers.js';
 
 const createAdminRouter = () => {
   const router = express.Router();
   router.use(authenticate, requireRole('admin', 'subadmin'));
+
+  // Serviceable Delivery Pincodes Management (Admin can view, add, or remove pincodes anytime)
+  router.get('/serviceable-pincodes', async (_req: Request, res: Response) => {
+    try {
+      const pincodes = await getServiceablePincodes();
+      return res.json({ pincodes });
+    } catch (error) {
+      console.error('Fetch serviceable pincodes failed:', error);
+      return res.status(500).json({ message: 'Unable to fetch serviceable pincodes' });
+    }
+  });
+
+  router.post('/serviceable-pincodes', async (req: Request, res: Response) => {
+    try {
+      const raw = req.body?.pincode ?? req.body?.pincodes;
+      const { added, pincodes } = await addServiceablePincodes(raw);
+      if (added.length === 0) {
+        return res.status(400).json({
+          message: 'Please provide a valid 5 or 6 digit pincode (or comma-separated pincodes)',
+          pincodes,
+        });
+      }
+      return res.json({
+        message: `Serviceable pincode(s) active: ${added.join(', ')}`,
+        added,
+        pincodes,
+      });
+    } catch (error) {
+      console.error('Add serviceable pincodes failed:', error);
+      return res.status(500).json({ message: 'Unable to add serviceable pincode' });
+    }
+  });
+
+  router.delete('/serviceable-pincodes/:pincode', async (req: Request, res: Response) => {
+    try {
+      const pincode = String(req.params.pincode || '').trim();
+      if (!pincode) {
+        return res.status(400).json({ message: 'Pincode is required' });
+      }
+      const { pincodes, unapprovedPartnersCount } = await removeServiceablePincode(pincode);
+      return res.json({
+        message:
+          unapprovedPartnersCount > 0
+            ? `Pincode ${pincode} removed from serviceable range (${unapprovedPartnersCount} restaurant/shop(s) in this pincode were automatically marked unapproved)`
+            : `Pincode ${pincode} removed from serviceable range`,
+        pincodes,
+        unapprovedCount: unapprovedPartnersCount,
+        unapprovedPartnersCount,
+      });
+    } catch (error) {
+      console.error('Remove serviceable pincode failed:', error);
+      return res.status(500).json({ message: 'Unable to remove serviceable pincode' });
+    }
+  });
+
+  // =========================================================================
+  // COUPON & DISCOUNT MANAGEMENT (ADMIN PANEL)
+  // =========================================================================
+  router.get('/coupons', async (_req: Request, res: Response) => {
+    try {
+      await ensureDefaultCouponsSeeded();
+      const [coupons, rawCategories, customers] = await Promise.all([
+        Coupon.find().sort({ createdAt: -1 }).lean(),
+        FoodItem.distinct('category'),
+        Customer.find()
+          .select('_id customerId name email phone')
+          .sort({ createdAt: -1 })
+          .limit(120)
+          .lean(),
+      ]);
+
+      const defaultCats = [
+        'Main Course',
+        'Sweets',
+        'Starters',
+        'Desserts',
+        'Biryani',
+        'Beverages',
+        'Breads',
+        'Groceries',
+        'Fresh Produce',
+        'Dairy & Bakery',
+        'Snacks & Packaged',
+      ];
+      const categorySet = new Set<string>(defaultCats);
+      for (const c of rawCategories) {
+        if (typeof c === 'string' && c.trim()) {
+          categorySet.add(c.trim());
+        }
+      }
+
+      let activeCoupons = 0;
+      let totalRedemptions = 0;
+      let totalDiscountGiven = 0;
+
+      for (const c of coupons) {
+        if (c.isActive) activeCoupons++;
+        totalRedemptions += Number(c.usedCount || 0);
+        for (const u of c.usedBy || []) {
+          totalDiscountGiven += Number(u.discountAmount || 0);
+        }
+      }
+
+      return res.json({
+        coupons: coupons.map((c) => ({
+          ...c,
+          id: String(c._id),
+          couponTypeLabel: COUPON_TYPE_LABELS[c.couponType] || c.couponType,
+        })),
+        summary: {
+          totalCoupons: coupons.length,
+          activeCoupons,
+          inactiveCoupons: coupons.length - activeCoupons,
+          totalRedemptions,
+          totalDiscountGiven: Number(totalDiscountGiven.toFixed(2)),
+          maxCouponsPerOrder: 2,
+        },
+        categories: Array.from(categorySet),
+        customerDirectory: customers.map((cust: any) => ({
+          id: String(cust._id),
+          customerId:
+            cust.customerId ||
+            `cust-${String(cust._id).slice(-4).toLowerCase()}`,
+          name: cust.name || 'Customer',
+          email: cust.email || '',
+          phone: cust.phone || '',
+        })),
+      });
+    } catch (error) {
+      console.error('Admin coupons fetch failed:', error);
+      return res.status(500).json({ message: 'Unable to fetch coupons' });
+    }
+  });
+
+  router.post('/coupons', async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      const body = req.body ?? {};
+      const code = String(body.code || '')
+        .trim()
+        .toUpperCase()
+        .replace(/\s+/g, '');
+      const title = String(body.title || '').trim();
+      const description = String(body.description || '').trim();
+      const couponType = String(body.couponType || 'restaurant_item_category') as CouponType;
+      const discountType = body.discountType === 'flat' ? 'flat' : 'percentage';
+      const discountValue = Number(body.discountValue ?? 0);
+      const maxDiscountAmount = Math.max(0, Number(body.maxDiscountAmount ?? 0));
+      const minOrderAmount = Math.max(0, Number(body.minOrderAmount ?? 0));
+      const targetItemCategory = String(body.targetItemCategory || '').trim();
+      const occasionName = String(body.occasionName || '').trim();
+      const targetUserIdentifier = String(body.targetUserIdentifier || '').trim();
+      const applicableStoreType = ['all', 'restaurant', 'shop'].includes(body.applicableStoreType)
+        ? body.applicableStoreType
+        : couponType === 'shop' || couponType === 'grocery'
+        ? 'shop'
+        : couponType === 'restaurant_item_category'
+        ? 'restaurant'
+        : 'all';
+      const usageLimitPerUser = Math.max(0, Number(body.usageLimitPerUser ?? 1));
+      const totalUsageLimit = Math.max(0, Number(body.totalUsageLimit ?? 0));
+      const validFrom = body.validFrom ? new Date(body.validFrom) : new Date();
+      const validUntil = body.validUntil ? new Date(body.validUntil) : null;
+      const isActive = body.isActive !== undefined ? Boolean(body.isActive) : true;
+
+      if (!code || code.length < 3) {
+        return res.status(400).json({
+          message: 'Coupon code must be at least 3 characters (e.g. DIWALI50, SWEETS20)',
+        });
+      }
+      if (!title) {
+        return res.status(400).json({ message: 'Coupon title is required' });
+      }
+      if (!COUPON_TYPES.includes(couponType)) {
+        return res.status(400).json({ message: 'Invalid coupon category/type' });
+      }
+      if (!discountValue || discountValue <= 0) {
+        return res.status(400).json({ message: 'Discount value must be greater than 0' });
+      }
+      if (discountType === 'percentage' && discountValue > 100) {
+        return res.status(400).json({ message: 'Percentage discount cannot exceed 100%' });
+      }
+      if (couponType === 'specific_user' && !targetUserIdentifier) {
+        return res.status(400).json({
+          message: 'Please provide the Specific User ID, Email, or Mobile Number for this coupon',
+        });
+      }
+
+      const existing = await Coupon.findOne({ code });
+      if (existing) {
+        return res.status(409).json({
+          message: `A coupon with code "${code}" already exists`,
+        });
+      }
+
+      const created = await Coupon.create({
+        code,
+        title,
+        description,
+        couponType,
+        discountType,
+        discountValue,
+        maxDiscountAmount,
+        minOrderAmount,
+        targetItemCategory,
+        occasionName,
+        targetUserIdentifier,
+        applicableStoreType,
+        usageLimitPerUser,
+        totalUsageLimit,
+        validFrom,
+        validUntil,
+        isActive,
+        createdBy: (user as any)?.name || user?.role || 'Admin',
+      });
+
+      return res.status(201).json({
+        message: `Coupon "${created.code}" created successfully`,
+        coupon: {
+          ...created.toObject(),
+          id: String(created._id),
+          couponTypeLabel: COUPON_TYPE_LABELS[created.couponType] || created.couponType,
+        },
+      });
+    } catch (error) {
+      console.error('Create coupon failed:', error);
+      return res.status(500).json({ message: 'Unable to create coupon' });
+    }
+  });
+
+  router.put('/coupons/:couponId', async (req: Request, res: Response) => {
+    try {
+      const couponId = String(req.params.couponId || '');
+      if (!mongoose.isValidObjectId(couponId)) {
+        return res.status(400).json({ message: 'Valid coupon ID is required' });
+      }
+
+      const coupon = await Coupon.findById(couponId);
+      if (!coupon) {
+        return res.status(404).json({ message: 'Coupon not found' });
+      }
+
+      const body = req.body ?? {};
+      if (body.code !== undefined) {
+        const nextCode = String(body.code || '')
+          .trim()
+          .toUpperCase()
+          .replace(/\s+/g, '');
+        if (nextCode && nextCode !== coupon.code) {
+          const dup = await Coupon.findOne({ code: nextCode, _id: { $ne: coupon._id } });
+          if (dup) {
+            return res.status(409).json({ message: `Coupon code "${nextCode}" already exists` });
+          }
+          coupon.code = nextCode;
+        }
+      }
+      if (body.title !== undefined) coupon.title = String(body.title).trim();
+      if (body.description !== undefined) coupon.description = String(body.description).trim();
+      if (body.couponType !== undefined && COUPON_TYPES.includes(body.couponType)) {
+        coupon.couponType = body.couponType;
+      }
+      if (body.discountType === 'flat' || body.discountType === 'percentage') {
+        coupon.discountType = body.discountType;
+      }
+      if (body.discountValue !== undefined) {
+        coupon.discountValue = Math.max(1, Number(body.discountValue));
+      }
+      if (body.maxDiscountAmount !== undefined) {
+        coupon.maxDiscountAmount = Math.max(0, Number(body.maxDiscountAmount));
+      }
+      if (body.minOrderAmount !== undefined) {
+        coupon.minOrderAmount = Math.max(0, Number(body.minOrderAmount));
+      }
+      if (body.targetItemCategory !== undefined) {
+        coupon.targetItemCategory = String(body.targetItemCategory).trim();
+      }
+      if (body.occasionName !== undefined) {
+        coupon.occasionName = String(body.occasionName).trim();
+      }
+      if (body.targetUserIdentifier !== undefined) {
+        coupon.targetUserIdentifier = String(body.targetUserIdentifier).trim();
+      }
+      if (
+        body.applicableStoreType !== undefined &&
+        ['all', 'restaurant', 'shop'].includes(body.applicableStoreType)
+      ) {
+        coupon.applicableStoreType = body.applicableStoreType;
+      }
+      if (body.usageLimitPerUser !== undefined) {
+        coupon.usageLimitPerUser = Math.max(0, Number(body.usageLimitPerUser));
+      }
+      if (body.totalUsageLimit !== undefined) {
+        coupon.totalUsageLimit = Math.max(0, Number(body.totalUsageLimit));
+      }
+      if (body.validFrom !== undefined) {
+        coupon.validFrom = body.validFrom ? new Date(body.validFrom) : new Date();
+      }
+      if (body.validUntil !== undefined) {
+        coupon.validUntil = body.validUntil ? new Date(body.validUntil) : null;
+      }
+      if (body.isActive !== undefined) {
+        coupon.isActive = Boolean(body.isActive);
+      }
+
+      await coupon.save();
+      return res.json({
+        message: `Coupon "${coupon.code}" updated successfully`,
+        coupon: {
+          ...coupon.toObject(),
+          id: String(coupon._id),
+          couponTypeLabel: COUPON_TYPE_LABELS[coupon.couponType] || coupon.couponType,
+        },
+      });
+    } catch (error) {
+      console.error('Update coupon failed:', error);
+      return res.status(500).json({ message: 'Unable to update coupon' });
+    }
+  });
+
+  router.delete('/coupons/:couponId', async (req: Request, res: Response) => {
+    try {
+      const couponId = String(req.params.couponId || '');
+      if (!mongoose.isValidObjectId(couponId)) {
+        return res.status(400).json({ message: 'Valid coupon ID is required' });
+      }
+      const deleted = await Coupon.findByIdAndDelete(couponId);
+      if (!deleted) {
+        return res.status(404).json({ message: 'Coupon not found' });
+      }
+      return res.json({
+        message: `Coupon "${deleted.code}" deleted successfully`,
+      });
+    } catch (error) {
+      console.error('Delete coupon failed:', error);
+      return res.status(500).json({ message: 'Unable to delete coupon' });
+    }
+  });
 
   router.get('/overview', (req: Request, res: Response) => {
     const user = (req as AuthenticatedRequest).user;
@@ -1041,18 +1389,29 @@ const createAdminRouter = () => {
           digipin = `DGP-${Math.round(restaurantLocation.lat * 100)}-${Math.round(restaurantLocation.lng * 100)}`;
         }
 
+        const rAddr = restaurantAddress ? restaurantAddress.trim() : '';
+        const rPincode =
+          extractPincodeFromText(req.body?.pincode) ||
+          extractPincodeFromText(rAddr) ||
+          '';
+        const serviceablePincodes = await getServiceablePincodes();
+        const isPincodeServiceable =
+          Boolean(rPincode) && serviceablePincodes.includes(rPincode);
         const restBankCheck = validateBankAndPanDetails(req.body?.bankDetails);
+        const canAutoApprove = restBankCheck.valid && isPincodeServiceable;
+
         const restaurant = await Restaurant.create({
           name: name.trim(),
           email: email ? email.trim().toLowerCase() : undefined,
           phone: phone ? phone.trim() : undefined,
           passwordHash: await hashPassword(password),
           role: 'restaurant',
-          isApproved: restBankCheck.valid,
+          isApproved: canAutoApprove,
           isBlocked: false,
           restaurantId,
           digipin,
-          restaurantAddress: restaurantAddress ? restaurantAddress.trim() : '',
+          pincode: rPincode,
+          restaurantAddress: rAddr,
           restaurantLocation,
           cuisine: cuisine ? cuisine.trim() : 'Multi-cuisine',
           isOpen: true,
@@ -1062,21 +1421,27 @@ const createAdminRouter = () => {
                 bankDetails: {
                   ...restBankCheck.sanitized,
                   isSubmitted: true,
-                  isApproved: true,
-                  isLocked: true,
+                  isApproved: canAutoApprove,
+                  isLocked: canAutoApprove,
                   agreementCommissionPercent: 15,
                   submittedAt: new Date(),
-                  approvedAt: new Date(),
-                  approvedBy: currentUser?.name || 'Admin',
+                  ...(canAutoApprove
+                    ? {
+                        approvedAt: new Date(),
+                        approvedBy: currentUser?.name || 'Admin',
+                      }
+                    : {}),
                 },
               }
             : {}),
         });
 
         return res.status(201).json({
-          message: restBankCheck.valid
-            ? 'Restaurant created and approved with verified Bank & PAN details'
-            : 'Restaurant created (Pending Bank & PAN submission for approval)',
+          message: canAutoApprove
+            ? 'Restaurant created and approved with verified Bank, PAN & serviceable pincode'
+            : restBankCheck.valid && !isPincodeServiceable
+              ? `Restaurant created (Pending approval: pincode "${rPincode || 'N/A'}" is not in serviceable range)`
+              : 'Restaurant created (Pending Bank & PAN submission and serviceable pincode check for approval)',
           user: userResponse(restaurant as any),
         });
       }
@@ -1104,9 +1469,17 @@ const createAdminRouter = () => {
         if (!digipin) {
           digipin = `DGP-${Math.round(shopLocation.lat * 100)}-${Math.round(shopLocation.lng * 100)}`;
         }
-        const sAddress = req.body?.shopAddress || req.body?.restaurantAddress || '';
+        const sAddress = (req.body?.shopAddress || req.body?.restaurantAddress || '').trim();
+        const sPincode =
+          extractPincodeFromText(req.body?.pincode) ||
+          extractPincodeFromText(sAddress) ||
+          '';
+        const serviceablePincodes = await getServiceablePincodes();
+        const isPincodeServiceable =
+          Boolean(sPincode) && serviceablePincodes.includes(sPincode);
         const sCategory = req.body?.category || req.body?.cuisine || 'Retail, Supermarket & Groceries';
         const shopBankCheck = validateBankAndPanDetails(req.body?.bankDetails);
+        const canAutoApprove = shopBankCheck.valid && isPincodeServiceable;
 
         const shop = await Shop.create({
           name: name.trim(),
@@ -1114,11 +1487,12 @@ const createAdminRouter = () => {
           phone: phone ? phone.trim() : undefined,
           passwordHash: await hashPassword(password),
           role: 'shop',
-          isApproved: shopBankCheck.valid,
+          isApproved: canAutoApprove,
           isBlocked: false,
           shopId,
           digipin,
-          shopAddress: sAddress.trim(),
+          pincode: sPincode,
+          shopAddress: sAddress,
           shopLocation,
           category: sCategory.trim(),
           isOpen: true,
@@ -1128,21 +1502,27 @@ const createAdminRouter = () => {
                 bankDetails: {
                   ...shopBankCheck.sanitized,
                   isSubmitted: true,
-                  isApproved: true,
-                  isLocked: true,
+                  isApproved: canAutoApprove,
+                  isLocked: canAutoApprove,
                   agreementCommissionPercent: 12,
                   submittedAt: new Date(),
-                  approvedAt: new Date(),
-                  approvedBy: currentUser?.name || 'Admin',
+                  ...(canAutoApprove
+                    ? {
+                        approvedAt: new Date(),
+                        approvedBy: currentUser?.name || 'Admin',
+                      }
+                    : {}),
                 },
               }
             : {}),
         });
 
         return res.status(201).json({
-          message: shopBankCheck.valid
-            ? 'Shop created and approved with verified Bank & PAN details'
-            : 'Shop created (Pending Bank & PAN submission for approval)',
+          message: canAutoApprove
+            ? 'Shop created and approved with verified Bank, PAN & serviceable pincode'
+            : shopBankCheck.valid && !isPincodeServiceable
+              ? `Shop created (Pending approval: pincode "${sPincode || 'N/A'}" is not in serviceable range)`
+              : 'Shop created (Pending Bank & PAN submission and serviceable pincode check for approval)',
           user: userResponse(shop as any),
         });
       }
@@ -1330,6 +1710,7 @@ const createAdminRouter = () => {
         cuisine,
         deliveryVehicle,
         digipin,
+        pincode,
       } = req.body;
 
       const updates: Record<string, unknown> = {};
@@ -1339,6 +1720,13 @@ const createAdminRouter = () => {
       if (role && USER_ROLES.includes(role)) updates.role = role;
       if (restaurantAddress !== undefined)
         updates.restaurantAddress = restaurantAddress.trim();
+      if (pincode !== undefined) {
+        updates.pincode =
+          extractPincodeFromText(pincode) || String(pincode).trim();
+      } else if (restaurantAddress !== undefined) {
+        const extractedPin = extractPincodeFromText(restaurantAddress);
+        if (extractedPin) updates.pincode = extractedPin;
+      }
       if (cuisine !== undefined) updates.cuisine = cuisine.trim();
       if (deliveryVehicle !== undefined)
         updates.deliveryVehicle = deliveryVehicle.trim();
@@ -1363,7 +1751,12 @@ const createAdminRouter = () => {
       if (!user) {
         const shopUpdates: Record<string, unknown> = { ...updates };
         if (req.body.shopAddress !== undefined || req.body.restaurantAddress !== undefined) {
-          shopUpdates.shopAddress = (req.body.shopAddress || req.body.restaurantAddress || '').trim();
+          const nextAddr = (req.body.shopAddress || req.body.restaurantAddress || '').trim();
+          shopUpdates.shopAddress = nextAddr;
+          if (pincode === undefined) {
+            const extractedPin = extractPincodeFromText(nextAddr);
+            if (extractedPin) shopUpdates.pincode = extractedPin;
+          }
         }
         if (req.body.category !== undefined || req.body.cuisine !== undefined) {
           shopUpdates.category = (req.body.category || req.body.cuisine || '').trim();
@@ -1376,6 +1769,14 @@ const createAdminRouter = () => {
           { $set: shopUpdates },
           { returnDocument: 'after', runValidators: true },
         );
+      }
+      if (user && (user.role === 'restaurant' || user.role === 'shop') && user.isApproved) {
+        const serviceablePincodes = await getServiceablePincodes();
+        const currentPin = resolvePartnerPincode(user);
+        if (!currentPin || !serviceablePincodes.includes(currentPin)) {
+          user.isApproved = false;
+          await user.save();
+        }
       }
       if (!user) {
         user = await Rider.findByIdAndUpdate(
@@ -1489,7 +1890,7 @@ const createAdminRouter = () => {
     },
   );
 
-  // Approve rider or restaurant or shop (ONLY when bank details + IFSC + PAN are submitted and Account Holder Name matches PAN Card Name)
+  // Approve rider or restaurant or shop (ONLY when bank details + IFSC + PAN are submitted and Account Holder Name matches PAN Card Name, AND for Restaurant/Shop its pincode is in Admin serviceable range)
   router.post('/users/:userId/approve', async (req: Request, res: Response) => {
     try {
       const userId = String(req.params.userId || '');
@@ -1503,6 +1904,7 @@ const createAdminRouter = () => {
 
       let user: any = await Restaurant.findById(userId);
       let partnerLabel = 'Restaurant';
+      let isStorePartner = true;
 
       if (!user) {
         user = await Shop.findById(userId);
@@ -1511,9 +1913,26 @@ const createAdminRouter = () => {
       if (!user) {
         user = await Rider.findById(userId);
         partnerLabel = 'Delivery Partner (Rider)';
+        isStorePartner = false;
       }
 
       if (user) {
+        if (isStorePartner) {
+          const serviceablePincodes = await getServiceablePincodes();
+          const partnerPincode = resolvePartnerPincode(user);
+          if (!partnerPincode || !serviceablePincodes.includes(partnerPincode)) {
+            return res.status(400).json({
+              message: `${partnerLabel} "${user.name}" pincode ${partnerPincode ? `(${partnerPincode})` : '(missing)'} is not in the serviceable range. Active serviceable pincodes: ${serviceablePincodes.join(', ') || 'None'}.`,
+              code: 'PINCODE_NOT_SERVICEABLE',
+              pincode: partnerPincode || '',
+              serviceablePincodes,
+            });
+          }
+          if (!user.pincode && partnerPincode) {
+            user.pincode = partnerPincode;
+          }
+        }
+
         const approvalCheck = checkPartnerCanBeApproved(user.bankDetails);
         if (!approvalCheck.canApprove) {
           return res.status(400).json({
@@ -1882,6 +2301,102 @@ const createAdminRouter = () => {
     } catch (error) {
       console.error('Delete account failed:', error);
       return res.status(500).json({ message: 'Unable to delete account' });
+    }
+  });
+
+  // Reset password for any Shop, Restaurant, Rider, Customer, or Sub-Admin account
+  // Default password format: Tomato<DDMMYYYY> where <DDMMYYYY> is the user's DOB (or custom password provided by admin)
+  router.post('/users/:userId/reset-password', async (req: Request, res: Response) => {
+    try {
+      const userId = String(req.params.userId || '').trim();
+      const currentUser = (req as AuthenticatedRequest).user;
+      if (!userId || !mongoose.isValidObjectId(userId)) {
+        return res.status(400).json({ message: 'Valid user ID is required' });
+      }
+
+      // Locate user across Shop, Restaurant, Rider, Customer, Employee
+      let targetDoc: any =
+        (await Shop.findById(userId)) ||
+        (await Restaurant.findById(userId)) ||
+        (await Rider.findById(userId)) ||
+        (await Customer.findById(userId)) ||
+        (await Employee.findById(userId));
+
+      if (!targetDoc) {
+        return res.status(404).json({ message: 'User account not found' });
+      }
+
+      if (targetDoc.role === 'admin' && currentUser?.role !== 'admin') {
+        return res.status(403).json({
+          message: 'Access denied. Sub-admins cannot reset administrator passwords.',
+        });
+      }
+      if (targetDoc.role === 'subadmin' && currentUser?.role !== 'admin') {
+        return res.status(403).json({
+          message: 'Access denied. Only the platform administrator can reset sub-admin passwords.',
+        });
+      }
+
+      const providedDob = typeof req.body?.dob === 'string' ? req.body.dob.trim() : '';
+      if (providedDob) {
+        targetDoc.dob = providedDob;
+      }
+
+      const effectiveDob = String(targetDoc.dob || '').trim();
+
+      // Convert YYYY-MM-DD or DD/MM/YYYY or DD-MM-YYYY into DDMMYYYY
+      const formatDobToDDMMYYYY = (rawDob: string): string => {
+        if (!rawDob) return '';
+        const isoMatch = rawDob.match(/^(\d{4})[-/](\d{2})[-/](\d{2})/);
+        if (isoMatch) {
+          return `${isoMatch[3]}${isoMatch[2]}${isoMatch[1]}`;
+        }
+        const dmyMatch = rawDob.match(/^(\d{2})[-/](\d{2})[-/](\d{4})/);
+        if (dmyMatch) {
+          return `${dmyMatch[1]}${dmyMatch[2]}${dmyMatch[3]}`;
+        }
+        const digitsOnly = rawDob.replace(/\D/g, '');
+        if (digitsOnly.length === 8) return digitsOnly;
+        return '';
+      };
+
+      const ddmmyyyy = formatDobToDDMMYYYY(effectiveDob);
+      const customPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword.trim() : '';
+
+      const finalPassword = customPassword || (ddmmyyyy ? `Tomato${ddmmyyyy}` : '');
+      if (!finalPassword) {
+        return res.status(400).json({
+          message: 'Please select the user\'s DOB to generate "Tomato<DDMMYYYY>" or enter a custom password.',
+        });
+      }
+
+      if (finalPassword.length < 6) {
+        return res.status(400).json({
+          message: 'Password must be at least 6 characters long.',
+        });
+      }
+
+      targetDoc.passwordHash = await hashPassword(finalPassword);
+      targetDoc.resetPasswordTokenHash = undefined;
+      targetDoc.resetPasswordExpiresAt = undefined;
+      await targetDoc.save();
+
+      await Notification.create({
+        userId: String(targetDoc._id),
+        role: targetDoc.role,
+        title: 'Password Reset by Admin',
+        message: 'Your account password has been reset by the platform administrator.',
+        type: 'service',
+      });
+
+      return res.json({
+        message: `Password for "${targetDoc.name}" has been reset successfully to "${finalPassword}".`,
+        resetPassword: finalPassword,
+        user: userResponse(targetDoc),
+      });
+    } catch (error) {
+      console.error('Admin reset password failed:', error);
+      return res.status(500).json({ message: 'Unable to reset user password' });
     }
   });
 
@@ -3150,6 +3665,30 @@ const createAdminRouter = () => {
         const wantsApprove =
           rawApproveFlag !== undefined ? Boolean(rawApproveFlag) : Boolean(doc.isApproved);
 
+        if (req.body.pincode !== undefined && (partnerRole === 'restaurant' || partnerRole === 'shop')) {
+          doc.pincode = extractPincodeFromText(req.body.pincode) || String(req.body.pincode).trim();
+        }
+
+        const unlockForUserEdit =
+          Boolean(req.body.unlockForUserEdit) || req.body.isLocked === false;
+
+        if (wantsApprove && !unlockForUserEdit && (partnerRole === 'restaurant' || partnerRole === 'shop')) {
+          const serviceablePincodes = await getServiceablePincodes();
+          const partnerPincode = resolvePartnerPincode(doc);
+          const partnerLabel = partnerRole === 'shop' ? 'Shop' : 'Restaurant';
+          if (!partnerPincode || !serviceablePincodes.includes(partnerPincode)) {
+            return res.status(400).json({
+              message: `${partnerLabel} "${doc.name}" pincode ${partnerPincode ? `(${partnerPincode})` : '(missing)'} is not in the serviceable range. Active serviceable pincodes: ${serviceablePincodes.join(', ') || 'None'}.`,
+              code: 'PINCODE_NOT_SERVICEABLE',
+              pincode: partnerPincode || '',
+              serviceablePincodes,
+            });
+          }
+          if (!doc.pincode && partnerPincode) {
+            doc.pincode = partnerPincode;
+          }
+        }
+
         if (wantsApprove && !validation.valid) {
           return res.status(400).json({
             message: `Cannot approve bank details for "${doc.name}": ${validation.message}`,
@@ -3180,8 +3719,6 @@ const createAdminRouter = () => {
         const adminIdentifier =
           adminUser?.name || adminUser?.email || adminUser?.userId || 'Admin';
 
-        const unlockForUserEdit =
-          Boolean(req.body.unlockForUserEdit) || req.body.isLocked === false;
         const nextApproved = unlockForUserEdit ? false : wantsApprove && validation.valid;
         const nextLocked = unlockForUserEdit ? false : nextApproved;
 

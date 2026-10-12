@@ -17,6 +17,7 @@ export interface IShop extends Document {
   creditPoint: number;
   shopId: string;
   digipin: string;
+  pincode?: string;
   shopAddress: string;
   shopLocation: {
     lat: number;
@@ -26,6 +27,7 @@ export interface IShop extends Document {
   isOnline: boolean;
   isOpen: boolean;
   bankDetails?: IBankDetails;
+  dob?: string;
   lastLocationUpdated?: Date;
   createdAt?: Date;
   updatedAt?: Date;
@@ -57,6 +59,8 @@ const shopSchema: Schema<IShop> = new Schema(
     creditPoint: { type: Number, default: 0, min: 0 },
     shopId: { type: String, unique: true, sparse: true, trim: true },
     digipin: { type: String, default: '', trim: true },
+    pincode: { type: String, default: '', trim: true },
+    dob: { type: String, default: '', trim: true },
     shopAddress: { type: String, default: '' },
     shopLocation: {
       lat: { type: Number, default: 12.9716 },

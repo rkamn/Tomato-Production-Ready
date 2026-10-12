@@ -6,6 +6,7 @@ import {
   PaymentStatus,
   PaymentMethod,
   IOrderStatusHistory,
+  IAppliedOrderCoupon,
 } from './Order.js';
 
 export interface IShopOrder extends Document {
@@ -31,6 +32,9 @@ export interface IShopOrder extends Document {
   subtotal: number;
   tax: number;
   deliveryFee: number;
+  discountAmount?: number;
+  couponCodes?: string[];
+  appliedCoupons?: IAppliedOrderCoupon[];
   totalAmount: number;
   deliveryAddress?: IOrderAddress;
   paymentStatus: PaymentStatus;
@@ -176,6 +180,26 @@ const shopOrderSchema: Schema<IShopOrder> = new Schema(
     deliveryFee: {
       type: Number,
       default: 40,
+    },
+    discountAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    couponCodes: {
+      type: [String],
+      default: [],
+    },
+    appliedCoupons: {
+      type: [
+        {
+          code: { type: String, default: '' },
+          title: { type: String, default: '' },
+          couponType: { type: String, default: '' },
+          discountAmount: { type: Number, default: 0 },
+        },
+      ],
+      default: [],
     },
     totalAmount: {
       type: Number,

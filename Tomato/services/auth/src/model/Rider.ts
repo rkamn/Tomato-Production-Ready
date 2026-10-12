@@ -23,6 +23,7 @@ export interface IRider extends Document {
   };
   isOnline: boolean;
   bankDetails?: IBankDetails;
+  dob?: string;
   lastLocationUpdated?: Date;
   createdAt?: Date;
   updatedAt?: Date;
@@ -53,6 +54,7 @@ const schema: Schema<IRider> = new Schema(
     walletBalance: { type: Number, default: 0, min: 0 },
     creditPoint: { type: Number, default: 0, min: 0 },
     riderId: { type: String, unique: true, sparse: true, trim: true },
+    dob: { type: String, default: '', trim: true },
     deliveryVehicle: { type: String, default: 'motorcycle' },
     currentLocation: {
       lat: { type: Number, default: 12.9716 },

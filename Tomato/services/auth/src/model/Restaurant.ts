@@ -34,6 +34,7 @@ export interface IRestaurant extends Document {
   creditPoint: number;
   restaurantId: string;
   digipin: string;
+  pincode?: string;
   restaurantAddress: string;
   restaurantLocation: {
     lat: number;
@@ -43,6 +44,7 @@ export interface IRestaurant extends Document {
   isOnline: boolean;
   isOpen: boolean;
   bankDetails?: IBankDetails;
+  dob?: string;
   lastLocationUpdated?: Date;
   createdAt?: Date;
   updatedAt?: Date;
@@ -74,6 +76,8 @@ const schema: Schema<IRestaurant> = new Schema(
     creditPoint: { type: Number, default: 0, min: 0 },
     restaurantId: { type: String, unique: true, sparse: true, trim: true },
     digipin: { type: String, default: '', trim: true },
+    pincode: { type: String, default: '', trim: true },
+    dob: { type: String, default: '', trim: true },
     restaurantAddress: { type: String, default: '' },
     restaurantLocation: {
       lat: { type: Number, default: 12.9716 },

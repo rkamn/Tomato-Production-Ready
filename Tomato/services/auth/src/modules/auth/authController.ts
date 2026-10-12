@@ -10,6 +10,11 @@ import Shop, { IShop } from '../../model/Shop.js';
 import Notification from '../../model/Notification.js';
 import Counter, { getNextCounterValue, generateIdFromCounter } from '../../model/Counter.js';
 import { AuthenticatedRequest } from '../../middleware/authenticate.js';
+import {
+	extractPincodeFromText,
+	resolvePartnerPincode,
+	getServiceablePincodes,
+} from '../../utils/bankHelpers.js';
 
 const getPublicBaseUrl = () => process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 5050}`;
 
@@ -142,6 +147,7 @@ export const userResponse = (user: {
 	subadminId?: string;
 	adminId?: string;
 	digipin?: string;
+	pincode?: string;
 	restaurantAddress?: string;
 	shopAddress?: string;
 	restaurantLocation?: { lat: number; lng: number };
@@ -156,6 +162,7 @@ export const userResponse = (user: {
 	permissions?: string[];
 	adminRoleTitle?: string;
 	createdBy?: string;
+	dob?: string;
 	bankDetails?: any;
 }) => {
 	const rawCustomerId = user.customerId || (user.role === 'customer' ? `cust-${String(user._id).slice(-4).toLowerCase()}` : '');
@@ -182,6 +189,7 @@ export const userResponse = (user: {
 		displayName,
 		email: user.email,
 		phone: user.phone,
+		dob: (user as any).dob || '',
 		image: user.image || '',
 		role: user.role,
 		isApproved: user.isApproved ?? true,
@@ -199,6 +207,7 @@ export const userResponse = (user: {
 		subadminId,
 		adminId,
 		digipin: user.digipin || '',
+		pincode: resolvePartnerPincode(user),
 		restaurantAddress: user.restaurantAddress || user.shopAddress || '',
 		shopAddress: user.shopAddress || user.restaurantAddress || '',
 		restaurantLocation: user.restaurantLocation || user.shopLocation || { lat: 12.9716, lng: 77.5946 },
@@ -291,6 +300,7 @@ export const registerUser = async (req: Request, res: Response) => {
 				: typeof req.body?.restaurantAddress === 'string'
 					? req.body.restaurantAddress.trim()
 					: '';
+			const pincode = extractPincodeFromText(req.body?.pincode || shopAddress || digipin);
 			const category = typeof req.body?.category === 'string'
 				? req.body.category.trim()
 				: typeof req.body?.cuisine === 'string'
@@ -305,6 +315,7 @@ export const registerUser = async (req: Request, res: Response) => {
 				isBlocked: false,
 				shopId,
 				digipin,
+				pincode,
 				shopAddress,
 				shopLocation: restaurantLocation,
 				category,
@@ -333,6 +344,8 @@ export const registerUser = async (req: Request, res: Response) => {
 
 		if (role === 'restaurant') {
 			const restaurantId = await generateRestaurantId();
+			const restAddr = typeof req.body?.restaurantAddress === 'string' ? req.body.restaurantAddress.trim() : '';
+			const pincode = extractPincodeFromText(req.body?.pincode || restAddr || digipin);
 			const restaurantPayload: Record<string, unknown> = {
 				name,
 				passwordHash: await hashPassword(password),
@@ -341,7 +354,8 @@ export const registerUser = async (req: Request, res: Response) => {
 				isBlocked: false,
 				restaurantId,
 				digipin,
-				restaurantAddress: typeof req.body?.restaurantAddress === 'string' ? req.body.restaurantAddress.trim() : '',
+				pincode,
+				restaurantAddress: restAddr,
 				restaurantLocation,
 				cuisine: typeof req.body?.cuisine === 'string' ? req.body.cuisine.trim() : 'Multi-cuisine',
 				isOpen: true,
@@ -700,14 +714,16 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 		: typeof req.body?.shopAddress === 'string'
 			? req.body.shopAddress.trim()
 			: undefined;
+	const nextPincode = typeof req.body?.pincode === 'string' ? req.body.pincode.trim() : undefined;
 	const nextCuisine = typeof req.body?.cuisine === 'string'
 		? req.body.cuisine.trim()
 		: typeof req.body?.category === 'string'
 			? req.body.category.trim()
 			: undefined;
 	const nextVehicle = typeof req.body?.deliveryVehicle === 'string' ? req.body.deliveryVehicle.trim() : undefined;
+	const nextDob = typeof req.body?.dob === 'string' ? req.body.dob.trim() : undefined;
 
-	if (!nextName && !nextEmail && !nextPhone && !nextImage && !nextAddress && !nextCuisine && !nextVehicle) {
+	if (!nextName && !nextEmail && !nextPhone && !nextImage && !nextAddress && nextPincode === undefined && !nextCuisine && !nextVehicle && nextDob === undefined) {
 		return res.status(400).json({
 			message: 'No profile changes provided',
 		});
@@ -723,9 +739,18 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 		if (nextEmail) updates.email = nextEmail;
 		if (nextPhone) updates.phone = nextPhone;
 		if (nextImage) updates.image = nextImage;
+		if (nextDob !== undefined) updates.dob = nextDob;
 		if (nextAddress !== undefined) {
 			updates.restaurantAddress = nextAddress;
 			updates.shopAddress = nextAddress;
+		}
+		if (nextPincode !== undefined || nextAddress !== undefined) {
+			const resolvedPin = extractPincodeFromText(nextPincode || nextAddress || '');
+			if (resolvedPin) {
+				updates.pincode = resolvedPin;
+			} else if (nextPincode !== undefined) {
+				updates.pincode = nextPincode;
+			}
 		}
 		if (nextCuisine !== undefined) {
 			updates.cuisine = nextCuisine;
@@ -734,6 +759,12 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 		if (nextVehicle !== undefined) updates.deliveryVehicle = nextVehicle;
 
 		const userRole = req.user?.role;
+		if ((userRole === 'restaurant' || userRole === 'shop') && updates.pincode !== undefined) {
+			const serviceable = await getServiceablePincodes();
+			if (!updates.pincode || !serviceable.includes(String(updates.pincode))) {
+				updates.isApproved = false;
+			}
+		}
 
 		const duplicateFilter = {
 			$and: [

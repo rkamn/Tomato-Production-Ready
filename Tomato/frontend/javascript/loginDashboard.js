@@ -1361,6 +1361,7 @@ function buildNav() {
     ...(hasPerm('riders_manage') ? [{ id: 'admin-riders', icon: '🚴', label: 'Riders' }] : []),
     ...(hasPerm('customers_manage') ? [{ id: 'admin-customers', icon: '👥', label: 'Customers' }] : []),
     { id: 'admin-bank', icon: '🏦', label: 'Bank' },
+    { id: 'admin-coupons', icon: '🎟️', label: 'Coupon & Discount' },
     ...(hasPerm('dashboard_view') ? [{ id: 'admin-analytics', icon: '📈', label: 'Analytics' }] : []),
     { id: 'admin-complaints', icon: '⚖️', label: 'Complaint Review' },
     ...(hasPerm('subadmins_manage') ? [{ id: 'admin-subadmins', icon: '🛡️', label: 'Sub-Admins & RBAC' }] : []),
@@ -1423,8 +1424,17 @@ function buildNav() {
         itemMap.delete(id);
       }
     });
-    // Ensure newly added tabs appear above settings if not in savedOrder
-    ['admin-bank', 'partner-bank', 'support', 'admin-complaints'].forEach((newId) => {
+    // Ensure newly added tabs appear above settings if not in savedOrder (and 'admin-coupons' sits right below 'admin-bank')
+    ['admin-bank', 'admin-coupons', 'partner-bank', 'support', 'admin-complaints'].forEach((newId) => {
+      if (newId === 'admin-coupons' && itemMap.has('admin-coupons')) {
+        const couponItem = itemMap.get('admin-coupons');
+        itemMap.delete('admin-coupons');
+        const bankIdx = items.findIndex((it) => it.id === 'admin-bank');
+        if (bankIdx !== -1) {
+          items.splice(bankIdx + 1, 0, couponItem);
+          return;
+        }
+      }
       if (itemMap.has(newId)) {
         const newItem = itemMap.get(newId);
         itemMap.delete(newId);
@@ -1737,6 +1747,8 @@ function switchView(viewId, filter = null, force = false) {
     fetchAdminComplaints();
   } else if (viewId === 'admin-bank') {
     loadAdminBankPanel();
+  } else if (viewId === 'admin-coupons') {
+    fetchAdminCoupons();
   } else if (viewId === 'partner-bank') {
     loadPartnerBankPanel();
   } else if (viewId === 'support') {
@@ -2720,6 +2732,9 @@ function openFilterSelectionModal(tab) {
 
 function closeFilterModal() {
   closeModal('filter-selection-modal');
+  if (typeof closeInlineRestaurantSearchDropdown === 'function') {
+    closeInlineRestaurantSearchDropdown();
+  }
 }
 
 function handleFilterModalBackdropClick(e) {
@@ -2778,11 +2793,11 @@ function toggleRestaurantModalCategories(event, restId) {
 
   const wasOpen = panel.classList.contains('open');
 
-  // Close any previously opened restaurant category panel
-  document.querySelectorAll('#filter-modal-items-container .rest-category-panel.open').forEach((p) => {
+  // Close any previously opened restaurant category panel in modal or inline search dropdown
+  document.querySelectorAll('.rest-category-panel.open').forEach((p) => {
     p.classList.remove('open');
   });
-  document.querySelectorAll('#filter-modal-items-container .rest-category-expand-btn.expanded').forEach((b) => {
+  document.querySelectorAll('.rest-category-expand-btn.expanded').forEach((b) => {
     b.classList.remove('expanded');
     b.innerHTML = '▾ Categories';
   });
@@ -3144,14 +3159,27 @@ function renderRestaurantPills() {
   const totalItemsCount = allMenuItems.length;
   const distinctCategories = getDistinctCategories();
 
+  const existingSearchVal = typeof inlineRestaurantSearchQuery !== 'undefined' ? inlineRestaurantSearchQuery : '';
   let headersHtml = `
-    <div class="split-filter-pill ${mainCustomerTab === 'all_restaurants' ? 'active' : ''}">
-      <button type="button" class="split-filter-pill-action" onclick="selectMainCustomerTab('all_restaurants'); openFilterSelectionModal('all_restaurants');" title="Click to view and search restaurants">
-        🏪 Restaurants (${allRestaurants.length})
-      </button>
-      <button type="button" class="split-filter-pill-caret" onclick="selectMainCustomerTab('all_restaurants'); openFilterSelectionModal('all_restaurants');" title="Open all restaurants popup" aria-label="Open all restaurants popup">
-        ▼
-      </button>
+    <div id="inline-restaurant-search-wrapper" style="position:relative; display:inline-flex; align-items:center; min-width:255px;">
+      <span style="position:absolute; left:0.75rem; font-size:0.88rem; pointer-events:none; z-index:1;">🏪</span>
+      <input
+        id="inline-restaurant-search-input"
+        type="text"
+        value="${escapeHtml(existingSearchVal)}"
+        placeholder="Search Restaurants (${allRestaurants.length})..."
+         autocomplete="off"
+        style="width:100%; padding:0.46rem 2rem 0.46rem 2.15rem; font-size:0.84rem; font-weight:600; border:1.5px solid ${mainCustomerTab === 'all_restaurants' ? 'var(--ink)' : 'var(--line)'}; border-radius:999px; background:${mainCustomerTab === 'all_restaurants' ? '#fff' : 'var(--panel)'}; color:var(--ink); outline:none; box-shadow:${mainCustomerTab === 'all_restaurants' ? '0 2px 8px rgba(15,23,42,0.08)' : 'none'}; transition:all 0.15s ease;"
+        onfocus="handleInlineRestaurantSearchFocus(this)"
+        onclick="handleInlineRestaurantSearchFocus(this)"
+        oninput="handleInlineRestaurantSearchInput(this)"
+      />
+      <span style="position:absolute; right:0.75rem; font-size:0.82rem; color:var(--muted); pointer-events:none;">🔍</span>
+      <div
+        id="inline-restaurant-search-dropdown"
+        style="display:none; position:absolute; top:calc(100% + 6px); left:0; width:min(440px, 90vw); max-height:380px; overflow-y:auto; background:#ffffff; border:1px solid var(--line); border-radius:12px; box-shadow:0 14px 32px rgba(15,23,42,0.18); padding:0.6rem; z-index:1200; flex-direction:column; gap:0.45rem;"
+        onclick="handleFilterModalItemClick(event)"
+      ></div>
     </div>
     <button class="filter-pill ${mainCustomerTab === 'all_menus' ? 'active' : ''}" onclick="selectMainCustomerTab('all_menus')">
       🍽️ Menus (${totalItemsCount})
@@ -3603,7 +3631,7 @@ function renderRestaurantHistoryTileHtml(rest, featuredItemOverride = null, subt
       ? slideItems
           .map(
             (item, idx) =>
-              `<span data-rest-cat-slide="${idx}" style="display:${idx === 0 ? 'inline-flex' : 'none'}; align-items:center; font-size:0.8rem; font-weight:700; color:#fde047; text-shadow:0 1px 3px rgba(0,0,0,0.85);">${escapeHtml(item.category || 'Dish')}</span>`
+              `<span data-rest-cat-slide="${idx}" style="display:${idx === 0 ? 'inline-flex' : 'none'}; align-items:center; font-size:0.8rem; font-weight:800; color:#1e3a8a; background:rgba(255,255,255,0.68); backdrop-filter:blur(2px); padding:0.08rem 0.45rem; border-radius:4px;">${escapeHtml(item.category || 'Dish')}</span>`
           )
           .join('')
       : '';
@@ -3789,8 +3817,10 @@ function renderMenuItems() {
   if (mainCustomerTab === 'all_restaurants' && currentSelectedRestaurantId === 'all' && selectedCategory === 'all') {
     const { orderedAll, visitedIdSet, sameProductIdSet, featuredItemByRestId } = getOrderedRestaurantsByVisitAndProduct();
 
+    const effectiveRestSearch = (searchVal || (typeof inlineRestaurantSearchQuery === 'string' ? inlineRestaurantSearchQuery.toLowerCase().trim() : ''));
     let filteredRests = orderedAll;
-    if (searchVal) {
+    if (effectiveRestSearch) {
+      const searchVal = effectiveRestSearch;
       filteredRests = orderedAll.filter((r) => {
         const restId = String(r.id || r._id);
         const rName = (r.name || r.displayName || '').toLowerCase();
@@ -4002,16 +4032,21 @@ function addToCart(itemId, name, price, restaurantId, storeType = 'restaurant') 
     );
     if (confirmSwitch) {
       cart.length = 0;
+      if (typeof resetAppliedCouponsState === 'function') resetAppliedCouponsState();
     } else {
       return;
     }
   }
 
+  const sourceListForCat = storeType === 'shop' ? allShopItems : allMenuItems;
+  const matchedItemForCat = sourceListForCat.find((m) => String(m.id || m._id) === String(itemId));
+  const itemCategory = matchedItemForCat?.category || '';
   const existing = cart.find((i) => i.itemId === itemId);
   if (existing) {
     existing.quantity += 1;
+    if (!existing.category && itemCategory) existing.category = itemCategory;
   } else {
-    cart.push({ itemId, name, price, quantity: 1, restaurantId, storeType });
+    cart.push({ itemId, name, price, quantity: 1, restaurantId, storeType, category: itemCategory });
   }
   if (restaurantId) {
     recordVisitedItem(storeType === 'shop' ? 'shops' : 'restaurants', restaurantId);
@@ -4040,6 +4075,7 @@ function updateCartQuantity(itemId, delta) {
 
 function clearCart() {
   cart.length = 0;
+  if (typeof resetAppliedCouponsState === 'function') resetAppliedCouponsState();
   updateCartUI();
 }
 
@@ -4085,9 +4121,16 @@ function updateCartUI() {
     }
   }
 
+  if (!cart.length && typeof resetAppliedCouponsState === 'function') {
+    resetAppliedCouponsState();
+  }
   const subtotal = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
   const tax = Number((subtotal * 0.05).toFixed(2));
-  const grandTotal = subtotal + tax + 40;
+  const discountAmt = typeof getActiveCartDiscountAmount === 'function' ? getActiveCartDiscountAmount(subtotal) : 0;
+  const grandTotal = Number(Math.max(0, subtotal + tax + 40 - discountAmt).toFixed(2));
+  const activeCodesLabel = (typeof appliedCouponCodes !== 'undefined' && appliedCouponCodes.length)
+    ? `🎟️ Coupon (${appliedCouponCodes.join(' + ')})`
+    : '🎟️ Coupon Discount';
 
   const defaultAddr = customerAddresses.find((a) => a.isDefault) || customerAddresses[0];
   const addrHtml = defaultAddr
@@ -4114,6 +4157,12 @@ function updateCartUI() {
       const orderGrandTotalEl = document.getElementById('order-cart-grand-total');
       const orderLabelEl = document.getElementById('order-cart-delivery-label');
 
+      const orderDiscRow = document.getElementById('order-cart-discount-row');
+      const orderDiscLabel = document.getElementById('order-cart-discount-label');
+      const orderDiscVal = document.getElementById('order-cart-discount-val');
+      if (orderDiscRow) orderDiscRow.style.display = discountAmt > 0 ? 'flex' : 'none';
+      if (orderDiscLabel) orderDiscLabel.textContent = activeCodesLabel;
+      if (orderDiscVal) orderDiscVal.textContent = `-₹${discountAmt.toFixed(2)}`;
       if (orderSubtotalEl) orderSubtotalEl.textContent = `₹${subtotal.toFixed(2)}`;
       if (orderTaxEl) orderTaxEl.textContent = `₹${tax.toFixed(2)}`;
       if (orderGrandTotalEl) orderGrandTotalEl.textContent = `₹${grandTotal.toFixed(2)}`;
@@ -4155,11 +4204,20 @@ function updateCartUI() {
       const ovGrandTotalEl = document.getElementById('overview-cart-grand-total');
       const ovLabelEl = document.getElementById('overview-cart-delivery-label');
 
+      const ovDiscRow = document.getElementById('overview-cart-discount-row');
+      const ovDiscLabel = document.getElementById('overview-cart-discount-label');
+      const ovDiscVal = document.getElementById('overview-cart-discount-val');
+      if (ovDiscRow) ovDiscRow.style.display = discountAmt > 0 ? 'flex' : 'none';
+      if (ovDiscLabel) ovDiscLabel.textContent = activeCodesLabel;
+      if (ovDiscVal) ovDiscVal.textContent = `-₹${discountAmt.toFixed(2)}`;
       if (ovSubtotalEl) ovSubtotalEl.textContent = `₹${subtotal.toFixed(2)}`;
       if (ovTaxEl) ovTaxEl.textContent = `₹${tax.toFixed(2)}`;
       if (ovGrandTotalEl) ovGrandTotalEl.textContent = `₹${grandTotal.toFixed(2)}`;
       if (ovLabelEl) ovLabelEl.innerHTML = addrHtml;
     }
+  }
+  if (typeof syncCartCouponsOnCartChange === 'function') {
+    syncCartCouponsOnCartChange();
   }
 }
 
@@ -4438,6 +4496,26 @@ async function populateCheckoutAddresses() {
   updateCheckoutAddressPreview();
 }
 
+let cachedServiceablePincodes = [];
+
+function resolveFrontendAddressPincode(addr) {
+  if (!addr) return '';
+  const direct = String(addr.postalCode || addr.pincode || '').trim();
+  const m1 = direct.match(/\b(\d{5,6})\b/);
+  if (m1) return m1[1];
+  const combined = `${addr.line1 || ''} ${addr.line2 || ''} ${addr.city || ''}`;
+  const m2 = combined.match(/\b(\d{5,6})\b/);
+  return m2 ? m2[1] : '';
+}
+
+async function fetchCustomerServiceablePincodes() {
+  try {
+    const res = await apiFetch('/api/customer/serviceable-pincodes');
+    if (Array.isArray(res.pincodes)) cachedServiceablePincodes = res.pincodes;
+  } catch (_) {}
+  return cachedServiceablePincodes;
+}
+
 function updateCheckoutAddressPreview() {
   const select = document.getElementById('checkout-address-select');
   const preview = document.getElementById('checkout-address-preview');
@@ -4453,23 +4531,28 @@ function updateCheckoutAddressPreview() {
     return;
   }
 
+  const custPin = resolveFrontendAddressPincode(addr);
+  const hasPinList = Array.isArray(cachedServiceablePincodes) && cachedServiceablePincodes.length > 0;
+  const isPinServiceable = !hasPinList || (custPin && cachedServiceablePincodes.includes(custPin));
+
   preview.innerHTML = `
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.2rem;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.2rem; flex-wrap:wrap; gap:0.35rem;">
       <strong>📍 ${escapeHtml(addr.label || 'Home')}</strong>
-      ${addr.isDefault ? '<span class="badge badge-delivered" style="padding:2px 7px; font-size:0.72rem;">✓ Default Address</span>' : '<span style="font-size:0.72rem; color:var(--muted);">Alternate Address</span>'}
+      <div style="display:flex; gap:0.35rem; align-items:center;">
+        ${isPinServiceable
+          ? `<span class="badge badge-approved" style="padding:2px 7px; font-size:0.7rem;">✓ Serviceable (${escapeHtml(custPin || 'OK')})</span>`
+          : `<span class="badge badge-blocked" style="padding:2px 7px; font-size:0.7rem;">✕ Out of Serviceable Range (${escapeHtml(custPin || 'No Pincode')})</span>`}
+        ${addr.isDefault ? '<span class="badge badge-delivered" style="padding:2px 7px; font-size:0.72rem;">✓ Default Address</span>' : '<span style="font-size:0.72rem; color:var(--muted);">Alternate Address</span>'}
+      </div>
     </div>
     <div style="color:var(--ink);">${escapeHtml(addr.line1)}${addr.line2 ? ', ' + escapeHtml(addr.line2) : ''}, ${escapeHtml(addr.city)}, ${escapeHtml(addr.state || '')} - <strong>${escapeHtml(addr.postalCode || '')}</strong></div>
     <div style="margin-top:0.2rem; font-size:0.78rem; color:var(--muted);">📞 Delivery Contact: <strong>${escapeHtml(addr.phone || user.phone || 'N/A')}</strong></div>
+    ${!isPinServiceable ? `<div style="margin-top:0.4rem; padding:0.4rem 0.6rem; border-radius:6px; background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; font-size:0.78rem; font-weight:600;">⚠️ Your area (Pincode: ${escapeHtml(custPin || 'N/A')}) is out of serviceable range. Active delivery pincodes: ${escapeHtml(cachedServiceablePincodes.join(', '))}</div>` : ''}
   `;
 
   if (defaultPrompt && makeDefaultCb) {
-    if (addr.isDefault) {
-      defaultPrompt.style.display = 'none';
-      makeDefaultCb.checked = false;
-    } else {
-      defaultPrompt.style.display = 'block';
-      makeDefaultCb.checked = false;
-    }
+    defaultPrompt.style.display = addr.isDefault ? 'none' : 'block';
+    makeDefaultCb.checked = false;
   }
 }
 
@@ -4485,13 +4568,11 @@ async function openPaymentGatewayModal() {
     return;
   }
 
-  const subtotal = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
-  const tax = Number((subtotal * 0.05).toFixed(2));
-  const grandTotal = subtotal + tax + 40;
-
-  document.getElementById('gateway-amount').textContent = `₹${grandTotal.toFixed(2)}`;
   document.getElementById('gateway-items-count').textContent = cart.reduce((sum, i) => sum + i.quantity, 0);
-
+  await fetchCustomerAvailableCoupons();
+  await validateAndSyncCartCoupons({ silent: true });
+  updateGatewayBillingSummaryUI();
+  await fetchCustomerServiceablePincodes();
   await populateCheckoutAddresses();
   openModal('payment-gateway-modal');
 }
@@ -4528,7 +4609,9 @@ async function placeOrderAfterPayment(txnId, method, chosenAddr) {
       name: i.name,
       quantity: i.quantity,
       price: i.price,
+      category: i.category || '',
     })),
+    couponCodes: Array.isArray(appliedCouponCodes) ? appliedCouponCodes.slice(0, 2) : [],
     paymentMethod: method,
     paymentTransactionId: txnId,
     addressId: chosenAddr._id,
@@ -4543,7 +4626,10 @@ async function placeOrderAfterPayment(txnId, method, chosenAddr) {
   clearCart();
   closeModal('payment-gateway-modal');
   const storeLabel = isShopOrder ? '🏪 Shop Order' : '🍽️ Restaurant Order';
-  alert(`${storeLabel} Placed Successfully!\nOrder Number: ${orderRes.order.orderNumber}\nDelivering To: ${chosenAddr.label} (${chosenAddr.line1}, ${chosenAddr.city})\nPayment Mode: ${method.toUpperCase()}\nTransaction Ref: ${txnId}`);
+  const discountLine = orderRes.order?.discountAmount > 0
+    ? `\nCoupon Savings: -₹${Number(orderRes.order.discountAmount).toFixed(2)} (${(orderRes.order.couponCodes || []).join(', ')})`
+    : '';
+  alert(`${storeLabel} Placed Successfully!\nOrder Number: ${orderRes.order.orderNumber}${discountLine}\nFinal Paid: ₹${Number(orderRes.order.totalAmount || 0).toFixed(2)}\nDelivering To: ${chosenAddr.label} (${chosenAddr.line1}, ${chosenAddr.city})\nPayment Mode: ${method.toUpperCase()}\nTransaction Ref: ${txnId}`);
 
   switchView('customer-orders');
 }
@@ -4565,6 +4651,14 @@ async function executePaymentAndOrder() {
     return;
   }
 
+  // Enforce Admin Serviceable Pincode Check before initiating payment
+  const activePincodes = await fetchCustomerServiceablePincodes();
+  const custPincode = resolveFrontendAddressPincode(chosenAddr);
+  if (!custPincode || (activePincodes.length > 0 && !activePincodes.includes(custPincode))) {
+    alert(`Cannot place order: Your area${custPincode ? ` (Pincode: ${custPincode})` : ''} is out of serviceable range.\n\nDelivery services are currently available only in pincodes: ${activePincodes.join(', ') || 'None'}.`);
+    return;
+  }
+
   const makeDefaultChecked = document.getElementById('checkout-make-default')?.checked;
   if (makeDefaultChecked && !chosenAddr.isDefault) {
     try {
@@ -4576,9 +4670,16 @@ async function executePaymentAndOrder() {
     }
   }
 
+  if (Array.isArray(appliedCouponCodes) && appliedCouponCodes.length > 0) {
+    const couponCheck = await validateAndSyncCartCoupons({ silent: false });
+    if (!couponCheck.valid) {
+      return;
+    }
+  }
   const subtotal = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
   const tax = Number((subtotal * 0.05).toFixed(2));
-  const totalAmount = subtotal + tax + 40;
+  const discountAmt = typeof getActiveCartDiscountAmount === 'function' ? getActiveCartDiscountAmount(subtotal) : 0;
+  const totalAmount = Number(Math.max(1, subtotal + tax + 40 - discountAmt).toFixed(2));
 
   // 1. Razorpay Payment Gateway Flow
   if (selectedPaymentMethod === 'razorpay') {
@@ -6423,6 +6524,11 @@ async function viewOrderBill(orderId) {
             <span>Packing & Delivery Fee:</span>
             <span>₹${Number(bill.deliveryFee).toFixed(2)}</span>
           </div>
+          ${Number(bill.discountAmount || 0) > 0 ? `
+          <div style="display:flex; justify-content:space-between; color:#15803d; font-weight:700;">
+            <span>Coupon Discount ${Array.isArray(bill.couponCodes) && bill.couponCodes.length ? '(' + bill.couponCodes.map((c) => escapeHtml(c)).join(' + ') + ')' : ''}:</span>
+            <span>-₹${Number(bill.discountAmount).toFixed(2)}</span>
+          </div>` : ''}
           <div class="bill-total-row">
             <span>NET PAYABLE:</span>
             <span>₹${Number(bill.totalAmount).toFixed(2)}</span>
@@ -7387,7 +7493,104 @@ async function fetchAdminUsers(role, searchQuery = '', page = 1, force = false) 
   }
 }
 
+let adminServiceablePincodes = [];
+
+function resolveFrontendPartnerPincode(u) {
+  if (!u) return '';
+  const direct = String(u.pincode || '').trim();
+  const m1 = direct.match(/\b(\d{5,6})\b/);
+  if (m1) return m1[1];
+  const combined = `${u.shopAddress || ''} ${u.restaurantAddress || ''} ${u.digipin || ''}`;
+  const m2 = combined.match(/\b(\d{5,6})\b/);
+  return m2 ? m2[1] : '';
+}
+
+async function fetchAdminServiceablePincodes() {
+  if (role !== 'admin' && role !== 'subadmin') return adminServiceablePincodes;
+  try {
+    const res = await apiFetch('/api/admin/serviceable-pincodes');
+    if (Array.isArray(res.pincodes)) {
+      adminServiceablePincodes = res.pincodes;
+      cachedServiceablePincodes = res.pincodes;
+    }
+    renderAdminServiceablePincodesBars();
+  } catch (err) {
+    console.warn('Could not load serviceable pincodes:', err);
+  }
+  return adminServiceablePincodes;
+}
+
+function renderAdminServiceablePincodesBars() {
+  const bars = document.querySelectorAll('.admin-serviceable-pincodes-bar');
+  if (!bars.length) return;
+  const pillsHtml = adminServiceablePincodes.length
+    ? adminServiceablePincodes.map((pin) => `
+        <span style="display:inline-flex; align-items:center; gap:0.35rem; background:#dbeafe; color:#1e3a8a; border:1px solid #93c5fd; padding:0.22rem 0.6rem; border-radius:999px; font-size:0.78rem; font-weight:700; font-family:monospace;">
+          📍 ${escapeHtml(pin)}
+          <button type="button" onclick="removeAdminServiceablePincode('${escapeHtml(pin)}')" title="Remove pincode ${escapeHtml(pin)}" style="border:none; background:rgba(30,58,138,0.12); color:#1e3a8a; border-radius:50%; width:17px; height:17px; font-size:0.7rem; line-height:1; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">✕</button>
+        </span>
+      `).join('')
+    : '<span style="color:#dc2626; font-size:0.8rem; font-weight:600;">⚠️ No serviceable pincodes configured — no restaurants/shops or customer orders will be serviceable!</span>';
+
+  bars.forEach((bar, idx) => {
+    const inputId = `admin-new-pincode-input-${idx}`;
+    bar.innerHTML = `
+      <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:10px; padding:0.75rem 1rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem;">
+        <div style="flex:1 1 320px;">
+          <div style="font-size:0.78rem; font-weight:700; color:#0f172a; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:0.35rem;">
+            🗺️ Admin Serviceable Delivery Pincodes (${adminServiceablePincodes.length} Active)
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:0.4rem; align-items:center;">${pillsHtml}</div>
+          <div style="font-size:0.73rem; color:var(--muted); margin-top:0.3rem;">Only restaurants/shops in these pincodes can be approved, and only customers in these pincodes can place orders.</div>
+        </div>
+        <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
+          <input id="${inputId}" type="text" placeholder="Add pincode (e.g. 560034)" maxlength="30" style="padding:0.38rem 0.65rem; border:1px solid #94a3b8; border-radius:6px; font-size:0.82rem; width:190px; font-family:monospace; background:#fff;" onkeydown="if(event.key==='Enter'){event.preventDefault(); addAdminServiceablePincode('${inputId}');}" />
+          <button type="button" class="btn btn-primary btn-sm" onclick="addAdminServiceablePincode('${inputId}')">+ Add Pincode</button>
+        </div>
+      </div>
+    `;
+  });
+}
+
+async function addAdminServiceablePincode(inputId) {
+  const input = document.getElementById(inputId);
+  const raw = input ? input.value.trim() : prompt('Enter 5 or 6 digit serviceable pincode(s):') || '';
+  if (!raw) return;
+  try {
+    const res = await apiFetch('/api/admin/serviceable-pincodes', {
+      method: 'POST',
+      body: JSON.stringify({ pincode: raw }),
+    });
+    if (input) input.value = '';
+    adminServiceablePincodes = res.pincodes || adminServiceablePincodes;
+    cachedServiceablePincodes = adminServiceablePincodes;
+    renderAdminServiceablePincodesBars();
+    refreshAdminViews();
+  } catch (err) {
+    alert(err.message || 'Unable to add pincode');
+  }
+}
+
+async function removeAdminServiceablePincode(pin) {
+  if (!confirm(`Remove pincode "${pin}" from the serviceable delivery range?\n\nNote: Any currently approved restaurants or shops in pincode ${pin} will automatically be marked unapproved until this pincode is re-enabled.`)) return;
+  try {
+    const res = await apiFetch(`/api/admin/serviceable-pincodes/${encodeURIComponent(pin)}`, {
+      method: 'DELETE',
+    });
+    adminServiceablePincodes = res.pincodes || [];
+    cachedServiceablePincodes = adminServiceablePincodes;
+    renderAdminServiceablePincodesBars();
+    if (res.message) alert(res.message);
+    refreshAdminViews();
+  } catch (err) {
+    alert(err.message || 'Unable to remove pincode');
+  }
+}
+window.addAdminServiceablePincode = addAdminServiceablePincode;
+window.removeAdminServiceablePincode = removeAdminServiceablePincode;
+
 function fetchAdminShops(page, force = false) {
+  fetchAdminServiceablePincodes();
   const query = document.getElementById('admin-shops-search')?.value?.trim() || '';
   const targetPage = page || adminUsersPagination.shop.currentPage || 1;
   return fetchAdminUsers('shop', query, targetPage, force);
@@ -7395,6 +7598,7 @@ function fetchAdminShops(page, force = false) {
 window.fetchAdminShops = fetchAdminShops;
 
 function fetchAdminRestaurants(page, force = false) {
+  fetchAdminServiceablePincodes();
   const query = document.getElementById('admin-restaurants-search')?.value?.trim() || '';
   const targetPage = page || adminUsersPagination.restaurant.currentPage || 1;
   return fetchAdminUsers('restaurant', query, targetPage, force);
@@ -7433,11 +7637,7 @@ function handleAdminSearchInput(role) {
   const input = document.getElementById(`${prefix}-search`);
   const clearBtn = document.getElementById(`${prefix}-clear-btn`);
   const query = input?.value?.trim() || '';
-
-  if (clearBtn) {
-    clearBtn.style.display = query ? 'inline-flex' : 'none';
-  }
-
+  if (clearBtn) clearBtn.style.display = query ? 'inline-flex' : 'none';
   clearTimeout(adminSearchDebounceTimer);
   adminSearchDebounceTimer = setTimeout(() => {
     if (adminUsersPagination[role]) adminUsersPagination[role].currentPage = 1;
@@ -7449,11 +7649,7 @@ function renderAdminUserPaginationControls(targetRole, pagination) {
   if (!pagination || pagination.totalPages <= 1) {
     if (pagination && pagination.totalItems > 0) {
       const roleLabel = targetRole === 'deliveryPartner' ? 'riders' : targetRole === 'restaurant' ? 'restaurants' : targetRole === 'shop' ? 'shops' : 'customers';
-      return `
-        <div style="margin-top:0.75rem; padding-top:0.6rem; border-top:1px solid var(--line); font-size:0.83rem; color:var(--muted); text-align:right;">
-          Total: <strong>${pagination.totalItems}</strong> ${roleLabel} (All on 1 page)
-        </div>
-      `;
+      return `<div style="margin-top:0.75rem; padding-top:0.6rem; border-top:1px solid var(--line); font-size:0.83rem; color:var(--muted); text-align:right;">Total: <strong>${pagination.totalItems}</strong> ${roleLabel} (All on 1 page)</div>`;
     }
     return '';
   }
@@ -7461,40 +7657,21 @@ function renderAdminUserPaginationControls(targetRole, pagination) {
   const startItem = pagination.totalItems === 0 ? 0 : (pagination.currentPage - 1) * pagination.pageSize + 1;
   const endItem = Math.min(pagination.currentPage * pagination.pageSize, pagination.totalItems);
   const roleLabel = targetRole === 'deliveryPartner' ? 'riders' : targetRole === 'restaurant' ? 'restaurants' : targetRole === 'shop' ? 'shops' : 'customers';
-
   const totalPages = pagination.totalPages;
   const current = pagination.currentPage;
   const pagesToShow = [];
 
   for (let i = 1; i <= totalPages; i++) {
-    if (i === 1 || i === totalPages || (i >= current - 1 && i <= current + 1)) {
-      pagesToShow.push(i);
-    } else if (pagesToShow[pagesToShow.length - 1] !== '...') {
-      pagesToShow.push('...');
-    }
+    if (i === 1 || i === totalPages || (i >= current - 1 && i <= current + 1)) pagesToShow.push(i);
+    else if (pagesToShow[pagesToShow.length - 1] !== '...') pagesToShow.push('...');
   }
 
   return `
     <div style="display:flex; justify-content:space-between; align-items:center; margin-top:1.25rem; padding-top:0.85rem; border-top:1px solid var(--line); flex-wrap:wrap; gap:0.6rem;">
-      <div style="font-size:0.85rem; color:var(--muted);">
-        Showing <strong>${startItem}–${endItem}</strong> of <strong>${pagination.totalItems}</strong> ${roleLabel} (Page <strong>${current}</strong> of <strong>${totalPages}</strong>)
-      </div>
+      <div style="font-size:0.85rem; color:var(--muted);">Showing <strong>${startItem}–${endItem}</strong> of <strong>${pagination.totalItems}</strong> ${roleLabel} (Page <strong>${current}</strong> of <strong>${totalPages}</strong>)</div>
       <div style="display:flex; align-items:center; gap:0.35rem; flex-wrap:wrap;">
         <button type="button" class="btn btn-outline btn-sm" ${!pagination.hasPrevPage ? 'disabled' : ''} onclick="changeAdminUserPage('${targetRole}', ${current - 1})">◀ Prev</button>
-        ${pagesToShow.map((p) => {
-          if (p === '...') return '<span style="color:var(--muted); padding:0 0.25rem;">…</span>';
-          const isActive = p === current;
-          return `
-            <button
-              type="button"
-              class="btn ${isActive ? 'btn-primary' : 'btn-outline'} btn-sm"
-              style="padding:0.25rem 0.55rem; font-size:0.8rem; font-weight:${isActive ? '700' : '500'};"
-              onclick="changeAdminUserPage('${targetRole}', ${p})"
-            >
-              ${p}
-            </button>
-          `;
-        }).join('')}
+        ${pagesToShow.map((p) => p === '...' ? '<span style="color:var(--muted); padding:0 0.25rem;">…</span>' : `<button type="button" class="btn ${p === current ? 'btn-primary' : 'btn-outline'} btn-sm" style="padding:0.25rem 0.55rem; font-size:0.8rem; font-weight:${p === current ? '700' : '500'};" onclick="changeAdminUserPage('${targetRole}', ${p})">${p}</button>`).join('')}
         <button type="button" class="btn btn-outline btn-sm" ${!pagination.hasNextPage ? 'disabled' : ''} onclick="changeAdminUserPage('${targetRole}', ${current + 1})">Next ▶</button>
       </div>
     </div>
@@ -7505,12 +7682,7 @@ function renderPartnerManagementTable(usersList, targetRole, searchQuery = '', p
   const roleLabel = targetRole === 'deliveryPartner' ? 'delivery partners' : targetRole === 'shop' ? 'shops' : targetRole + 's';
   if (!usersList.length) {
     if (searchQuery) {
-      return `
-        <div style="padding:2rem 1rem; text-align:center; color:var(--muted); background:#fdfdfd; border:1px dashed var(--line); border-radius:8px;">
-          <p style="font-size:1rem; margin-bottom:0.6rem;">🔍 No ${roleLabel} found matching "<strong>${escapeHtml(searchQuery)}</strong>"</p>
-          <button class="btn btn-outline btn-sm" onclick="clearAdminSearch('${targetRole}')">Clear Search</button>
-        </div>
-      `;
+      return `<div style="padding:2rem 1rem; text-align:center; color:var(--muted); background:#fdfdfd; border:1px dashed var(--line); border-radius:8px;"><p style="font-size:1rem; margin-bottom:0.6rem;">🔍 No ${roleLabel} found matching "<strong>${escapeHtml(searchQuery)}</strong>"</p><button class="btn btn-outline btn-sm" onclick="clearAdminSearch('${targetRole}')">Clear Search</button></div>`;
     }
     return `<p style="color:var(--muted); padding:1rem 0;">No accounts registered in this category.</p>`;
   }
@@ -7522,8 +7694,8 @@ function renderPartnerManagementTable(usersList, targetRole, searchQuery = '', p
           <tr>
             <th>Name / Business</th>
             <th>Contact (Mobile & Email)</th>
-            ${targetRole === 'restaurant' ? '<th>Address & Cuisine</th>' : ''}
-            ${targetRole === 'shop' ? '<th>Address & Category</th>' : ''}
+            ${targetRole === 'restaurant' ? '<th>Address, Pincode & Cuisine</th>' : ''}
+            ${targetRole === 'shop' ? '<th>Address, Pincode & Category</th>' : ''}
             ${targetRole === 'deliveryPartner' ? '<th>Vehicle</th>' : ''}
             <th>Approval</th>
             <th>Account Status</th>
@@ -7534,25 +7706,22 @@ function renderPartnerManagementTable(usersList, targetRole, searchQuery = '', p
           ${usersList.map((u) => {
             const isPending = u.isApproved === false;
             const isBlocked = Boolean(u.isBlocked);
+            const partnerPin = resolveFrontendPartnerPincode(u);
+            const pinServiceable = !adminServiceablePincodes.length || (partnerPin && adminServiceablePincodes.includes(partnerPin));
+            const pinBadgeHtml = (targetRole === 'restaurant' || targetRole === 'shop')
+              ? `<span class="badge ${pinServiceable ? 'badge-approved' : 'badge-blocked'}" style="font-size:0.7rem; font-family:monospace;">📮 Pincode: ${escapeHtml(partnerPin || 'Missing')} ${pinServiceable ? '✓' : '(Not Serviceable)'}</span>`
+              : '';
 
             const cleanName = formatCleanName(u.name || u.displayName);
             let nameCellHtml = `<strong>${escapeHtml(cleanName)}</strong>`;
-            if (targetRole === 'restaurant') {
-              const rId = u.restaurantId || String(u.id || u._id);
+            if (targetRole === 'restaurant' || targetRole === 'shop') {
+              const codeId = targetRole === 'shop' ? (u.shopId || String(u.id || u._id)) : (u.restaurantId || String(u.id || u._id));
               nameCellHtml = `
                 <div><strong style="font-size:0.95rem;">${escapeHtml(cleanName)}</strong></div>
                 <div style="margin-top:3px; display:flex; gap:0.35rem; align-items:center; flex-wrap:wrap;">
                   <span class="badge" style="background:#e0f2fe; color:#0369a1; font-weight:700; font-size:0.75rem;">📍 DIGIPIN: ${escapeHtml(u.digipin || 'Not Set')}</span>
-                  <span class="badge" style="background:#f1f5f9; color:#475569; font-size:0.72rem; font-family:monospace;" title="MongoDB ID: ${escapeHtml(String(u.id || u._id))}">ID: ${escapeHtml(rId)}</span>
-                </div>
-              `;
-            } else if (targetRole === 'shop') {
-              const sId = u.shopId || String(u.id || u._id);
-              nameCellHtml = `
-                <div><strong style="font-size:0.95rem;">${escapeHtml(cleanName)}</strong></div>
-                <div style="margin-top:3px; display:flex; gap:0.35rem; align-items:center; flex-wrap:wrap;">
-                  <span class="badge" style="background:#e0f2fe; color:#0369a1; font-weight:700; font-size:0.75rem;">📍 DIGIPIN: ${escapeHtml(u.digipin || 'Not Set')}</span>
-                  <span class="badge" style="background:#f1f5f9; color:#475569; font-size:0.72rem; font-family:monospace;" title="MongoDB ID: ${escapeHtml(String(u.id || u._id))}">ID: ${escapeHtml(sId)}</span>
+                  ${pinBadgeHtml}
+                  <span class="badge" style="background:#f1f5f9; color:#475569; font-size:0.72rem; font-family:monospace;" title="MongoDB ID: ${escapeHtml(String(u.id || u._id))}">ID: ${escapeHtml(codeId)}</span>
                 </div>
               `;
             } else if (targetRole === 'deliveryPartner') {
@@ -7560,20 +7729,13 @@ function renderPartnerManagementTable(usersList, targetRole, searchQuery = '', p
               nameCellHtml = `
                 <div><strong style="font-size:0.95rem;">${escapeHtml(cleanName)}</strong></div>
                 <div style="margin-top:3px; display:flex; gap:0.35rem; align-items:center; flex-wrap:wrap;">
-                  <span class="badge" style="background:${u.isOnline ? '#f0fdf4' : '#f1f5f9'}; color:${u.isOnline ? '#15803d' : '#64748b'}; font-weight:600; font-size:0.72rem;">
-                    ● ${u.isOnline ? 'GPS Live Online' : 'GPS Offline'} ${u.currentLocation?.lat ? `(${u.currentLocation.lat.toFixed(3)}, ${u.currentLocation.lng.toFixed(3)})` : ''}
-                  </span>
+                  <span class="badge" style="background:${u.isOnline ? '#f0fdf4' : '#f1f5f9'}; color:${u.isOnline ? '#15803d' : '#64748b'}; font-weight:600; font-size:0.72rem;">● ${u.isOnline ? 'GPS Live Online' : 'GPS Offline'} ${u.currentLocation?.lat ? `(${u.currentLocation.lat.toFixed(3)}, ${u.currentLocation.lng.toFixed(3)})` : ''}</span>
                   <span class="badge" style="background:#f1f5f9; color:#475569; font-size:0.72rem; font-family:monospace;" title="MongoDB ID: ${escapeHtml(String(u.id || u._id))}">ID: ${escapeHtml(rdId)}</span>
                 </div>
               `;
             } else if (targetRole === 'customer') {
               const cId = u.customerId || String(u.id || u._id);
-              nameCellHtml = `
-                <div><strong style="font-size:0.95rem;">${escapeHtml(cleanName)}</strong></div>
-                <div style="margin-top:3px; display:flex; gap:0.35rem; align-items:center; flex-wrap:wrap;">
-                  <span class="badge" style="background:#f1f5f9; color:#475569; font-size:0.72rem; font-family:monospace;" title="MongoDB ID: ${escapeHtml(String(u.id || u._id))}">ID: ${escapeHtml(cId)}</span>
-                </div>
-              `;
+              nameCellHtml = `<div><strong style="font-size:0.95rem;">${escapeHtml(cleanName)}</strong></div><div style="margin-top:3px;"><span class="badge" style="background:#f1f5f9; color:#475569; font-size:0.72rem; font-family:monospace;">ID: ${escapeHtml(cId)}</span></div>`;
             }
 
             return `
@@ -7590,46 +7752,27 @@ function renderPartnerManagementTable(usersList, targetRole, searchQuery = '', p
                 ${targetRole === 'shop' ? `<td><small>${escapeHtml(u.shopAddress || u.restaurantAddress || 'Bengaluru')}</small><br><span class="badge badge-ready">${escapeHtml(u.category || 'Retail & Groceries')}</span></td>` : ''}
                 ${targetRole === 'deliveryPartner' ? `<td><span class="badge badge-accepted">${escapeHtml(u.deliveryVehicle || 'Bike')}</span></td>` : ''}
                 <td>
-                  <span class="badge ${isPending ? 'badge-pending' : 'badge-approved'}">
-                    ${isPending ? 'Pending Approval' : 'Approved'}
-                  </span>
+                  <span class="badge ${isPending ? 'badge-pending' : 'badge-approved'}">${isPending ? 'Pending Approval' : 'Approved'}</span>
                   ${targetRole !== 'customer' ? (() => {
                     const bd = u.bankDetails || {};
                     const holder = String(bd.accountHolderName || '').trim().toLowerCase();
                     const panHolder = String(bd.panHolderName || '').trim().toLowerCase();
                     const namesMatch = Boolean(holder && panHolder && holder === panHolder);
-                    if (bd.isApproved && bd.isLocked) {
-                      return '<div style="margin-top:4px;"><span class="badge badge-approved" style="font-size:0.68rem;">🔒 Bank &amp; PAN Verified</span></div>';
-                    } else if (bd.isSubmitted || (bd.accountNumber && bd.ifscCode && bd.panNumber)) {
-                      return `<div style="margin-top:4px;"><span class="badge ${namesMatch ? 'badge-ready' : 'badge-blocked'}" style="font-size:0.68rem;">${namesMatch ? '🪪 Bank Submitted (Match)' : '⚠️ PAN Name Mismatch'}</span></div>`;
-                    }
+                    if (bd.isApproved && bd.isLocked) return '<div style="margin-top:4px;"><span class="badge badge-approved" style="font-size:0.68rem;">🔒 Bank &amp; PAN Verified</span></div>';
+                    if (bd.isSubmitted || (bd.accountNumber && bd.ifscCode && bd.panNumber)) return `<div style="margin-top:4px;"><span class="badge ${namesMatch ? 'badge-ready' : 'badge-blocked'}" style="font-size:0.68rem;">${namesMatch ? '🪪 Bank Submitted (Match)' : '⚠️ PAN Name Mismatch'}</span></div>`;
                     return '<div style="margin-top:4px;"><span class="badge badge-pending" style="font-size:0.68rem;">⚠️ Bank KYC Pending</span></div>';
                   })() : ''}
                 </td>
-                <td>
-                  <span class="badge ${isBlocked ? 'badge-blocked' : 'badge-delivered'}">
-                    ${isBlocked ? 'Blocked' : 'Active'}
-                  </span>
-                </td>
+                <td><span class="badge ${isBlocked ? 'badge-blocked' : 'badge-delivered'}">${isBlocked ? 'Blocked' : 'Active'}</span></td>
                 <td>
                   <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
-                    ${role === 'admin' ? `
-                      <button type="button" class="btn btn-outline btn-sm" style="background:#fef3c7; border-color:#facc15; color:#92400e; font-weight:600;" onclick="openAdminCreditTransferModal('${escapeHtml(targetRole === 'customer' ? u.customerId || String(u.id || u._id) : targetRole === 'deliveryPartner' ? u.riderId || String(u.id || u._id) : targetRole === 'shop' ? u.shopId || String(u.id || u._id) : u.restaurantId || String(u.id || u._id))}')">💳 Add Credits</button>
-                    ` : ''}
-                    ${targetRole !== 'customer' ? `
-                      <button type="button" class="btn btn-outline btn-sm" style="background:#eff6ff; border-color:#93c5fd; color:#1d4ed8; font-weight:600;" onclick="openAdminBankModalByUserId('${u.id || u._id}')">🏦 Bank / KYC</button>
-                    ` : ''}
-                    ${targetRole === 'deliveryPartner' ? `
-                      <button class="btn btn-outline btn-sm" style="background:#f0fdf4; border-color:#86efac; color:#15803d; font-weight:600;" onclick="openAdminFleetTrackerModal()">📍 Live Radar</button>
-                    ` : ''}
-                    ${isPending ? `
-                      <button class="btn btn-success btn-sm" onclick="approveUser('${u.id || u._id}')">✓ Approve</button>
-                      <button class="btn btn-danger btn-sm" onclick="rejectUser('${u.id || u._id}')">✕ Reject</button>
-                    ` : ''}
-                    <button class="btn ${isBlocked ? 'btn-success' : 'btn-danger'} btn-sm" onclick="toggleBlockUser('${u.id || u._id}', ${isBlocked})">
-                      ${isBlocked ? 'Unblock' : 'Block'}
-                    </button>
-                    <button class="btn btn-outline btn-sm" onclick="editAdminUser('${u.id || u._id}', '${escapeHtml(cleanName)}', '${escapeHtml(u.email || '')}', '${escapeHtml(u.phone || '')}', '${u.role}', '${escapeHtml(u.shopAddress || u.restaurantAddress || '')}', '${escapeHtml(u.category || u.cuisine || '')}', '${escapeHtml(u.deliveryVehicle || '')}', '${escapeHtml(u.digipin || '')}', '${u.shopLocation?.lat || u.restaurantLocation?.lat || ''}', '${u.shopLocation?.lng || u.restaurantLocation?.lng || ''}')">Edit</button>
+                    ${role === 'admin' ? `<button type="button" class="btn btn-outline btn-sm" style="background:#fef3c7; border-color:#facc15; color:#92400e; font-weight:600;" onclick="openAdminCreditTransferModal('${escapeHtml(targetRole === 'customer' ? u.customerId || String(u.id || u._id) : targetRole === 'deliveryPartner' ? u.riderId || String(u.id || u._id) : targetRole === 'shop' ? u.shopId || String(u.id || u._id) : u.restaurantId || String(u.id || u._id))}')">💳 Add Credits</button>` : ''}
+                    ${targetRole !== 'customer' ? `<button type="button" class="btn btn-outline btn-sm" style="background:#eff6ff; border-color:#93c5fd; color:#1d4ed8; font-weight:600;" onclick="openAdminBankModalByUserId('${u.id || u._id}')">🏦 Bank / KYC</button>` : ''}
+                    ${targetRole === 'deliveryPartner' ? `<button class="btn btn-outline btn-sm" style="background:#f0fdf4; border-color:#86efac; color:#15803d; font-weight:600;" onclick="openAdminFleetTrackerModal()">📍 Live Radar</button>` : ''}
+                    ${isPending ? `<button class="btn btn-success btn-sm" onclick="approveUser('${u.id || u._id}')">✓ Approve</button><button class="btn btn-danger btn-sm" onclick="rejectUser('${u.id || u._id}')">✕ Reject</button>` : ''}
+                    <button class="btn ${isBlocked ? 'btn-success' : 'btn-danger'} btn-sm" onclick="toggleBlockUser('${u.id || u._id}', ${isBlocked})">${isBlocked ? 'Unblock' : 'Block'}</button>
+                    <button class="btn btn-outline btn-sm" onclick="editAdminUser('${u.id || u._id}', '${escapeHtml(cleanName)}', '${escapeHtml(u.email || '')}', '${escapeHtml(u.phone || '')}', '${u.role}', '${escapeHtml(u.shopAddress || u.restaurantAddress || '')}', '${escapeHtml(u.category || u.cuisine || '')}', '${escapeHtml(u.deliveryVehicle || '')}', '${escapeHtml(u.digipin || '')}', '${u.shopLocation?.lat || u.restaurantLocation?.lat || ''}', '${u.shopLocation?.lng || u.restaurantLocation?.lng || ''}', '${escapeHtml(partnerPin)}')">Edit</button>
+                    <button type="button" class="btn btn-outline btn-sm" style="background:#fff7ed; border-color:#fdba74; color:#c2410c; font-weight:600;" onclick="openAdminResetPasswordModal('${u.id || u._id}', '${escapeHtml(cleanName)}', '${targetRole}', '${escapeHtml(u.dob || '')}', '${escapeHtml(u.email || u.phone || '')}')" title="Reset password to Tomato<DDMMYYYY> or custom">🔑 Reset Password</button>
                     <button class="btn btn-danger btn-sm" onclick="deleteAdminUser('${u.id || u._id}', '${escapeHtml(cleanName)}', '${targetRole}')">🗑 Delete</button>
                   </div>
                 </td>
@@ -7650,6 +7793,10 @@ async function approveUser(userId) {
     refreshAdminViews();
   } catch (e) {
     const msg = e.message || 'Approval failed.';
+    if (msg.toLowerCase().includes('pincode') || msg.toLowerCase().includes('serviceable')) {
+      alert(`❌ Approval Blocked — Pincode Out of Serviceable Range:\n\n${msg}`);
+      return;
+    }
     if (confirm(`${msg}\n\nWould you like to open the Bank / PAN KYC verification modal for this partner now?`)) {
       openAdminBankModalByUserId(userId);
     }
@@ -7868,6 +8015,8 @@ function openAdminCreateUserModal(defaultRole = 'restaurant') {
   document.getElementById('adm-password').value = '';
   document.getElementById('adm-password-group').style.display = 'block';
   document.getElementById('adm-restaurant-address').value = '';
+  const rPin = document.getElementById('adm-restaurant-pincode');
+  if (rPin) rPin.value = '';
   document.getElementById('adm-cuisine').value = '';
   document.getElementById('adm-vehicle').value = '';
   const dPin = document.getElementById('adm-restaurant-digipin');
@@ -7880,15 +8029,17 @@ function openAdminCreateUserModal(defaultRole = 'restaurant') {
   openModal('admin-user-modal');
 }
 
-function editAdminUser(id, name, email, phone, uRole, address, cuisine, vehicle, digipin = '', lat = '', lng = '') {
+function editAdminUser(id, name, email, phone, uRole, address, cuisine, vehicle, digipin = '', lat = '', lng = '', pincode = '') {
   document.getElementById('admin-user-modal-title').textContent = 'Edit User / Partner';
   document.getElementById('adm-user-id').value = id;
   document.getElementById('adm-role').value = uRole;
   document.getElementById('adm-name').value = formatCleanName(name);
   document.getElementById('adm-email').value = email;
   document.getElementById('adm-phone').value = phone;
-  document.getElementById('adm-password-group').style.display = 'none'; // Password optional on edit
+  document.getElementById('adm-password-group').style.display = 'none';
   document.getElementById('adm-restaurant-address').value = address;
+  const rPin = document.getElementById('adm-restaurant-pincode');
+  if (rPin) rPin.value = pincode || extractPincodeFromStr(address) || '';
   document.getElementById('adm-cuisine').value = cuisine;
   document.getElementById('adm-vehicle').value = vehicle;
   const dPin = document.getElementById('adm-restaurant-digipin');
@@ -7909,6 +8060,8 @@ function toggleAdminUserFields() {
     restFields.style.display = (r === 'restaurant' || r === 'shop') ? 'block' : 'none';
     const addrLabel = document.getElementById('adm-rest-address-label');
     if (addrLabel) addrLabel.innerHTML = (r === 'shop' ? 'Shop Address' : 'Restaurant Address') + ' <span style="color:var(--tomato);">*</span>';
+    const pinLabel = document.getElementById('adm-rest-pincode-label');
+    if (pinLabel) pinLabel.innerHTML = (r === 'shop' ? 'Shop Pincode (Serviceable Area)' : 'Restaurant Pincode (Serviceable Area)') + ' <span style="color:var(--tomato);">*</span>';
     const digipinLabel = document.getElementById('adm-rest-digipin-label');
     if (digipinLabel) digipinLabel.innerHTML = (r === 'shop' ? 'Shop DIGIPIN' : 'Restaurant DIGIPIN') + ' <span style="color:var(--tomato);">*</span>';
     const catLabel = document.getElementById('adm-cuisine-label');
@@ -7924,6 +8077,7 @@ async function saveAdminUser(e) {
   const digipinVal = document.getElementById('adm-restaurant-digipin')?.value?.trim();
   const latVal = document.getElementById('adm-restaurant-lat')?.value;
   const lngVal = document.getElementById('adm-restaurant-lng')?.value;
+  const pincodeVal = document.getElementById('adm-restaurant-pincode')?.value?.trim();
 
   if ((targetRole === 'restaurant' || targetRole === 'shop') && !digipinVal && (!latVal || !lngVal)) {
     alert('Location requirement: Please provide either a valid DIGIPIN or click "Detect Device GPS Pin" to set pickup coordinates.');
@@ -7938,6 +8092,7 @@ async function saveAdminUser(e) {
     password: document.getElementById('adm-password').value,
     restaurantAddress: document.getElementById('adm-restaurant-address').value.trim(),
     shopAddress: document.getElementById('adm-restaurant-address').value.trim(),
+    pincode: pincodeVal || undefined,
     cuisine: document.getElementById('adm-cuisine').value.trim(),
     category: document.getElementById('adm-cuisine').value.trim(),
     deliveryVehicle: document.getElementById('adm-vehicle').value.trim(),
@@ -8129,6 +8284,7 @@ async function fetchAdminSubAdmins(force = false) {
                   </td>
                   <td style="text-align:right; white-space:nowrap;">
                     <button class="btn btn-outline btn-sm" onclick="openEditSubAdminModal('${s._id}')" title="Configure permissions">⚙️ Permissions</button>
+                    <button type="button" class="btn btn-outline btn-sm" style="background:#fff7ed; border-color:#fdba74; color:#c2410c; font-weight:600;" onclick="openAdminResetPasswordModal('${s._id}', '${escapeHtml(formatCleanName(s.name || s.displayName || 'Sub-Admin'))}', 'subadmin', '${escapeHtml(s.dob || '')}', '${escapeHtml(s.email || s.phone || '')}')" title="Reset password to Tomato<DDMMYYYY> or custom">🔑 Reset Password</button>
                     <button class="btn btn-outline btn-sm" style="${isBlocked ? 'color:var(--green); border-color:var(--green);' : 'color:var(--tomato); border-color:var(--tomato);'}" onclick="toggleSubAdminStatus('${s._id}', ${isBlocked})">
                       ${isBlocked ? '✓ Unblock' : '🚫 Block'}
                     </button>
@@ -9194,13 +9350,13 @@ function loadSupportPanel() {
     orderRefText = 'Related Kitchen Order / Settlement ID (Optional)';
     orderRefPlaceholder = 'e.g. ORD-5501 or BATCH-99';
     categories = [
-      'Kitchen Order Delay / Prep Issues',
-      'Rider Pickup Coordination Delay',
-      'Menu Item, Pricing & Stock Availability',
-      'Payout, Commission & Bank Settlements',
-      'Operating Hours & Outlet Online Status',
-      'Order Cancellation & Customer Disputes',
-      'Merchant Technical / Dashboard Support'
+    'Kitchen Order Delay / Prep Issues',
+    'Rider Pickup Coordination Delay',
+    'Menu Item, Pricing & Stock Availability',
+    'Payout, Commission & Bank Settlements',
+    'Operating Hours & Outlet Online Status',
+    'Order Cancellation & Customer Disputes',
+    'Merchant Technical / Dashboard Support'
     ];
   } else if (role === 'shop') {
     badgeText = 'Shop Partner Help';
@@ -9210,13 +9366,13 @@ function loadSupportPanel() {
     orderRefText = 'Related Shop Order ID / Item SKU (Optional)';
     orderRefPlaceholder = 'e.g. ORD-8810 or SKU-201';
     categories = [
-      'Shop Order Packing & Dispatch Issue',
-      'Rider Pickup Coordination Delay',
-      'Catalog, Inventory & Stock Sync Issue',
-      'Weekly Payouts & Settlement Query',
-      'Store Timings & Customer Inquiries',
-      'Barcode / Scanner & System Query',
-      'Retailer Technical Support'
+    'Shop Order Packing & Dispatch Issue',
+    'Rider Pickup Coordination Delay',
+    'Catalog, Inventory & Stock Sync Issue',
+    'Weekly Payouts & Settlement Query',
+    'Store Timings & Customer Inquiries',
+    'Barcode / Scanner & System Query',
+    'Retailer Technical Support'
     ];
   } else if (role === 'deliveryPartner' || role === 'rider') {
     badgeText = 'Rider Delivery Help';
@@ -9226,12 +9382,12 @@ function loadSupportPanel() {
     orderRefText = 'Related Delivery Trip ID (Optional)';
     orderRefPlaceholder = 'e.g. TRIP-3304';
     categories = [
-      'Delivery Address Navigation Issue',
-      'Customer Unreachable / Phone Switched Off',
-      'Restaurant / Shop Pickup Delay',
-      'Trip Earnings & Wallet Payout Query',
-      'Accident / Vehicle Breakdown / Emergency',
-      'Rider App Technical Issue'
+    'Delivery Address Navigation Issue',
+    'Customer Unreachable / Phone Switched Off',
+    'Restaurant / Shop Pickup Delay',
+    'Trip Earnings & Wallet Payout Query',
+    'Accident / Vehicle Breakdown / Emergency',
+    'Rider App Technical Issue'
     ];
   }
 
@@ -9252,8 +9408,8 @@ function loadSupportPanel() {
 
   if (categorySelect) {
     categorySelect.innerHTML = categories
-      .map((cat, idx) => `<option value="${escapeHtml(cat)}" ${idx === 0 ? 'selected' : ''}>${escapeHtml(cat)}</option>`)
-      .join('');
+    .map((cat, idx) => `<option value="${escapeHtml(cat)}" ${idx === 0 ? 'selected' : ''}>${escapeHtml(cat)}</option>`)
+    .join('');
   }
 
   renderSupportTicketsList();
@@ -9289,37 +9445,37 @@ async function submitSupportTicket(e) {
 
   try {
     const res = await apiFetch('/api/support/tickets', {
-      method: 'POST',
-      body: JSON.stringify({
-        category,
-        priority,
-        orderRef,
-        subject,
-        description,
-      }),
+    method: 'POST',
+    body: JSON.stringify({
+    category,
+    priority,
+    orderRef,
+    subject,
+    description,
+    }),
     });
 
     const createdTicket = res.ticket || {
-      ticketId: `TKT-${Math.floor(100000 + Math.random() * 900000)}`,
-      category,
-      priority,
-      orderRef,
-      subject,
-      description,
-      status: 'Open',
-      createdAt: new Date().toISOString(),
+    ticketId: `TKT-${Math.floor(100000 + Math.random() * 900000)}`,
+    category,
+    priority,
+    orderRef,
+    subject,
+    description,
+    status: 'Open',
+    createdAt: new Date().toISOString(),
     };
 
     // Also save in local cache
     let tickets = [];
     try {
-      const raw = localStorage.getItem(getSupportTicketsStorageKey());
-      if (raw) tickets = JSON.parse(raw);
+    const raw = localStorage.getItem(getSupportTicketsStorageKey());
+    if (raw) tickets = JSON.parse(raw);
     } catch (_) {}
     if (!Array.isArray(tickets)) tickets = [];
     tickets.unshift(createdTicket);
     try {
-      localStorage.setItem(getSupportTicketsStorageKey(), JSON.stringify(tickets));
+    localStorage.setItem(getSupportTicketsStorageKey(), JSON.stringify(tickets));
     } catch (_) {}
 
     if (subjectEl) subjectEl.value = '';
@@ -9329,9 +9485,9 @@ async function submitSupportTicket(e) {
     renderSupportTicketsList();
 
     showToastNotification({
-      title: 'Support Ticket Logged',
-      message: `Ticket ${createdTicket.ticketId || createdTicket.id} received and queued in Complaint Review Desk`,
-      type: 'success',
+    title: 'Support Ticket Logged',
+    message: `Ticket ${createdTicket.ticketId || createdTicket.id} received and queued in Complaint Review Desk`,
+    type: 'success',
     });
 
     alert(`✅ Support Ticket Created Successfully!\nTicket ID: ${createdTicket.ticketId || createdTicket.id}\nCategory: ${category}\nPriority: ${priority}\n\nThis ticket has been sent to the Admin & Sub-Admin Complaint Review Desk for immediate review.`);
@@ -9340,27 +9496,27 @@ async function submitSupportTicket(e) {
     // Fallback to local storage if API failed
     const fallbackId = `TKT-${Math.floor(100000 + Math.random() * 900000)}`;
     const fallbackTicket = {
-      id: fallbackId,
-      ticketId: fallbackId,
-      role,
-      category,
-      priority,
-      orderRef,
-      subject,
-      description,
-      status: 'Open',
-      createdAt: new Date().toISOString(),
+    id: fallbackId,
+    ticketId: fallbackId,
+    role,
+    category,
+    priority,
+    orderRef,
+    subject,
+    description,
+    status: 'Open',
+    createdAt: new Date().toISOString(),
     };
 
     let tickets = [];
     try {
-      const raw = localStorage.getItem(getSupportTicketsStorageKey());
-      if (raw) tickets = JSON.parse(raw);
+    const raw = localStorage.getItem(getSupportTicketsStorageKey());
+    if (raw) tickets = JSON.parse(raw);
     } catch (_) {}
     if (!Array.isArray(tickets)) tickets = [];
     tickets.unshift(fallbackTicket);
     try {
-      localStorage.setItem(getSupportTicketsStorageKey(), JSON.stringify(tickets));
+    localStorage.setItem(getSupportTicketsStorageKey(), JSON.stringify(tickets));
     } catch (_) {}
 
     if (subjectEl) subjectEl.value = '';
@@ -9371,8 +9527,8 @@ async function submitSupportTicket(e) {
     alert(`✅ Support Ticket Created (Offline Mode)!\nTicket ID: ${fallbackId}\nCategory: ${category}\nPriority: ${priority}`);
   } finally {
     if (submitBtn) {
-      submitBtn.disabled = false;
-      submitBtn.innerHTML = originalBtnText;
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = originalBtnText;
     }
   }
 }
@@ -9389,41 +9545,41 @@ async function renderSupportTicketsList() {
   try {
     const res = await apiFetch('/api/support/tickets');
     if (res && Array.isArray(res.tickets) && res.tickets.length > 0) {
-      tickets = res.tickets;
-      try {
-        localStorage.setItem(getSupportTicketsStorageKey(), JSON.stringify(tickets));
-      } catch (_) {}
+    tickets = res.tickets;
+    try {
+    localStorage.setItem(getSupportTicketsStorageKey(), JSON.stringify(tickets));
+    } catch (_) {}
     }
   } catch (_) {}
 
   // Fallback to localStorage if API returned empty or failed
   if (!tickets || tickets.length === 0) {
     try {
-      const raw = localStorage.getItem(getSupportTicketsStorageKey());
-      if (raw) tickets = JSON.parse(raw);
+    const raw = localStorage.getItem(getSupportTicketsStorageKey());
+    if (raw) tickets = JSON.parse(raw);
     } catch (_) {}
   }
 
   if (!Array.isArray(tickets) || !tickets.length) {
     // Provide default starter ticket for demo/clarity if empty
     tickets = [
-      {
-        id: 'TKT-10492',
-        ticketId: 'TKT-10492',
-        role,
-        category: role === 'customer' ? 'Welcome & Onboarding' : 'Partner Account Verification',
-        priority: 'Normal',
-        orderRef: '',
-        subject: role === 'customer' ? 'Welcome to Tomato Support' : 'Merchant Partner Support Desk',
-        description: role === 'customer'
-          ? 'Welcome to Tomato! If you face any issues with orders or delivery, raise a ticket here for priority resolution.'
-          : 'Welcome to your Partner Helpdesk. Use this channel to coordinate orders, request settlements, and contact support.',
-        status: 'Resolved',
-        createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
-      }
+    {
+    id: 'TKT-10492',
+    ticketId: 'TKT-10492',
+    role,
+    category: role === 'customer' ? 'Welcome & Onboarding' : 'Partner Account Verification',
+    priority: 'Normal',
+    orderRef: '',
+    subject: role === 'customer' ? 'Welcome to Tomato Support' : 'Merchant Partner Support Desk',
+    description: role === 'customer'
+    ? 'Welcome to Tomato! If you face any issues with orders or delivery, raise a ticket here for priority resolution.'
+    : 'Welcome to your Partner Helpdesk. Use this channel to coordinate orders, request settlements, and contact support.',
+    status: 'Resolved',
+    createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
+    }
     ];
     try {
-      localStorage.setItem(getSupportTicketsStorageKey(), JSON.stringify(tickets));
+    localStorage.setItem(getSupportTicketsStorageKey(), JSON.stringify(tickets));
     } catch (_) {}
   }
 
@@ -9442,53 +9598,53 @@ async function renderSupportTicketsList() {
     let statusBg = '#fee2e2';
     let statusColor = '#b91c1c';
     if (t.status === 'In Review') {
-      statusBg = '#fef3c7';
-      statusColor = '#b45309';
+    statusBg = '#fef3c7';
+    statusColor = '#b45309';
     } else if (t.status === 'Resolved') {
-      statusBg = '#dcfce7';
-      statusColor = '#15803d';
+    statusBg = '#dcfce7';
+    statusColor = '#15803d';
     } else if (t.status === 'Closed') {
-      statusBg = '#f1f5f9';
-      statusColor = '#475569';
+    statusBg = '#f1f5f9';
+    statusColor = '#475569';
     }
 
     const dateStr = new Date(t.createdAt).toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
     });
 
     const hasAdminComment = Boolean(t.adminComment && t.adminComment.trim());
 
     return `
-      <div style="border:1px solid var(--line); border-radius:6px; padding:0.85rem; margin-bottom:0.75rem; background:#fafafa;">
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.4rem; margin-bottom:0.4rem;">
-          <div style="display:flex; align-items:center; gap:0.45rem;">
-            <strong style="font-size:0.85rem; color:var(--ink);">${escapeHtml(tid)}</strong>
-            <span class="badge" style="background:${priorityBg}; color:${priorityColor}; font-size:0.7rem; padding:0.1rem 0.45rem; border-radius:999px; font-weight:700;">${escapeHtml(t.priority || 'Normal')}</span>
-            ${t.orderRef ? `<span class="badge" style="background:#f1f5f9; color:#475569; font-size:0.7rem; padding:0.1rem 0.45rem; border-radius:999px;">Ref: ${escapeHtml(t.orderRef)}</span>` : ''}
-          </div>
-          <div style="display:flex; align-items:center; gap:0.4rem;">
-            <span class="badge" style="background:${statusBg}; color:${statusColor}; font-size:0.72rem; padding:0.15rem 0.5rem; border-radius:999px; font-weight:700;">${escapeHtml(t.status)}</span>
-            <button type="button" class="btn btn-outline btn-sm" style="font-size:0.7rem; padding:0.15rem 0.45rem; cursor:pointer;" onclick="toggleSupportTicketStatus('${escapeHtml(tid)}')">
-              ${isResolved ? 'Reopen' : 'Mark Resolved'}
-            </button>
-          </div>
-        </div>
-        <div style="font-weight:600; font-size:0.88rem; color:var(--ink); margin-bottom:0.25rem;">${escapeHtml(t.subject)}</div>
-        <div style="font-size:0.8rem; color:var(--muted); margin-bottom:0.45rem; line-height:1.35;">${escapeHtml(t.description)}</div>
-        ${hasAdminComment ? `
-          <div style="margin-top:0.5rem; margin-bottom:0.45rem; padding:0.45rem 0.65rem; background:#ecfdf5; border-left:3px solid #10b981; border-radius:4px; font-size:0.78rem; color:#065f46;">
-            <strong>💬 Admin Review Note:</strong> ${escapeHtml(t.adminComment)}
-            ${t.reviewedBy?.name ? `<span style="display:block; font-size:0.72rem; color:#047857; margin-top:0.2rem;">Reviewed by: ${escapeHtml(t.reviewedBy.name)}</span>` : ''}
-          </div>
-        ` : ''}
-        <div style="font-size:0.72rem; color:#94a3b8; display:flex; justify-content:space-between; align-items:center;">
-          <span>Category: <em>${escapeHtml(t.category)}</em></span>
-          <span>${dateStr}</span>
-        </div>
-      </div>
+    <div style="border:1px solid var(--line); border-radius:6px; padding:0.85rem; margin-bottom:0.75rem; background:#fafafa;">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.4rem; margin-bottom:0.4rem;">
+    <div style="display:flex; align-items:center; gap:0.45rem;">
+    <strong style="font-size:0.85rem; color:var(--ink);">${escapeHtml(tid)}</strong>
+    <span class="badge" style="background:${priorityBg}; color:${priorityColor}; font-size:0.7rem; padding:0.1rem 0.45rem; border-radius:999px; font-weight:700;">${escapeHtml(t.priority || 'Normal')}</span>
+    ${t.orderRef ? `<span class="badge" style="background:#f1f5f9; color:#475569; font-size:0.7rem; padding:0.1rem 0.45rem; border-radius:999px;">Ref: ${escapeHtml(t.orderRef)}</span>` : ''}
+    </div>
+    <div style="display:flex; align-items:center; gap:0.4rem;">
+    <span class="badge" style="background:${statusBg}; color:${statusColor}; font-size:0.72rem; padding:0.15rem 0.5rem; border-radius:999px; font-weight:700;">${escapeHtml(t.status)}</span>
+    <button type="button" class="btn btn-outline btn-sm" style="font-size:0.7rem; padding:0.15rem 0.45rem; cursor:pointer;" onclick="toggleSupportTicketStatus('${escapeHtml(tid)}')">
+    ${isResolved ? 'Reopen' : 'Mark Resolved'}
+    </button>
+    </div>
+    </div>
+    <div style="font-weight:600; font-size:0.88rem; color:var(--ink); margin-bottom:0.25rem;">${escapeHtml(t.subject)}</div>
+    <div style="font-size:0.8rem; color:var(--muted); margin-bottom:0.45rem; line-height:1.35;">${escapeHtml(t.description)}</div>
+    ${hasAdminComment ? `
+    <div style="margin-top:0.5rem; margin-bottom:0.45rem; padding:0.45rem 0.65rem; background:#ecfdf5; border-left:3px solid #10b981; border-radius:4px; font-size:0.78rem; color:#065f46;">
+    <strong>💬 Admin Review Note:</strong> ${escapeHtml(t.adminComment)}
+    ${t.reviewedBy?.name ? `<span style="display:block; font-size:0.72rem; color:#047857; margin-top:0.2rem;">Reviewed by: ${escapeHtml(t.reviewedBy.name)}</span>` : ''}
+    </div>
+    ` : ''}
+    <div style="font-size:0.72rem; color:#94a3b8; display:flex; justify-content:space-between; align-items:center;">
+    <span>Category: <em>${escapeHtml(t.category)}</em></span>
+    <span>${dateStr}</span>
+    </div>
+    </div>
     `;
   }).join('');
 }
@@ -9509,7 +9665,7 @@ async function toggleSupportTicketStatus(ticketId) {
   if (target) {
     target.status = target.status === 'Resolved' || target.status === 'Closed' ? 'Open' : 'Resolved';
     try {
-      localStorage.setItem(getSupportTicketsStorageKey(), JSON.stringify(tickets));
+    localStorage.setItem(getSupportTicketsStorageKey(), JSON.stringify(tickets));
     } catch (_) {}
   }
   renderSupportTicketsList();
@@ -9524,81 +9680,81 @@ function renderSupportFAQs() {
 
   if (role === 'restaurant') {
     faqs = [
-      {
-        q: 'When are daily / weekly merchant payouts credited?',
-        a: 'Settlement payouts are calculated automatically and transferred directly to your verified bank account every Tuesday morning. Check transaction reference IDs in your Banking statements.'
-      },
-      {
-        q: 'How do I toggle item availability or mark dishes out of stock?',
-        a: 'Navigate to "Menu Management" from the sidebar. You can toggle any food item between "In Stock" and "Out of Stock" instantly, which reflects on customer search in real time.'
-      },
-      {
-        q: 'What should I do if a delivery rider is delayed for pickup?',
-        a: 'Ensure you click "Accept" and "Food is Ready" on the Kitchen Orders panel. The system continuously tracks the closest active riders within a 2km proximity ring and dispatches replacements if needed.'
-      },
-      {
-        q: 'How can I change kitchen opening hours or pause incoming orders?',
-        a: 'Click your profile status toggle in the sidebar or under "Restaurant Profile" to mark your kitchen as "Closed" or "Busy" during rush hours.'
-      }
+  {
+  q: 'When are daily / weekly merchant payouts credited?',
+  a: 'Settlement payouts are calculated automatically and transferred directly to your verified bank account every Tuesday morning. Check transaction reference IDs in your Banking statements.'
+  },
+  {
+  q: 'How do I toggle item availability or mark dishes out of stock?',
+  a: 'Navigate to "Menu Management" from the sidebar. You can toggle any food item between "In Stock" and "Out of Stock" instantly, which reflects on customer search in real time.'
+  },
+  {
+  q: 'What should I do if a delivery rider is delayed for pickup?',
+  a: 'Ensure you click "Accept" and "Food is Ready" on the Kitchen Orders panel. The system continuously tracks the closest active riders within a 2km proximity ring and dispatches replacements if needed.'
+  },
+  {
+  q: 'How can I change kitchen opening hours or pause incoming orders?',
+  a: 'Click your profile status toggle in the sidebar or under "Restaurant Profile" to mark your kitchen as "Closed" or "Busy" during rush hours.'
+  }
     ];
   } else if (role === 'shop') {
     faqs = [
-      {
-        q: 'How does the shop order packing workflow work?',
-        a: 'When an order arrives, click "Accept", pack all grocery / retail items, and click "Pack & Dispatch". An assigned rider will arrive at your store with the order verification code.'
-      },
-      {
-        q: 'How do I update prices or add new retail items?',
-        a: 'Go to "Item Management" in your sidebar. Click "+ Add New Retail Item" to upload products with prices, SKU tags, and category labels.'
-      },
-      {
-        q: 'When do shop partner settlements arrive?',
-        a: 'Reconciled settlements are generated on a rolling 7-day cycle and credited to your registered bank account.'
-      },
-      {
-        q: 'What if an ordered grocery item is out of stock in my shop?',
-        a: 'You can update stock quantity directly from Item Management, or raise a ticket above for immediate order adjustment.'
-      }
+  {
+  q: 'How does the shop order packing workflow work?',
+  a: 'When an order arrives, click "Accept", pack all grocery / retail items, and click "Pack & Dispatch". An assigned rider will arrive at your store with the order verification code.'
+  },
+  {
+  q: 'How do I update prices or add new retail items?',
+  a: 'Go to "Item Management" in your sidebar. Click "+ Add New Retail Item" to upload products with prices, SKU tags, and category labels.'
+  },
+  {
+  q: 'When do shop partner settlements arrive?',
+  a: 'Reconciled settlements are generated on a rolling 7-day cycle and credited to your registered bank account.'
+  },
+  {
+  q: 'What if an ordered grocery item is out of stock in my shop?',
+  a: 'You can update stock quantity directly from Item Management, or raise a ticket above for immediate order adjustment.'
+  }
     ];
   } else {
     // Customer FAQs
     faqs = [
-      {
-        q: 'How do I check the live status of my food order?',
-        a: 'You can check real-time order tracking either under the "Live Activity & Notifications" panel on the Overview page or by visiting "My Orders" in the sidebar.'
-      },
-      {
-        q: 'Where do refunds go if an order is cancelled or items are missing?',
-        a: 'Refunds are automatically processed to your Tomato Wallet instantly, or back to your original payment card / UPI within 3–5 banking business days.'
-      },
-      {
-        q: 'How do I add or change my delivery address?',
-        a: 'Click "Saved Addresses" in the sidebar to add a new address or edit your Home, Work, and Landmark tags.'
-      },
-      {
-        q: 'Can I cancel an order after placing it?',
-        a: 'You can cancel an order before the kitchen accepts and starts preparation. If preparation has already begun, please raise a ticket above for assistance.'
-      },
-      {
-        q: 'How do I use my Wallet points during checkout?',
-        a: 'Your available wallet balance is automatically displayed on the checkout payment modal when placing your order.'
-      }
+  {
+  q: 'How do I check the live status of my food order?',
+  a: 'You can check real-time order tracking either under the "Live Activity & Notifications" panel on the Overview page or by visiting "My Orders" in the sidebar.'
+  },
+  {
+  q: 'Where do refunds go if an order is cancelled or items are missing?',
+  a: 'Refunds are automatically processed to your Tomato Wallet instantly, or back to your original payment card / UPI within 3–5 banking business days.'
+  },
+  {
+  q: 'How do I add or change my delivery address?',
+  a: 'Click "Saved Addresses" in the sidebar to add a new address or edit your Home, Work, and Landmark tags.'
+  },
+  {
+  q: 'Can I cancel an order after placing it?',
+  a: 'You can cancel an order before the kitchen accepts and starts preparation. If preparation has already begun, please raise a ticket above for assistance.'
+  },
+  {
+  q: 'How do I use my Wallet points during checkout?',
+  a: 'Your available wallet balance is automatically displayed on the checkout payment modal when placing your order.'
+  }
     ];
   }
 
   container.innerHTML = faqs.map((f, i) => `
     <div style="border:1px solid var(--line); border-radius:6px; overflow:hidden; background:#fbfbfb;">
-      <button
-        type="button"
-        onclick="toggleFaqAccordion(${i})"
-        style="width:100%; text-align:left; background:#fff; border:none; padding:0.75rem 0.9rem; font-size:0.87rem; font-weight:600; color:var(--ink); display:flex; justify-content:space-between; align-items:center; cursor:pointer;"
-      >
-        <span>${escapeHtml(f.q)}</span>
-        <span id="faq-chevron-${i}" style="font-size:0.8rem; color:var(--muted); transition:transform 0.2s;">▼</span>
-      </button>
-      <div id="faq-answer-${i}" style="display:none; padding:0.75rem 0.9rem; font-size:0.82rem; color:var(--muted); background:#f8fafc; border-top:1px solid var(--line); line-height:1.45;">
-        ${escapeHtml(f.a)}
-      </div>
+  <button
+  type="button"
+  onclick="toggleFaqAccordion(${i})"
+  style="width:100%; text-align:left; background:#fff; border:none; padding:0.75rem 0.9rem; font-size:0.87rem; font-weight:600; color:var(--ink); display:flex; justify-content:space-between; align-items:center; cursor:pointer;"
+  >
+  <span>${escapeHtml(f.q)}</span>
+  <span id="faq-chevron-${i}" style="font-size:0.8rem; color:var(--muted); transition:transform 0.2s;">▼</span>
+  </button>
+  <div id="faq-answer-${i}" style="display:none; padding:0.75rem 0.9rem; font-size:0.82rem; color:var(--muted); background:#f8fafc; border-top:1px solid var(--line); line-height:1.45;">
+  ${escapeHtml(f.a)}
+  </div>
     </div>
   `).join('');
 }
@@ -9637,17 +9793,36 @@ function loadProfileSettings() {
   document.getElementById('set-role').value = role.toUpperCase();
   document.getElementById('set-email').value = user.email || '';
   document.getElementById('set-phone').value = user.phone || '';
+  const dobEl = document.getElementById('set-dob');
+  if (dobEl) {
+    dobEl.max = new Date().toISOString().split('T')[0];
+    dobEl.value = user.dob ? String(user.dob).split('T')[0] : '';
+  }
 
   const restGroup = document.getElementById('restaurant-settings-group');
   const riderGroup = document.getElementById('rider-settings-group');
+
+  const adminPincodesBar = document.getElementById('admin-settings-pincodes-bar');
+  if (adminPincodesBar) {
+    if (role === 'admin' || role === 'subadmin') {
+    adminPincodesBar.style.display = 'block';
+    fetchAdminServiceablePincodes();
+    } else {
+    adminPincodesBar.style.display = 'none';
+    }
+  }
 
   if (role === 'restaurant' || role === 'shop') {
     restGroup.style.display = 'block';
     const addrLabel = document.getElementById('set-restaurant-address-label');
     if (addrLabel) addrLabel.textContent = role === 'shop' ? 'Shop Address' : 'Restaurant Address';
+    const pinLabel = document.getElementById('set-restaurant-pincode-label');
+    if (pinLabel) pinLabel.textContent = role === 'shop' ? 'Shop Pincode (Serviceable Area)' : 'Restaurant Pincode (Serviceable Area)';
     const cuisineLabel = document.getElementById('set-cuisine-label');
     if (cuisineLabel) cuisineLabel.textContent = role === 'shop' ? 'Shop Category / Speciality' : 'Cuisines Served';
     document.getElementById('set-restaurant-address').value = user.shopAddress || user.restaurantAddress || '';
+    const pinInput = document.getElementById('set-restaurant-pincode');
+    if (pinInput) pinInput.value = resolveFrontendPartnerPincode(user);
     document.getElementById('set-cuisine').value = user.category || user.cuisine || '';
   } else {
     restGroup.style.display = 'none';
@@ -9675,12 +9850,16 @@ async function saveProfileSettings(e) {
   if (document.getElementById('set-phone').value.trim()) {
     formData.append('phone', document.getElementById('set-phone').value.trim());
   }
+  const dobVal = (document.getElementById('set-dob')?.value || '').trim();
+  formData.append('dob', dobVal);
   if (role === 'restaurant') {
     formData.append('restaurantAddress', document.getElementById('set-restaurant-address').value.trim());
+    formData.append('pincode', (document.getElementById('set-restaurant-pincode')?.value || '').trim());
     formData.append('cuisine', document.getElementById('set-cuisine').value.trim());
   }
   if (role === 'shop') {
     formData.append('shopAddress', document.getElementById('set-restaurant-address').value.trim());
+    formData.append('pincode', (document.getElementById('set-restaurant-pincode')?.value || '').trim());
     formData.append('category', document.getElementById('set-cuisine').value.trim());
   }
   if (role === 'deliveryPartner') {
@@ -9694,11 +9873,11 @@ async function saveProfileSettings(e) {
 
   try {
     const res = await fetch(`${API_ROOT}/api/auth/profile`, {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      body: formData,
+    method: 'PUT',
+    headers: {
+    Authorization: `Bearer ${token}`,
+    },
+    body: formData,
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.message || 'Unable to update profile');
@@ -9730,10 +9909,10 @@ async function openOrderLiveTrackingModal(orderId, viewerRole = null) {
   const body = document.getElementById('olt-modal-body');
   if (body) {
     body.innerHTML = `
-      <div style="text-align:center; padding:2rem 0; color:var(--muted);">
-        <div style="font-size:2rem; margin-bottom:0.5rem; animation:pulse 1.5s infinite;">📡</div>
-        Establishing satellite connection &amp; live GPS telemetry...
-      </div>
+    <div style="text-align:center; padding:2rem 0; color:var(--muted);">
+    <div style="font-size:2rem; margin-bottom:0.5rem; animation:pulse 1.5s infinite;">📡</div>
+    Establishing satellite connection &amp; live GPS telemetry...
+    </div>
     `;
   }
 
@@ -9770,14 +9949,14 @@ async function refreshOrderLiveTracking() {
   } catch (err) {
     const body = document.getElementById('olt-modal-body');
     if (body) {
-      body.innerHTML = `
-        <div style="padding:1.5rem; background:#fee2e2; border:1px solid #fca5a5; border-radius:8px; color:#b91c1c;">
-          <strong>Live Telemetry Warning:</strong> ${escapeHtml(err.message)}
-          <div style="margin-top:0.8rem;">
-            <button class="btn btn-outline btn-sm" onclick="refreshOrderLiveTracking()">🔄 Retry Connection</button>
-          </div>
-        </div>
-      `;
+    body.innerHTML = `
+    <div style="padding:1.5rem; background:#fee2e2; border:1px solid #fca5a5; border-radius:8px; color:#b91c1c;">
+    <strong>Live Telemetry Warning:</strong> ${escapeHtml(err.message)}
+    <div style="margin-top:0.8rem;">
+    <button class="btn btn-outline btn-sm" onclick="refreshOrderLiveTracking()">🔄 Retry Connection</button>
+    </div>
+    </div>
+    `;
     }
   }
 }
@@ -9791,8 +9970,8 @@ function renderOrderLiveTracking(data) {
 
   const badgeEl = document.getElementById('olt-status-badge');
   if (badgeEl) {
-    badgeEl.className = `badge badge-${data.status}`;
-    badgeEl.textContent = String(data.status || 'in_progress').replace(/_/g, ' ').toUpperCase();
+  badgeEl.className = `badge badge-${data.status}`;
+  badgeEl.textContent = String(data.status || 'in_progress').replace(/_/g, ' ').toUpperCase();
   }
 
   const telem = data.telemetry || {};
@@ -9806,94 +9985,89 @@ function renderOrderLiveTracking(data) {
   const eta = telem.etaMinutes !== undefined ? telem.etaMinutes : Math.round(Number(distCust) * 4 + 4);
 
   const mapsUrl = rider.location?.lat && rest.location?.lat
-    ? `https://www.google.com/maps/dir/?api=1&origin=${rider.location.lat},${rider.location.lng}&destination=${rest.location.lat},${rest.location.lng}`
-    : 'https://maps.google.com';
+  ? `https://www.google.com/maps/dir/?api=1&origin=${rider.location.lat},${rider.location.lng}&destination=${rest.location.lat},${rest.location.lng}`
+  : 'https://maps.google.com';
 
   body.innerHTML = `
-    <!-- KPI Cards -->
-    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:0.75rem; margin-bottom:1.2rem;">
-      <div style="background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:0.85rem; text-align:center;">
-        <span style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:600; display:block;">Rider to Restaurant</span>
-        <strong style="font-size:1.3rem; color:var(--ink);">${distRest} km</strong>
-      </div>
-      <div style="background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:0.85rem; text-align:center;">
-        <span style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:600; display:block;">Rider to Customer</span>
-        <strong style="font-size:1.3rem; color:var(--ink);">${distCust} km</strong>
-      </div>
-      <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:0.85rem; text-align:center;">
-        <span style="font-size:0.75rem; color:#15803d; text-transform:uppercase; font-weight:600; display:block;">Estimated Arrival</span>
-        <strong style="font-size:1.3rem; color:#16a34a;">~${eta} mins</strong>
-      </div>
-      <div style="background:${isOnline ? '#f0fdf4' : '#fef2f2'}; border:1px solid ${isOnline ? '#bbf7d0' : '#fecaca'}; border-radius:10px; padding:0.85rem; text-align:center;">
-        <span style="font-size:0.75rem; color:${isOnline ? '#15803d' : '#991b1b'}; text-transform:uppercase; font-weight:600; display:block;">GPS Transmitter</span>
-        <strong style="font-size:1rem; color:${isOnline ? '#16a34a' : '#dc2626'};">${isOnline ? '🟢 Live Online' : '⚪ Offline'}</strong>
-        <div style="font-size:0.72rem; color:var(--muted);">${telem.lastPingSecondsAgo !== null ? `${telem.lastPingSecondsAgo}s ago` : 'Active'}</div>
-      </div>
-    </div>
-
-    <!-- Radar Canvas -->
-    <div style="background:#0f172a; border-radius:12px; padding:0.9rem; margin-bottom:1.2rem; position:relative; overflow:hidden;">
-      <div style="display:flex; justify-content:space-between; align-items:center; color:#94a3b8; font-size:0.76rem; margin-bottom:0.4rem; padding:0 0.2rem;">
-        <span>📡 LIVE SATELLITE DISPATCH RADAR</span>
-        <span style="color:#22c55e;">● GPS Signal Fixed</span>
-      </div>
-      <canvas id="live-order-canvas" width="680" height="250" style="width:100%; height:auto; background:#1e293b; border-radius:8px; border:1px solid #334155; display:block;"></canvas>
-    </div>
-
-    <!-- Partner & Destination Cards -->
-    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:0.9rem; margin-bottom:1.2rem; font-size:0.85rem;">
-      <!-- Restaurant -->
-      <div style="background:#fff; border:1px solid var(--line); border-radius:10px; padding:0.9rem;">
-        <span style="color:var(--tomato); font-weight:700; font-size:0.75rem; text-transform:uppercase; display:block; margin-bottom:0.3rem;">🏪 Pickup Restaurant</span>
-        <div style="font-weight:700; font-size:0.95rem; color:var(--ink);">${escapeHtml(formatCleanName(rest.displayName || rest.name || 'Tomato Partner'))}</div>
-        <div style="margin-top:0.3rem;">
-          <span class="badge" style="background:#e0f2fe; color:#0369a1; font-weight:700; font-size:0.75rem;">📍 DIGIPIN: ${escapeHtml(rest.digipin || 'DGP-BLR')}</span>
-        </div>
-        <div style="font-size:0.78rem; color:var(--muted); margin-top:0.35rem;">
-          GPS: ${rest.location?.lat ? `${rest.location.lat.toFixed(4)}, ${rest.location.lng.toFixed(4)}` : 'Bengaluru'}
-        </div>
-      </div>
-
-      <!-- Rider -->
-      <div style="background:#fff; border:1px solid var(--line); border-radius:10px; padding:0.9rem;">
-        <span style="color:#0284c7; font-weight:700; font-size:0.75rem; text-transform:uppercase; display:block; margin-bottom:0.3rem;">🚴 Delivery Partner</span>
-        <div style="font-weight:700; font-size:0.95rem; color:var(--ink);">${escapeHtml(formatCleanName(rider.displayName || rider.name || 'Assigned Partner'))}</div>
-        <div style="margin-top:0.3rem;">
-          <span class="badge" style="background:${isOnline ? '#dcfce7' : '#f1f5f9'}; color:${isOnline ? '#15803d' : '#475569'}; font-size:0.75rem;">
-            ${isOnline ? '🟢 Continuous Live GPS Active' : '⚪ Signal Standby'}
-          </span>
-        </div>
-        <div style="font-size:0.78rem; color:var(--muted); margin-top:0.35rem;">
-          GPS: ${rider.location?.lat ? `${rider.location.lat.toFixed(4)}, ${rider.location.lng.toFixed(4)}` : 'Indiranagar'}
-        </div>
-      </div>
-
-      <!-- Customer -->
-      <div style="background:#fff; border:1px solid var(--line); border-radius:10px; padding:0.9rem;">
-        <span style="color:var(--green); font-weight:700; font-size:0.75rem; text-transform:uppercase; display:block; margin-bottom:0.3rem;">🏠 Delivery Destination</span>
-        <div style="font-weight:700; font-size:0.95rem; color:var(--ink);">${escapeHtml(cust.name || 'Customer')}</div>
-        <div style="font-size:0.8rem; color:var(--ink); margin-top:0.3rem;">
-          ${escapeHtml(cust.address?.line1 || 'Delivery Address')}${cust.address?.city ? ', ' + escapeHtml(cust.address.city) : ''}
-        </div>
-      </div>
-    </div>
-
-    <!-- Action Buttons -->
-    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.6rem; border-top:1px dashed var(--line); padding-top:1rem;">
-      <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
-        <button class="btn btn-outline btn-sm" onclick="refreshOrderLiveTracking()">🔄 Refresh Coordinates</button>
-        <a href="${mapsUrl}" target="_blank" class="btn btn-outline btn-sm" style="color:var(--blue);">🗺️ Open in Google Maps</a>
-      </div>
-      ${role === 'deliveryPartner' ? `
-        <button class="btn btn-primary btn-sm" onclick="simulateRiderMovement(); setTimeout(refreshOrderLiveTracking, 600);">🚴 Simulate Step Ahead (~100m)</button>
-      ` : ''}
-    </div>
+  <!-- KPI Cards -->
+  <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:0.75rem; margin-bottom:1.2rem;">
+  <div style="background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:0.85rem; text-align:center;">
+  <span style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:600; display:block;">Rider to Restaurant</span>
+  <strong style="font-size:1.3rem; color:var(--ink);">${distRest} km</strong>
+  </div>
+  <div style="background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:0.85rem; text-align:center;">
+  <span style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:600; display:block;">Rider to Customer</span>
+  <strong style="font-size:1.3rem; color:var(--ink);">${distCust} km</strong>
+  </div>
+  <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:0.85rem; text-align:center;">
+  <span style="font-size:0.75rem; color:#15803d; text-transform:uppercase; font-weight:600; display:block;">Estimated Arrival</span>
+  <strong style="font-size:1.3rem; color:#16a34a;">~${eta} mins</strong>
+  </div>
+  <div style="background:${isOnline ? '#f0fdf4' : '#fef2f2'}; border:1px solid ${isOnline ? '#bbf7d0' : '#fecaca'}; border-radius:10px; padding:0.85rem; text-align:center;">
+  <span style="font-size:0.75rem; color:${isOnline ? '#15803d' : '#991b1b'}; text-transform:uppercase; font-weight:600; display:block;">GPS Transmitter</span>
+  <strong style="font-size:1rem; color:${isOnline ? '#16a34a' : '#dc2626'};">${isOnline ? '🟢 Live Online' : '⚪ Offline'}</strong>
+  <div style="font-size:0.72rem; color:var(--muted);">${telem.lastPingSecondsAgo !== null ? `${telem.lastPingSecondsAgo}s ago` : 'Active'}</div>
+  </div>
+  </div>
+  <!-- Radar Canvas -->
+  <div style="background:#0f172a; border-radius:12px; padding:0.9rem; margin-bottom:1.2rem; position:relative; overflow:hidden;">
+  <div style="display:flex; justify-content:space-between; align-items:center; color:#94a3b8; font-size:0.76rem; margin-bottom:0.4rem; padding:0 0.2rem;">
+  <span>📡 LIVE SATELLITE DISPATCH RADAR</span>
+  <span style="color:#22c55e;">● GPS Signal Fixed</span>
+  </div>
+  <canvas id="live-order-canvas" width="680" height="250" style="width:100%; height:auto; background:#1e293b; border-radius:8px; border:1px solid #334155; display:block;"></canvas>
+  </div>
+  <!-- Partner & Destination Cards -->
+  <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:0.9rem; margin-bottom:1.2rem; font-size:0.85rem;">
+  <!-- Restaurant -->
+  <div style="background:#fff; border:1px solid var(--line); border-radius:10px; padding:0.9rem;">
+  <span style="color:var(--tomato); font-weight:700; font-size:0.75rem; text-transform:uppercase; display:block; margin-bottom:0.3rem;">🏪 Pickup Restaurant</span>
+  <div style="font-weight:700; font-size:0.95rem; color:var(--ink);">${escapeHtml(formatCleanName(rest.displayName || rest.name || 'Tomato Partner'))}</div>
+  <div style="margin-top:0.3rem;">
+  <span class="badge" style="background:#e0f2fe; color:#0369a1; font-weight:700; font-size:0.75rem;">📍 DIGIPIN: ${escapeHtml(rest.digipin || 'DGP-BLR')}</span>
+  </div>
+  <div style="font-size:0.78rem; color:var(--muted); margin-top:0.35rem;">
+  GPS: ${rest.location?.lat ? `${rest.location.lat.toFixed(4)}, ${rest.location.lng.toFixed(4)}` : 'Bengaluru'}
+  </div>
+  </div>
+  <!-- Rider -->
+  <div style="background:#fff; border:1px solid var(--line); border-radius:10px; padding:0.9rem;">
+  <span style="color:#0284c7; font-weight:700; font-size:0.75rem; text-transform:uppercase; display:block; margin-bottom:0.3rem;">🚴 Delivery Partner</span>
+  <div style="font-weight:700; font-size:0.95rem; color:var(--ink);">${escapeHtml(formatCleanName(rider.displayName || rider.name || 'Assigned Partner'))}</div>
+  <div style="margin-top:0.3rem;">
+  <span class="badge" style="background:${isOnline ? '#dcfce7' : '#f1f5f9'}; color:${isOnline ? '#15803d' : '#475569'}; font-size:0.75rem;">
+  ${isOnline ? '🟢 Continuous Live GPS Active' : '⚪ Signal Standby'}
+  </span>
+  </div>
+  <div style="font-size:0.78rem; color:var(--muted); margin-top:0.35rem;">
+  GPS: ${rider.location?.lat ? `${rider.location.lat.toFixed(4)}, ${rider.location.lng.toFixed(4)}` : 'Indiranagar'}
+  </div>
+  </div>
+  <!-- Customer -->
+  <div style="background:#fff; border:1px solid var(--line); border-radius:10px; padding:0.9rem;">
+  <span style="color:var(--green); font-weight:700; font-size:0.75rem; text-transform:uppercase; display:block; margin-bottom:0.3rem;">🏠 Delivery Destination</span>
+  <div style="font-weight:700; font-size:0.95rem; color:var(--ink);">${escapeHtml(cust.name || 'Customer')}</div>
+  <div style="font-size:0.8rem; color:var(--ink); margin-top:0.3rem;">
+  ${escapeHtml(cust.address?.line1 || 'Delivery Address')}${cust.address?.city ? ', ' + escapeHtml(cust.address.city) : ''}
+  </div>
+  </div>
+  </div>
+  <!-- Action Buttons -->
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.6rem; border-top:1px dashed var(--line); padding-top:1rem;">
+  <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+  <button class="btn btn-outline btn-sm" onclick="refreshOrderLiveTracking()">🔄 Refresh Coordinates</button>
+  <a href="${mapsUrl}" target="_blank" class="btn btn-outline btn-sm" style="color:var(--blue);">🗺️ Open in Google Maps</a>
+  </div>
+  ${role === 'deliveryPartner' ? `
+  <button class="btn btn-primary btn-sm" onclick="simulateRiderMovement(); setTimeout(refreshOrderLiveTracking, 600);">🚴 Simulate Step Ahead (~100m)</button>
+  ` : ''}
+  </div>
   `;
 
   // Render Canvas
   setTimeout(() => {
-    const canvas = document.getElementById('live-order-canvas');
-    if (canvas) drawLiveOrderRadar(canvas, data);
+  const canvas = document.getElementById('live-order-canvas');
+  if (canvas) drawLiveOrderRadar(canvas, data);
   }, 30);
 }
 
@@ -10039,7 +10213,7 @@ async function refreshAdminFleet() {
   } catch (err) {
     const container = document.getElementById('admin-fleet-table-container');
     if (container) {
-      container.innerHTML = `<p style="color:var(--tomato-dark); text-align:center;">Failed to fetch fleet: ${escapeHtml(err.message)}</p>`;
+    container.innerHTML = `<p style="color:var(--tomato-dark); text-align:center;">Failed to fetch fleet: ${escapeHtml(err.message)}</p>`;
     }
   }
 }
@@ -10052,18 +10226,18 @@ function renderAdminFleet(data) {
   const bar = document.getElementById('admin-fleet-summary-bar');
   if (bar) {
     bar.innerHTML = `
-      <div style="background:#f8fafc; border:1px solid var(--line); border-radius:8px; padding:0.75rem; text-align:center;">
-        <span style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:600; display:block;">Total Fleet</span>
-        <strong style="font-size:1.3rem;">${summary.totalRiders || riders.length}</strong>
-      </div>
-      <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:0.75rem; text-align:center;">
-        <span style="font-size:0.75rem; color:#15803d; text-transform:uppercase; font-weight:600; display:block;">Live Online Now</span>
-        <strong style="font-size:1.3rem; color:#16a34a;">${summary.onlineRiders || riders.filter((r) => r.isOnline).length}</strong>
-      </div>
-      <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; padding:0.75rem; text-align:center;">
-        <span style="font-size:0.75rem; color:#0369a1; text-transform:uppercase; font-weight:600; display:block;">Active Trips</span>
-        <strong style="font-size:1.3rem; color:#0284c7;">${summary.activeDeliveriesCount || 0}</strong>
-      </div>
+    <div style="background:#f8fafc; border:1px solid var(--line); border-radius:8px; padding:0.75rem; text-align:center;">
+    <span style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:600; display:block;">Total Fleet</span>
+    <strong style="font-size:1.3rem;">${summary.totalRiders || riders.length}</strong>
+    </div>
+    <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:0.75rem; text-align:center;">
+    <span style="font-size:0.75rem; color:#15803d; text-transform:uppercase; font-weight:600; display:block;">Live Online Now</span>
+    <strong style="font-size:1.3rem; color:#16a34a;">${summary.onlineRiders || riders.filter((r) => r.isOnline).length}</strong>
+    </div>
+    <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; padding:0.75rem; text-align:center;">
+    <span style="font-size:0.75rem; color:#0369a1; text-transform:uppercase; font-weight:600; display:block;">Active Trips</span>
+    <strong style="font-size:1.3rem; color:#0284c7;">${summary.activeDeliveriesCount || 0}</strong>
+    </div>
     `;
   }
 
@@ -10078,47 +10252,47 @@ function renderAdminFleet(data) {
   const tableContainer = document.getElementById('admin-fleet-table-container');
   if (tableContainer) {
     if (!riders.length) {
-      tableContainer.innerHTML = '<p style="color:var(--muted); text-align:center; padding:1rem 0;">No delivery partners registered in fleet.</p>';
-      return;
+    tableContainer.innerHTML = '<p style="color:var(--muted); text-align:center; padding:1rem 0;">No delivery partners registered in fleet.</p>';
+    return;
     }
 
     tableContainer.innerHTML = `
-      <div class="table-wrapper" style="max-height:280px; overflow-y:auto;">
-        <table>
-          <thead>
-            <tr>
-              <th>Rider (Name / ID)</th>
-              <th>Transmitter Status</th>
-              <th>Live GPS Coordinates</th>
-              <th>Active Trips</th>
-              <th>Vehicle</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${riders.map((r) => {
-              const isLive = Boolean(r.isOnline);
-              const coords = r.currentLocation?.lat ? `${r.currentLocation.lat.toFixed(4)}, ${r.currentLocation.lng.toFixed(4)}` : 'Indiranagar Hub';
+    <div class="table-wrapper" style="max-height:280px; overflow-y:auto;">
+    <table>
+    <thead>
+    <tr>
+    <th>Rider (Name / ID)</th>
+    <th>Transmitter Status</th>
+    <th>Live GPS Coordinates</th>
+    <th>Active Trips</th>
+    <th>Vehicle</th>
+    </tr>
+    </thead>
+    <tbody>
+    ${riders.map((r) => {
+    const isLive = Boolean(r.isOnline);
+    const coords = r.currentLocation?.lat ? `${r.currentLocation.lat.toFixed(4)}, ${r.currentLocation.lng.toFixed(4)}` : 'Indiranagar Hub';
 
-              return `
-                <tr>
-                  <td>
-                    <strong>${escapeHtml(r.name)}</strong> / <span style="font-family:monospace; color:#0369a1; font-weight:700;">${escapeHtml(r.riderId || 'RIDE')}</span>
-                    ${r.phone ? `<br><small style="color:var(--muted);">📞 ${escapeHtml(r.phone)}</small>` : ''}
-                  </td>
-                  <td>
-                    <span class="badge" style="background:${isLive ? '#dcfce7' : '#f1f5f9'}; color:${isLive ? '#15803d' : '#64748b'}; font-weight:600;">
-                      ${isLive ? '🟢 GPS Active' : '⚪ Offline'}
-                    </span>
-                  </td>
-                  <td><span style="font-family:monospace; font-size:0.82rem;">${coords}</span></td>
-                  <td><span class="badge ${r.activeDeliveriesCount > 0 ? 'badge-transit' : 'badge-delivered'}">${r.activeDeliveriesCount || 0} Active</span></td>
-                  <td><span class="badge badge-accepted">${escapeHtml(r.deliveryVehicle || 'Bike')}</span></td>
-                </tr>
-              `;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>
+    return `
+    <tr>
+    <td>
+    <strong>${escapeHtml(r.name)}</strong> / <span style="font-family:monospace; color:#0369a1; font-weight:700;">${escapeHtml(r.riderId || 'RIDE')}</span>
+    ${r.phone ? `<br><small style="color:var(--muted);">📞 ${escapeHtml(r.phone)}</small>` : ''}
+    </td>
+    <td>
+    <span class="badge" style="background:${isLive ? '#dcfce7' : '#f1f5f9'}; color:${isLive ? '#15803d' : '#64748b'}; font-weight:600;">
+    ${isLive ? '🟢 GPS Active' : '⚪ Offline'}
+    </span>
+    </td>
+    <td><span style="font-family:monospace; font-size:0.82rem;">${coords}</span></td>
+    <td><span class="badge ${r.activeDeliveriesCount > 0 ? 'badge-transit' : 'badge-delivered'}">${r.activeDeliveriesCount || 0} Active</span></td>
+    <td><span class="badge badge-accepted">${escapeHtml(r.deliveryVehicle || 'Bike')}</span></td>
+    </tr>
+    `;
+    }).join('')}
+    </tbody>
+    </table>
+    </div>
     `;
   }
 }
@@ -10189,10 +10363,10 @@ function drawAdminFleetCanvas(canvas, riders) {
 
     // Pulse
     if (isOnline) {
-      ctx.fillStyle = 'rgba(34, 197, 94, 0.25)';
-      ctx.beginPath();
-      ctx.arc(px, py, 16, 0, Math.PI * 2);
-      ctx.fill();
+    ctx.fillStyle = 'rgba(34, 197, 94, 0.25)';
+    ctx.beginPath();
+    ctx.arc(px, py, 16, 0, Math.PI * 2);
+    ctx.fill();
     }
 
     // Blip
@@ -10263,7 +10437,7 @@ async function fetchAdminBankPartners() {
   }
   try {
     const res = await apiFetch(
-      `/api/admin/bank/partners?role=${encodeURIComponent(roleFilter)}&status=${encodeURIComponent(statusFilter)}`
+    `/api/admin/bank/partners?role=${encodeURIComponent(roleFilter)}&status=${encodeURIComponent(statusFilter)}`
     );
     cachedAdminBankPartners = Array.isArray(res.partners) ? res.partners : [];
     populateAdminBankPartnerDirectory();
@@ -10271,7 +10445,7 @@ async function fetchAdminBankPartners() {
     renderAdminBankPartnersTable();
   } catch (err) {
     if (container) {
-      container.innerHTML = `<div class="empty-state"><p style="color:#dc2626;">Failed to load partner bank details: ${escapeHtml(err.message)}</p></div>`;
+    container.innerHTML = `<div class="empty-state"><p style="color:#dc2626;">Failed to load partner bank details: ${escapeHtml(err.message)}</p></div>`;
     }
   }
 }
@@ -10286,24 +10460,24 @@ function renderAdminBankPartnersKpis(partners) {
 
   kpiEl.innerHTML = `
     <div style="background:#f8fafc; border:1px solid var(--border); border-radius:10px; padding:0.7rem 0.85rem;">
-      <div style="font-size:0.7rem; color:var(--muted); font-weight:700; text-transform:uppercase;">Total Partners</div>
-      <div style="font-size:1.25rem; font-weight:800; color:var(--ink); margin-top:0.15rem;">${total}</div>
-      <div style="font-size:0.7rem; color:var(--muted);">Shops, Restaurants &amp; Riders</div>
+    <div style="font-size:0.7rem; color:var(--muted); font-weight:700; text-transform:uppercase;">Total Partners</div>
+    <div style="font-size:1.25rem; font-weight:800; color:var(--ink); margin-top:0.15rem;">${total}</div>
+    <div style="font-size:0.7rem; color:var(--muted);">Shops, Restaurants &amp; Riders</div>
     </div>
     <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:0.7rem 0.85rem;">
-      <div style="font-size:0.7rem; color:#15803d; font-weight:700; text-transform:uppercase;">🔒 Approved &amp; Locked</div>
-      <div style="font-size:1.25rem; font-weight:800; color:#14532d; margin-top:0.15rem;">${approvedLocked}</div>
-      <div style="font-size:0.7rem; color:#166534;">Verified PAN + Bank Match</div>
+    <div style="font-size:0.7rem; color:#15803d; font-weight:700; text-transform:uppercase;">🔒 Approved &amp; Locked</div>
+    <div style="font-size:1.25rem; font-weight:800; color:#14532d; margin-top:0.15rem;">${approvedLocked}</div>
+    <div style="font-size:0.7rem; color:#166534;">Verified PAN + Bank Match</div>
     </div>
     <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:10px; padding:0.7rem 0.85rem;">
-      <div style="font-size:0.7rem; color:#b45309; font-weight:700; text-transform:uppercase;">⏳ Pending Verification</div>
-      <div style="font-size:1.25rem; font-weight:800; color:#92400e; margin-top:0.15rem;">${pendingVerification}</div>
-      <div style="font-size:0.7rem; color:#b45309;">Submitted by Partner</div>
+    <div style="font-size:0.7rem; color:#b45309; font-weight:700; text-transform:uppercase;">⏳ Pending Verification</div>
+    <div style="font-size:1.25rem; font-weight:800; color:#92400e; margin-top:0.15rem;">${pendingVerification}</div>
+    <div style="font-size:0.7rem; color:#b45309;">Submitted by Partner</div>
     </div>
     <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:10px; padding:0.7rem 0.85rem;">
-      <div style="font-size:0.7rem; color:#b91c1c; font-weight:700; text-transform:uppercase;">⚠️ Details Missing</div>
-      <div style="font-size:1.25rem; font-weight:800; color:#991b1b; margin-top:0.15rem;">${notSubmitted}</div>
-      <div style="font-size:0.7rem; color:#b91c1c;">Cannot Be Approved Yet</div>
+    <div style="font-size:0.7rem; color:#b91c1c; font-weight:700; text-transform:uppercase;">⚠️ Details Missing</div>
+    <div style="font-size:1.25rem; font-weight:800; color:#991b1b; margin-top:0.15rem;">${notSubmitted}</div>
+    <div style="font-size:0.7rem; color:#b91c1c;">Cannot Be Approved Yet</div>
     </div>
   `;
 }
@@ -10316,42 +10490,42 @@ function renderAdminBankPartnersTable() {
 
   const filtered = cachedAdminBankPartners.filter((p) => {
     if (idFilter) {
-      const idHay = [p.partnerCode, p.id, p._id, p.email]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      if (!idHay.includes(idFilter)) return false;
+    const idHay = [p.partnerCode, p.id, p._id, p.email]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+    if (!idHay.includes(idFilter)) return false;
     }
     if (!q) return true;
     const bd = p.bankDetails || {};
     const hay = [
-      p.displayName,
-      p.name,
-      p.partnerCode,
-      p.id,
-      p._id,
-      p.email,
-      p.phone,
-      bd.accountHolderName,
-      bd.panHolderName,
-      bd.panNumber,
-      bd.ifscCode,
-      bd.accountNumber,
-      bd.bankName,
+    p.displayName,
+    p.name,
+    p.partnerCode,
+    p.id,
+    p._id,
+    p.email,
+    p.phone,
+    bd.accountHolderName,
+    bd.panHolderName,
+    bd.panNumber,
+    bd.ifscCode,
+    bd.accountNumber,
+    bd.bankName,
     ]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase();
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
     return hay.includes(q);
   });
 
   if (!filtered.length) {
     container.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon">🏦</div>
-        <h3>No Partner Bank Records Found</h3>
-        <p>Try changing your role/status/ID filters or search query.</p>
-      </div>
+    <div class="empty-state">
+    <div class="empty-icon">🏦</div>
+    <h3>No Partner Bank Records Found</h3>
+    <p>Try changing your role/status/ID filters or search query.</p>
+    </div>
     `;
     return;
   }
@@ -10364,133 +10538,71 @@ function renderAdminBankPartnersTable() {
 
   container.innerHTML = `
     <div class="table-responsive">
-      <table>
-        <thead>
-          <tr>
-            <th>Partner &amp; ID</th>
-            <th>Bank Account &amp; IFSC</th>
-            <th>Account Holder vs PAN Card</th>
-            <th>Agreement</th>
-            <th>KYC &amp; Lock Status</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${filtered
-            .map((p) => {
-              const bd = p.bankDetails || {};
-              const hasSubmitted = Boolean(bd.isSubmitted);
-              const isBankApproved = Boolean(bd.isApproved);
-              const isLocked = Boolean(bd.isLocked);
-              const partnerCodeVal = p.partnerCode || String(p.id || p._id || '').slice(-6);
-              const agreementLabel =
-                p.role === 'deliveryPartner'
-                  ? `Rider Payout: <strong>₹${Number(bd.riderPayoutPerOrder ?? 40)}/order</strong>`
-                  : `Tomato Comm: <strong>${Number(bd.agreementCommissionPercent ?? 15)}%</strong>`;
-
-              return `
-                <tr>
-                  <td>
-                    <div style="font-weight:700; color:var(--ink);">${escapeHtml(p.displayName || p.name)}</div>
-                    <div style="margin-top:3px; display:flex; align-items:center; gap:0.35rem; flex-wrap:wrap;">
-                      ${roleBadge(p.role)}
-                      <span style="font-family:monospace; font-size:0.75rem; font-weight:700; background:#e2e8f0; color:#0f172a; padding:2px 6px; border-radius:5px;">🆔 ${escapeHtml(partnerCodeVal)}</span>
-                    </div>
-                    <div style="font-size:0.78rem; color:var(--muted); margin-top:3px;">
-                      📞 ${escapeHtml(p.phone || 'N/A')} ${p.email ? `• ✉️ ${escapeHtml(p.email)}` : ''}
-                    </div>
-                  </td>
-                  <td>
-                    ${
-                      bd.accountNumber
-                        ? `
-                          <div style="font-weight:700;">${escapeHtml(bd.bankName || 'Bank')}</div>
-                          <div style="font-family:monospace; font-size:0.82rem;">A/C: <strong>${escapeHtml(bd.accountNumber)}</strong></div>
-                          <div style="font-family:monospace; font-size:0.78rem; color:#1d4ed8;">IFSC: <strong>${escapeHtml(bd.ifscCode || '—')}</strong></div>
-                          ${bd.upiId ? `<div style="font-size:0.75rem; color:var(--muted);">UPI: ${escapeHtml(bd.upiId)}</div>` : ''}
-                        `
-                        : '<span style="color:#dc2626; font-size:0.82rem; font-weight:600;">⚠️ Not Submitted</span>'
-                    }
-                  </td>
-                  <td>
-                    ${
-                      bd.accountHolderName || bd.panNumber
-                        ? `
-                          <div style="font-size:0.82rem;"><strong>Bank Holder:</strong> ${escapeHtml(bd.accountHolderName || '—')}</div>
-                          <div style="font-size:0.82rem;"><strong>PAN Holder:</strong> ${escapeHtml(bd.panHolderName || '—')}</div>
-                          <div style="font-family:monospace; font-size:0.8rem; margin-top:2px;">PAN: <strong>${escapeHtml(bd.panNumber || '—')}</strong></div>
-                          <div style="margin-top:4px;">
-                            ${
-                              p.namesMatch || p.verification?.nameMatched
-                                ? '<span class="badge badge-approved" style="font-size:0.7rem;">✓ Bank &amp; PAN Name Match</span>'
-                                : '<span class="badge badge-blocked" style="font-size:0.7rem;">✕ Name Mismatch</span>'
-                            }
-                          </div>
-                        `
-                        : '<span style="color:var(--muted); font-size:0.8rem;">No PAN / Holder Name</span>'
-                    }
-                  </td>
-                  <td>
-                    <div style="font-size:0.84rem;">${agreementLabel}</div>
-                    ${bd.adminNote ? `<div style="font-size:0.74rem; color:var(--muted); margin-top:2px;">📝 ${escapeHtml(bd.adminNote)}</div>` : ''}
-                  </td>
-                  <td>
-                    <div>
-                      <span class="badge ${p.isApproved ? 'badge-approved' : 'badge-pending'}">
-                        Partner: ${p.isApproved ? 'Approved' : 'Pending'}
-                      </span>
-                    </div>
-                    <div style="margin-top:4px;">
-                      ${
-                        isBankApproved && isLocked
-                          ? '<span class="badge badge-delivered">🔒 Bank Approved &amp; Locked</span>'
-                          : hasSubmitted
-                          ? '<span class="badge badge-ready">⏳ Submitted (Awaiting Approval)</span>'
-                          : '<span class="badge badge-blocked">⚠️ Incomplete KYC</span>'
-                      }
-                    </div>
-                  </td>
-                  <td>
-                    <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
-                      <button
-                        type="button"
-                        class="btn btn-outline btn-sm"
-                        style="font-weight:600;"
-                        onclick="openAdminBankEditModal('${escapeHtml(String(p.id || p._id || ''))}')"
-                      >
-                        ✏️ View / Edit &amp; Configure
-                      </button>
-                      <button
-                        type="button"
-                        class="btn btn-outline btn-sm"
-                        style="font-weight:600; color:#1d4ed8; border-color:#bfdbfe; background:#eff6ff;"
-                        onclick="viewPartnerSettlementsById('${escapeHtml(partnerCodeVal)}')"
-                        title="Filter payout settlements by this Partner ID"
-                      >
-                        💸 View Payouts
-                      </button>
-                      ${
-                        !p.isApproved || !isBankApproved
-                          ? `
-                            <button
-                              type="button"
-                              class="btn btn-success btn-sm"
-                              onclick="quickApprovePartnerBank('${escapeHtml(String(p.id || p._id || ''))}')"
-                              title="Approve Partner & Lock Bank Details (Requires valid Bank + IFSC + PAN & matching names)"
-                            >
-                              ✓ Approve &amp; Lock
-                            </button>
-                          `
-                          : ''
-                      }
-                    </div>
-                  </td>
-                </tr>
-              `;
-            })
-            .join('')}
-        </tbody>
-      </table>
+    <table>
+    <thead>
+    <tr>
+    <th>Partner &amp; ID</th>
+    <th>Bank Account &amp; IFSC</th>
+    <th>Account Holder vs PAN Card</th>
+    <th>Agreement</th>
+    <th>KYC &amp; Lock Status</th>
+    <th>Actions</th>
+    </tr>
+    </thead>
+    <tbody>
+    ${filtered.map((p) => {
+    const bd = p.bankDetails || {};
+    const hasSubmitted = Boolean(bd.isSubmitted);
+    const isBankApproved = Boolean(bd.isApproved);
+    const isLocked = Boolean(bd.isLocked);
+    const partnerCodeVal = p.partnerCode || String(p.id || p._id || '').slice(-6);
+    const agreementLabel = p.role === 'deliveryPartner'
+    ? `Rider Payout: <strong>₹${Number(bd.riderPayoutPerOrder ?? 40)}/order</strong>`
+    : `Tomato Comm: <strong>${Number(bd.agreementCommissionPercent ?? 15)}%</strong>`;
+    return `<tr>
+    <td>
+    <div style="font-weight:700; color:var(--ink);">${escapeHtml(p.displayName || p.name)}</div>
+    <div style="margin-top:3px; display:flex; align-items:center; gap:0.35rem; flex-wrap:wrap;">
+    ${roleBadge(p.role)}
+    <span style="font-family:monospace; font-size:0.75rem; font-weight:700; background:#e2e8f0; color:#0f172a; padding:2px 6px; border-radius:5px;">🆔 ${escapeHtml(partnerCodeVal)}</span>
+    </div>
+    <div style="font-size:0.78rem; color:var(--muted); margin-top:3px;">📞 ${escapeHtml(p.phone || 'N/A')} ${p.email ? `• ✉️ ${escapeHtml(p.email)}` : ''}</div>
+    </td>
+    <td>
+    ${bd.accountNumber ? `
+    <div style="font-weight:700;">${escapeHtml(bd.bankName || 'Bank')}</div>
+    <div style="font-family:monospace; font-size:0.82rem;">A/C: <strong>${escapeHtml(bd.accountNumber)}</strong></div>
+    <div style="font-family:monospace; font-size:0.78rem; color:#1d4ed8;">IFSC: <strong>${escapeHtml(bd.ifscCode || '—')}</strong></div>
+    ${bd.upiId ? `<div style="font-size:0.75rem; color:var(--muted);">UPI: ${escapeHtml(bd.upiId)}</div>` : ''}
+    ` : '<span style="color:#dc2626; font-size:0.82rem; font-weight:600;">⚠️ Not Submitted</span>'}
+    </td>
+    <td>
+    ${bd.accountHolderName || bd.panNumber ? `
+    <div style="font-size:0.82rem;"><strong>Bank Holder:</strong> ${escapeHtml(bd.accountHolderName || '—')}</div>
+    <div style="font-size:0.82rem;"><strong>PAN Holder:</strong> ${escapeHtml(bd.panHolderName || '—')}</div>
+    <div style="font-family:monospace; font-size:0.8rem; margin-top:2px;">PAN: <strong>${escapeHtml(bd.panNumber || '—')}</strong></div>
+    <div style="margin-top:4px;">${p.namesMatch || p.verification?.nameMatched ? '<span class="badge badge-approved" style="font-size:0.7rem;">✓ Bank &amp; PAN Name Match</span>' : '<span class="badge badge-blocked" style="font-size:0.7rem;">✕ Name Mismatch</span>'}</div>
+    ` : '<span style="color:var(--muted); font-size:0.8rem;">No PAN / Holder Name</span>'}
+    </td>
+    <td>
+    <div style="font-size:0.84rem;">${agreementLabel}</div>
+    ${bd.adminNote ? `<div style="font-size:0.74rem; color:var(--muted); margin-top:2px;">📝 ${escapeHtml(bd.adminNote)}</div>` : ''}
+    </td>
+    <td>
+    <div><span class="badge ${p.isApproved ? 'badge-approved' : 'badge-pending'}">Partner: ${p.isApproved ? 'Approved' : 'Pending'}</span></div>
+    <div style="margin-top:4px;">${isBankApproved && isLocked ? '<span class="badge badge-delivered">🔒 Bank Approved &amp; Locked</span>' : hasSubmitted ? '<span class="badge badge-ready">⏳ Submitted (Awaiting Approval)</span>' : '<span class="badge badge-blocked">⚠️ Incomplete KYC</span>'}</div>
+    </td>
+    <td>
+    <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+    <button type="button" class="btn btn-outline btn-sm" style="font-weight:600;" onclick="openAdminBankEditModal('${escapeHtml(String(p.id || p._id || ''))}')">✏️ View / Edit &amp; Configure</button>
+    <button type="button" class="btn btn-outline btn-sm" style="font-weight:600; color:#1d4ed8; border-color:#bfdbfe; background:#eff6ff;" onclick="viewPartnerSettlementsById('${escapeHtml(partnerCodeVal)}')" title="Filter payout settlements by this Partner ID">💸 View Payouts</button>
+    ${!p.isApproved || !isBankApproved ? `<button type="button" class="btn btn-success btn-sm" onclick="quickApprovePartnerBank('${escapeHtml(String(p.id || p._id || ''))}')" title="Approve Partner & Lock Bank Details">✓ Approve &amp; Lock</button>` : ''}
+    </div>
+    </td>
+    </tr>`;
+    }).join('')}
+    </tbody>
+    </table>
     </div>
   `;
 }
@@ -10498,8 +10610,8 @@ function renderAdminBankPartnersTable() {
 async function openAdminBankModalByUserId(userId) {
   if (!cachedAdminBankPartners.length) {
     try {
-      const res = await apiFetch('/api/admin/bank/partners?role=all&status=all');
-      cachedAdminBankPartners = Array.isArray(res.partners) ? res.partners : [];
+    const res = await apiFetch('/api/admin/bank/partners?role=all&status=all');
+    cachedAdminBankPartners = Array.isArray(res.partners) ? res.partners : [];
     } catch (_) {}
   }
   openAdminBankEditModal(userId);
@@ -10511,11 +10623,11 @@ async function openAdminBankEditModal(userId) {
   );
   if (!partner && userId) {
     try {
-      const res = await apiFetch('/api/admin/bank/partners?role=all&status=all');
-      cachedAdminBankPartners = Array.isArray(res.partners) ? res.partners : [];
-      partner = cachedAdminBankPartners.find(
-        (p) => String(p.id || p._id) === String(userId)
-      );
+    const res = await apiFetch('/api/admin/bank/partners?role=all&status=all');
+    cachedAdminBankPartners = Array.isArray(res.partners) ? res.partners : [];
+    partner = cachedAdminBankPartners.find(
+    (p) => String(p.id || p._id) === String(userId)
+    );
     } catch (_) {}
   }
   if (!partner) {
@@ -10530,18 +10642,18 @@ async function openAdminBankEditModal(userId) {
   const summaryEl = document.getElementById('admin-bank-modal-partner-summary');
   if (summaryEl) {
     summaryEl.innerHTML = `
-      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
-        <div>
-          <strong>${escapeHtml(partner.displayName || partner.name)}</strong>
-          <span style="color:var(--muted); font-family:monospace; margin-left:6px;">(${escapeHtml(partner.partnerCode || partner.role)})</span>
-          <div style="font-size:0.78rem; color:var(--muted);">📞 ${escapeHtml(partner.phone || 'N/A')} • ✉️ ${escapeHtml(partner.email || 'N/A')}</div>
-        </div>
-        <div>
-          <span class="badge ${bd.isLocked ? 'badge-delivered' : 'badge-pending'}">
-            ${bd.isLocked ? '🔒 Locked for Partner (Admin Editable)' : '🔓 Editable'}
-          </span>
-        </div>
-      </div>
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+    <div>
+    <strong>${escapeHtml(partner.displayName || partner.name)}</strong>
+    <span style="color:var(--muted); font-family:monospace; margin-left:6px;">(${escapeHtml(partner.partnerCode || partner.role)})</span>
+    <div style="font-size:0.78rem; color:var(--muted);">📞 ${escapeHtml(partner.phone || 'N/A')} • ✉️ ${escapeHtml(partner.email || 'N/A')}</div>
+    </div>
+    <div>
+    <span class="badge ${bd.isLocked ? 'badge-delivered' : 'badge-pending'}">
+    ${bd.isLocked ? '🔒 Locked for Partner (Admin Editable)' : '🔓 Editable'}
+    </span>
+    </div>
+    </div>
     `;
   }
 
@@ -10567,25 +10679,25 @@ async function openAdminBankEditModal(userId) {
     if (commGroup) commGroup.style.display = 'none';
     if (riderGroup) riderGroup.style.display = 'block';
     if (noteLabel) {
-      noteLabel.textContent = 'Admin Verification / Agreement Note (Rider Licence Number & Expiry)';
+    noteLabel.textContent = 'Admin Verification / Agreement Note (Rider Licence Number & Expiry)';
     }
     if (noteInput) {
-      noteInput.placeholder = 'Rider has to share Licence number & expiry (e.g. DL No: KA0120200012345 | Expiry: 15/08/2035)';
+    noteInput.placeholder = 'Rider has to share Licence number & expiry (e.g. DL No: KA0120200012345 | Expiry: 15/08/2035)';
     }
     if (noteHint) {
-      noteHint.textContent = '📌 Rider has to share Licence number & expiry. (Shop and Restaurant has to share FSSAI registration number and expiry.)';
+    noteHint.textContent = '📌 Rider has to share Licence number & expiry. (Shop and Restaurant has to share FSSAI registration number and expiry.)';
     }
   } else {
     if (commGroup) commGroup.style.display = 'block';
     if (riderGroup) riderGroup.style.display = 'none';
     if (noteLabel) {
-      noteLabel.textContent = 'Admin Verification / Agreement Note (FSSAI Registration Number & Expiry)';
+    noteLabel.textContent = 'Admin Verification / Agreement Note (FSSAI Registration Number & Expiry)';
     }
     if (noteInput) {
-      noteInput.placeholder = 'Shop and Restaurant has to share FSSAI registration number and expiry (e.g. FSSAI: 11223344556677 | Expiry: 31/12/2028)';
+    noteInput.placeholder = 'Shop and Restaurant has to share FSSAI registration number and expiry (e.g. FSSAI: 11223344556677 | Expiry: 31/12/2028)';
     }
     if (noteHint) {
-      noteHint.textContent = '📌 Shop and Restaurant has to share FSSAI registration number and expiry. (Rider has to share Licence number & expiry.)';
+    noteHint.textContent = '📌 Shop and Restaurant has to share FSSAI registration number and expiry. (Rider has to share Licence number & expiry.)';
     }
   }
 
@@ -10640,8 +10752,8 @@ async function saveAdminPartnerBankDetails(event) {
 
   try {
     const res = await apiFetch(`/api/admin/bank/partners/${encodeURIComponent(userId)}`, {
-      method: 'PUT',
-      body: JSON.stringify(payload),
+    method: 'PUT',
+    body: JSON.stringify(payload),
     });
     alert(res.message || 'Partner bank details & approval saved!');
     closeModal('admin-bank-edit-modal');
@@ -10655,18 +10767,19 @@ async function saveAdminPartnerBankDetails(event) {
 async function quickApprovePartnerBank(userId) {
   try {
     const res = await apiFetch(`/api/admin/users/${encodeURIComponent(userId)}/approve`, {
-      method: 'POST',
+    method: 'POST',
     });
     alert(res.message || 'Partner approved & bank details locked!');
     fetchAdminBankPartners();
     refreshAdminViews();
   } catch (err) {
-    if (
-      confirm(
-        `${err.message}\n\nWould you like to open the Bank & PAN verification form for this partner now?`
-      )
-    ) {
-      openAdminBankEditModal(userId);
+    const msg = err.message || 'Approval failed';
+    if (/pincode|serviceable/i.test(msg)) {
+    alert(`🚫 Approval Blocked — Pincode Out of Serviceable Range:\n\n${msg}`);
+    return;
+    }
+    if (confirm(`${msg}\n\nWould you like to open the Bank & PAN verification form for this partner now?`)) {
+    openAdminBankEditModal(userId);
     }
   }
 }
@@ -10691,12 +10804,12 @@ function populateAdminBankPartnerDirectory(directoryList) {
   const list = Array.isArray(directoryList) && directoryList.length
     ? directoryList
     : cachedAdminBankPartners.map((p) => ({
-        id: String(p.id || p._id || ''),
-        code: p.partnerCode || String(p.id || p._id || '').slice(-6),
-        name: p.displayName || p.name || 'Partner',
-        email: p.email || '',
-        role: p.role || 'restaurant',
-      }));
+    id: String(p.id || p._id || ''),
+    code: p.partnerCode || String(p.id || p._id || '').slice(-6),
+    name: p.displayName || p.name || 'Partner',
+    email: p.email || '',
+    role: p.role || 'restaurant',
+    }));
 
   const selectEl = document.getElementById('admin-bank-settlement-partner-select');
   const datalistEl = document.getElementById('admin-bank-settlement-id-datalist');
@@ -10708,34 +10821,34 @@ function populateAdminBankPartnerDirectory(directoryList) {
     const riders = list.filter((p) => p.role === 'deliveryPartner');
 
     const renderOpts = (items, icon) =>
-      items
-        .map(
-          (p) =>
-            `<option value="${escapeHtml(p.code)}" ${
-              currentFilterId &&
-              (currentFilterId.toLowerCase() === String(p.code).toLowerCase() ||
-                currentFilterId.toLowerCase() === String(p.id).toLowerCase())
-                ? 'selected'
-                : ''
-            }>${icon} ${escapeHtml(p.code)} — ${escapeHtml(p.name)}</option>`
-        )
-        .join('');
+    items
+    .map(
+    (p) =>
+    `<option value="${escapeHtml(p.code)}" ${
+    currentFilterId &&
+    (currentFilterId.toLowerCase() === String(p.code).toLowerCase() ||
+    currentFilterId.toLowerCase() === String(p.id).toLowerCase())
+    ? 'selected'
+    : ''
+    }>${icon} ${escapeHtml(p.code)} — ${escapeHtml(p.name)}</option>`
+    )
+    .join('');
 
     selectEl.innerHTML = `
-      <option value="">All Partners</option>
-      ${restaurants.length ? `<optgroup label="🏪 Restaurants (${restaurants.length})">${renderOpts(restaurants, '🏪')}</optgroup>` : ''}
-      ${shops.length ? `<optgroup label="🏬 Shops (${shops.length})">${renderOpts(shops, '🏬')}</optgroup>` : ''}
-      ${riders.length ? `<optgroup label="🚴 Riders (${riders.length})">${renderOpts(riders, '🚴')}</optgroup>` : ''}
+    <option value="">All Partners</option>
+    ${restaurants.length ? `<optgroup label="🏪 Restaurants (${restaurants.length})">${renderOpts(restaurants, '🏪')}</optgroup>` : ''}
+    ${shops.length ? `<optgroup label="🏬 Shops (${shops.length})">${renderOpts(shops, '🏬')}</optgroup>` : ''}
+    ${riders.length ? `<optgroup label="🚴 Riders (${riders.length})">${renderOpts(riders, '🚴')}</optgroup>` : ''}
     `;
   }
 
   if (datalistEl) {
     datalistEl.innerHTML = list
-      .map((p) => {
-        const roleLabel = p.role === 'shop' ? 'Shop' : p.role === 'restaurant' ? 'Restaurant' : 'Rider';
-        return `<option value="${escapeHtml(p.code)}">${escapeHtml(roleLabel)}: ${escapeHtml(p.name)} (${escapeHtml(p.email || p.id)})</option>`;
-      })
-      .join('');
+    .map((p) => {
+    const roleLabel = p.role === 'shop' ? 'Shop' : p.role === 'restaurant' ? 'Restaurant' : 'Rider';
+    return `<option value="${escapeHtml(p.code)}">${escapeHtml(roleLabel)}: ${escapeHtml(p.name)} (${escapeHtml(p.email || p.id)})</option>`;
+    })
+    .join('');
   }
 }
 
@@ -10755,7 +10868,7 @@ function quickFilterSettlementsById(idVal) {
   if (idInput) idInput.value = cleanId;
   if (selectEl) {
     const matchOpt = Array.from(selectEl.options).find(
-      (opt) => opt.value.toLowerCase() === cleanId.toLowerCase()
+    (opt) => opt.value.toLowerCase() === cleanId.toLowerCase()
     );
     selectEl.value = matchOpt ? matchOpt.value : '';
   }
@@ -10858,25 +10971,25 @@ async function fetchAdminBankSettlements() {
   }
   try {
     const queryParams = new URLSearchParams({
-      orderType,
-      payoutStatus: status,
+    orderType,
+    payoutStatus: status,
     });
     if (fromDate) queryParams.set('fromDate', fromDate);
     if (toDate) queryParams.set('toDate', toDate);
     if (filterById) queryParams.set('filterById', filterById);
 
     const res = await apiFetch(
-      `/api/admin/bank/settlements?${queryParams.toString()}`
+    `/api/admin/bank/settlements?${queryParams.toString()}`
     );
     cachedAdminBankSettlements = Array.isArray(res.settlements) ? res.settlements : [];
     if (Array.isArray(res.partnerDirectory)) {
-      populateAdminBankPartnerDirectory(res.partnerDirectory);
+    populateAdminBankPartnerDirectory(res.partnerDirectory);
     }
     renderAdminBankSettlementsKpis(res.summary || {});
     renderAdminBankSettlementsTable();
   } catch (err) {
     if (container) {
-      container.innerHTML = `<div class="empty-state"><p style="color:#dc2626;">Failed to load settlements: ${escapeHtml(err.message)}</p></div>`;
+    container.innerHTML = `<div class="empty-state"><p style="color:#dc2626;">Failed to load settlements: ${escapeHtml(err.message)}</p></div>`;
     }
   }
 }
@@ -10890,7 +11003,7 @@ function renderAdminBankSettlementsKpis(summary) {
   const totalOrds = Number(summary.totalOrders ?? summary.totalOrdersTracked ?? 0);
   const netBalance = Number(
     summary.tomatoNetBankBalance ??
-      totalRecv - Number(summary.completedPartnerPayouts || 0) - Number(summary.completedRiderPayouts || 0)
+    totalRecv - Number(summary.completedPartnerPayouts || 0) - Number(summary.completedRiderPayouts || 0)
   );
   const fromDateVal = (document.getElementById('admin-bank-settlement-from-date')?.value || '').trim();
   const toDateVal = (document.getElementById('admin-bank-settlement-to-date')?.value || '').trim();
@@ -10904,12 +11017,12 @@ function renderAdminBankSettlementsKpis(summary) {
 
   if (periodBadgeEl) {
     if (!fromDateVal && !toDateVal) {
-      periodBadgeEl.innerHTML = `<span class="badge badge-accepted" style="font-size:0.72rem;">All Time</span>${userFilterBadge} All fields &amp; settlements below reflect payout activity across all dates`;
+    periodBadgeEl.innerHTML = `<span class="badge badge-accepted" style="font-size:0.72rem;">All Time</span>${userFilterBadge} All fields &amp; settlements below reflect payout activity across all dates`;
     } else if (fromDateVal === todayStr && toDateVal === todayStr) {
-      periodBadgeEl.innerHTML = `<span class="badge badge-delivered" style="font-size:0.72rem;">Today: ${escapeHtml(todayStr)}</span>${userFilterBadge} All fields &amp; settlements below reflect activity for today`;
+    periodBadgeEl.innerHTML = `<span class="badge badge-delivered" style="font-size:0.72rem;">Today: ${escapeHtml(todayStr)}</span>${userFilterBadge} All fields &amp; settlements below reflect activity for today`;
     } else {
-      const rangeText = `${fromDateVal || 'Beginning'} to ${toDateVal || 'Present'}`;
-      periodBadgeEl.innerHTML = `<span class="badge badge-preparing" style="font-size:0.72rem;">Period: ${escapeHtml(rangeText)}</span>${userFilterBadge} All fields &amp; settlements below reflect activity for selected range`;
+    const rangeText = `${fromDateVal || 'Beginning'} to ${toDateVal || 'Present'}`;
+    periodBadgeEl.innerHTML = `<span class="badge badge-preparing" style="font-size:0.72rem;">Period: ${escapeHtml(rangeText)}</span>${userFilterBadge} All fields &amp; settlements below reflect activity for selected range`;
     }
   }
 
@@ -10924,29 +11037,29 @@ function renderAdminBankSettlementsKpis(summary) {
 
   kpiEl.innerHTML = `
     <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:0.7rem 0.85rem;">
-      <div style="font-size:0.7rem; color:#1d4ed8; font-weight:700; text-transform:uppercase;">🏦 Credited to Tomato A/C</div>
-      <div style="font-size:1.25rem; font-weight:800; color:#1e3a8a; margin-top:0.15rem;">₹${totalRecv.toLocaleString('en-IN')}</div>
-      <div style="font-size:0.7rem; color:#1e40af;">${escapeHtml(dateRangeNote)} (${totalOrds} Orders)</div>
+    <div style="font-size:0.7rem; color:#1d4ed8; font-weight:700; text-transform:uppercase;">🏦 Credited to Tomato A/C</div>
+    <div style="font-size:1.25rem; font-weight:800; color:#1e3a8a; margin-top:0.15rem;">₹${totalRecv.toLocaleString('en-IN')}</div>
+    <div style="font-size:0.7rem; color:#1e40af;">${escapeHtml(dateRangeNote)} (${totalOrds} Orders)</div>
     </div>
     <div style="background:#ecfeff; border:1px solid #a5f3fc; border-radius:10px; padding:0.7rem 0.85rem;">
-      <div style="font-size:0.7rem; color:#0e7490; font-weight:700; text-transform:uppercase;">🏛️ Available in Tomato A/C</div>
-      <div style="font-size:1.25rem; font-weight:800; color:#155e75; margin-top:0.15rem;">₹${netBalance.toLocaleString('en-IN')}</div>
-      <div style="font-size:0.7rem; color:#0e7490;">After Partner &amp; Rider Payouts</div>
+    <div style="font-size:0.7rem; color:#0e7490; font-weight:700; text-transform:uppercase;">🏛️ Available in Tomato A/C</div>
+    <div style="font-size:1.25rem; font-weight:800; color:#155e75; margin-top:0.15rem;">₹${netBalance.toLocaleString('en-IN')}</div>
+    <div style="font-size:0.7rem; color:#0e7490;">After Partner &amp; Rider Payouts</div>
     </div>
     <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:0.7rem 0.85rem;">
-      <div style="font-size:0.7rem; color:#15803d; font-weight:700; text-transform:uppercase;">💰 Commission Retained</div>
-      <div style="font-size:1.25rem; font-weight:800; color:#14532d; margin-top:0.15rem;">₹${totalComm.toLocaleString('en-IN')}</div>
-      <div style="font-size:0.7rem; color:#166534;">Based on Partner Agreements</div>
+    <div style="font-size:0.7rem; color:#15803d; font-weight:700; text-transform:uppercase;">💰 Commission Retained</div>
+    <div style="font-size:1.25rem; font-weight:800; color:#14532d; margin-top:0.15rem;">₹${totalComm.toLocaleString('en-IN')}</div>
+    <div style="font-size:0.7rem; color:#166534;">Based on Partner Agreements</div>
     </div>
     <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:10px; padding:0.7rem 0.85rem;">
-      <div style="font-size:0.7rem; color:#b45309; font-weight:700; text-transform:uppercase;">🏪 Pending Partner Payouts</div>
-      <div style="font-size:1.25rem; font-weight:800; color:#92400e; margin-top:0.15rem;">₹${Number(summary.pendingPartnerPayouts || 0).toLocaleString('en-IN')}</div>
-      <div style="font-size:0.7rem; color:#b45309;">Settled: ₹${Number(summary.completedPartnerPayouts || 0).toLocaleString('en-IN')}</div>
+    <div style="font-size:0.7rem; color:#b45309; font-weight:700; text-transform:uppercase;">🏪 Pending Partner Payouts</div>
+    <div style="font-size:1.25rem; font-weight:800; color:#92400e; margin-top:0.15rem;">₹${Number(summary.pendingPartnerPayouts || 0).toLocaleString('en-IN')}</div>
+    <div style="font-size:0.7rem; color:#b45309;">Settled: ₹${Number(summary.completedPartnerPayouts || 0).toLocaleString('en-IN')}</div>
     </div>
     <div style="background:#fef3c7; border:1px solid #fde047; border-radius:10px; padding:0.7rem 0.85rem;">
-      <div style="font-size:0.7rem; color:#a16207; font-weight:700; text-transform:uppercase;">🚴 Pending Rider Payouts</div>
-      <div style="font-size:1.25rem; font-weight:800; color:#854d0e; margin-top:0.15rem;">₹${Number(summary.pendingRiderPayouts || 0).toLocaleString('en-IN')}</div>
-      <div style="font-size:0.7rem; color:#a16207;">Settled: ₹${Number(summary.completedRiderPayouts || 0).toLocaleString('en-IN')}</div>
+    <div style="font-size:0.7rem; color:#a16207; font-weight:700; text-transform:uppercase;">🚴 Pending Rider Payouts</div>
+    <div style="font-size:1.25rem; font-weight:800; color:#854d0e; margin-top:0.15rem;">₹${Number(summary.pendingRiderPayouts || 0).toLocaleString('en-IN')}</div>
+    <div style="font-size:0.7rem; color:#a16207;">Settled: ₹${Number(summary.completedRiderPayouts || 0).toLocaleString('en-IN')}</div>
     </div>
   `;
 }
@@ -10959,230 +11072,129 @@ function renderAdminBankSettlementsTable() {
 
   const filtered = cachedAdminBankSettlements.filter((s) => {
     if (idFilter) {
-      const idHay = [
-        s.partnerCode,
-        s.partnerId,
-        s.partnerEmail,
-        s.partnerName,
-        s.riderCode,
-        s.riderId,
-        s.riderEmail,
-        s.riderName,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      if (!idHay.includes(idFilter)) return false;
+    const idHay = [
+    s.partnerCode,
+    s.partnerId,
+    s.partnerEmail,
+    s.partnerName,
+    s.riderCode,
+    s.riderId,
+    s.riderEmail,
+    s.riderName,
+    ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+    if (!idHay.includes(idFilter)) return false;
     }
     if (!q) return true;
     const hay = [
-      s.orderNumber,
-      s.partnerName,
-      s.partnerCode,
-      s.partnerId,
-      s.riderName,
-      s.riderCode,
-      s.riderId,
-      s.transactionId,
-      s.partnerPayoutRef,
-      s.partnerPayoutReference,
-      s.riderPayoutRef,
-      s.riderPayoutReference,
+    s.orderNumber,
+    s.partnerName,
+    s.partnerCode,
+    s.partnerId,
+    s.riderName,
+    s.riderCode,
+    s.riderId,
+    s.transactionId,
+    s.partnerPayoutRef,
+    s.partnerPayoutReference,
+    s.riderPayoutRef,
+    s.riderPayoutReference,
     ]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase();
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
     return hay.includes(q);
   });
 
   if (!filtered.length) {
     container.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon">💸</div>
-        <h3>No Order Payment Settlements Found</h3>
-        <p>No settlements match the selected Shop/Restaurant ID, date range, or filter criteria. Try adjusting the Filter by ID / From–To dates or clicking "Clear Filters".</p>
-      </div>
+    <div class="empty-state">
+    <div class="empty-icon">💸</div>
+    <h3>No Order Payment Settlements Found</h3>
+    <p>No settlements match the selected Shop/Restaurant ID, date range, or filter criteria. Try adjusting the Filter by ID / From–To dates or clicking "Clear Filters".</p>
+    </div>
     `;
     return;
   }
 
   container.innerHTML = `
     <div class="table-responsive">
-      <table>
-        <thead>
-          <tr>
-            <th>Order &amp; Tomato Receipt</th>
-            <th>Shop / Restaurant Payout (ID)</th>
-            <th>Rider Delivery Payout (ID)</th>
-            <th>Tomato Net Share</th>
-            <th>Approve &amp; Send Payout</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${filtered
-            .map((s) => {
-              const pBank = s.partnerBankDetails || s.partnerBankSnapshot || {};
-              const rBank = s.riderBankDetails || s.riderBankSnapshot || {};
-              const partnerPaid = s.partnerPayoutStatus === 'approved_paid' || s.partnerPayoutStatus === 'paid';
-              const riderPaid = s.riderPayoutStatus === 'approved_paid' || s.riderPayoutStatus === 'paid';
-              const partnerRef = s.partnerPayoutRef || s.partnerPayoutReference || 'UTR';
-              const riderRef = s.riderPayoutRef || s.riderPayoutReference || 'UTR';
-              const hasRider = Boolean(s.riderId);
-              const partnerCodeLabel =
-                s.partnerCode ||
-                (s.partnerId ? `${s.orderType === 'shop' ? 'SHOP' : 'REST'}-${String(s.partnerId).slice(-6).toUpperCase()}` : '');
-              const riderCodeLabel =
-                s.riderCode || (s.riderId ? `RDR-${String(s.riderId).slice(-6).toUpperCase()}` : '');
-              const receiptDateLabel = formatSettlementDateTime(s.tomatoReceivedAt || s.createdAt);
-              const partnerPaidDateLabel = formatSettlementDateTime(s.partnerPaidAt);
-              const riderPaidDateLabel = formatSettlementDateTime(s.riderPaidAt);
-
-              return `
-                <tr>
-                  <td>
-                    <div style="font-weight:700; color:var(--ink);">Order #${escapeHtml(s.orderNumber || String(s.orderId).slice(-6))}</div>
-                    ${
-                      receiptDateLabel
-                        ? `<div style="font-size:0.73rem; color:#475569; font-weight:600; margin-top:1px;">📅 ${escapeHtml(receiptDateLabel)}</div>`
-                        : ''
-                    }
-                    <div style="font-size:0.88rem; font-weight:800; color:#15803d; margin-top:2px;">
-                      Received: ₹${Number(s.totalAmount || 0).toLocaleString('en-IN')}
-                    </div>
-                    <div style="font-size:0.75rem; color:var(--muted);">
-                      Method: <strong>${escapeHtml((s.paymentMethod || 'online').toUpperCase())}</strong>
-                      • Status: <strong>${escapeHtml(s.orderStatus || 'placed')}</strong>
-                    </div>
-                    <div style="margin-top:3px;">
-                      <span class="badge ${s.tomatoAccountStatus === 'received' ? 'badge-approved' : 'badge-pending'}" style="font-size:0.68rem;">
-                        ${s.tomatoAccountStatus === 'received' ? '🏦 In Tomato Account' : '⏳ COD Pending Collection'}
-                      </span>
-                    </div>
-                  </td>
-                  <td>
-                    <div style="font-weight:700; display:flex; align-items:center; gap:0.35rem; flex-wrap:wrap;">
-                      <span>${s.orderType === 'shop' ? '🏬' : '🏪'} ${escapeHtml(s.partnerName || 'Partner')}</span>
-                      ${
-                        partnerCodeLabel
-                          ? `<span onclick="quickFilterSettlementsById('${escapeHtml(partnerCodeLabel)}')" title="Click to filter settlements by ${escapeHtml(partnerCodeLabel)}" style="cursor:pointer; font-family:monospace; font-size:0.72rem; font-weight:700; background:#dbeafe; color:#1e40af; padding:1px 6px; border-radius:5px; border:1px solid #bfdbfe;">🆔 ${escapeHtml(partnerCodeLabel)}</span>`
-                          : ''
-                      }
-                    </div>
-                    <div style="font-size:0.84rem; color:#1d4ed8; font-weight:700; margin-top:2px;">
-                      Payout: ₹${Number(s.partnerPayoutAmount || 0).toLocaleString('en-IN')}
-                      <span style="font-size:0.74rem; color:var(--muted); font-weight:500;">(Agr: ${Number(s.agreementCommissionPercent || 15)}% comm)</span>
-                    </div>
-                    ${
-                      pBank.accountNumber
-                        ? `<div style="font-family:monospace; font-size:0.74rem; color:var(--muted);">A/C: ${escapeHtml(pBank.accountNumber)} (${escapeHtml(pBank.ifscCode || '')})</div>`
-                        : '<div style="font-size:0.73rem; color:#dc2626;">⚠️ Partner Bank Not Approved</div>'
-                    }
-                    <div style="margin-top:4px;">
-                      <span class="badge ${partnerPaid ? 'badge-delivered' : 'badge-pending'}" style="font-size:0.7rem;">
-                        ${partnerPaid ? `✅ Paid (${escapeHtml(partnerRef)})` : '⏳ Pending Transfer'}
-                      </span>
-                      ${
-                        partnerPaid && partnerPaidDateLabel
-                          ? `<div style="font-size:0.7rem; color:#15803d; margin-top:2px;">Paid: ${escapeHtml(partnerPaidDateLabel)}</div>`
-                          : ''
-                      }
-                    </div>
-                  </td>
-                  <td>
-                    ${
-                      hasRider
-                        ? `
-                          <div style="font-weight:700; display:flex; align-items:center; gap:0.35rem; flex-wrap:wrap;">
-                            <span>🚴 ${escapeHtml(s.riderName || 'Rider')}</span>
-                            ${
-                              riderCodeLabel
-                                ? `<span onclick="quickFilterSettlementsById('${escapeHtml(riderCodeLabel)}')" title="Click to filter settlements by ${escapeHtml(riderCodeLabel)}" style="cursor:pointer; font-family:monospace; font-size:0.72rem; font-weight:700; background:#fef3c7; color:#92400e; padding:1px 6px; border-radius:5px; border:1px solid #fde68a;">🆔 ${escapeHtml(riderCodeLabel)}</span>`
-                                : ''
-                            }
-                          </div>
-                          <div style="font-size:0.84rem; color:#15803d; font-weight:700; margin-top:2px;">
-                            Payout: ₹${Number(s.riderPayoutAmount || 0).toLocaleString('en-IN')}
-                          </div>
-                          ${
-                            rBank.accountNumber
-                              ? `<div style="font-family:monospace; font-size:0.74rem; color:var(--muted);">A/C: ${escapeHtml(rBank.accountNumber)} (${escapeHtml(rBank.ifscCode || '')})</div>`
-                              : '<div style="font-size:0.73rem; color:#dc2626;">⚠️ Rider Bank Not Approved</div>'
-                          }
-                          <div style="margin-top:4px;">
-                            <span class="badge ${riderPaid ? 'badge-delivered' : 'badge-pending'}" style="font-size:0.7rem;">
-                              ${riderPaid ? `✅ Paid (${escapeHtml(riderRef)})` : '⏳ Pending Transfer'}
-                            </span>
-                            ${
-                              riderPaid && riderPaidDateLabel
-                                ? `<div style="font-size:0.7rem; color:#15803d; margin-top:2px;">Paid: ${escapeHtml(riderPaidDateLabel)}</div>`
-                                : ''
-                            }
-                          </div>
-                        `
-                        : '<span style="color:var(--muted); font-size:0.8rem;">No Rider Assigned Yet</span>'
-                    }
-                  </td>
-                  <td>
-                    <div style="font-weight:800; color:#0f172a;">₹${Number(s.tomatoCommissionAmount || 0).toLocaleString('en-IN')}</div>
-                    <div style="font-size:0.74rem; color:var(--muted);">Commission (${Number(s.agreementCommissionPercent || 15)}%)</div>
-                  </td>
-                  <td>
-                    <div style="display:flex; flex-direction:column; gap:0.35rem;">
-                      <button
-                        type="button"
-                        class="btn btn-outline btn-sm"
-                        onclick="openAdminSettlementAgreementModal('${escapeHtml(String(s._id))}')"
-                      >
-                        ⚙️ Configure Agreement
-                      </button>
-                      ${
-                        !partnerPaid
-                          ? `
-                            <button
-                              type="button"
-                              class="btn btn-success btn-sm"
-                              onclick="approveAndSendTomatoPayout('${escapeHtml(String(s._id))}', 'partner')"
-                            >
-                              💸 Pay ${s.orderType === 'shop' ? 'Shop' : 'Restaurant'} (₹${Number(s.partnerPayoutAmount || 0)})
-                            </button>
-                          `
-                          : ''
-                      }
-                      ${
-                        hasRider && !riderPaid
-                          ? `
-                            <button
-                              type="button"
-                              class="btn btn-primary btn-sm"
-                              onclick="approveAndSendTomatoPayout('${escapeHtml(String(s._id))}', 'rider')"
-                            >
-                              🚴 Pay Rider (₹${Number(s.riderPayoutAmount || 0)})
-                            </button>
-                          `
-                          : ''
-                      }
-                      ${
-                        !partnerPaid && hasRider && !riderPaid
-                          ? `
-                            <button
-                              type="button"
-                              class="btn btn-outline btn-sm"
-                              style="background:#f0fdf4; border-color:#86efac; color:#15803d; font-weight:700;"
-                              onclick="approveAndSendTomatoPayout('${escapeHtml(String(s._id))}', 'both')"
-                            >
-                              ✓ Approve &amp; Pay Both
-                            </button>
-                          `
-                          : ''
-                      }
-                    </div>
-                  </td>
-                </tr>
-              `;
-            })
-            .join('')}
-        </tbody>
-      </table>
+    <table>
+    <thead>
+    <tr>
+    <th>Order &amp; Tomato Receipt</th>
+    <th>Shop / Restaurant Payout (ID)</th>
+    <th>Rider Delivery Payout (ID)</th>
+    <th>Tomato Net Share</th>
+    <th>Approve &amp; Send Payout</th>
+    </tr>
+    </thead>
+    <tbody>
+    ${filtered.map((s) => {
+    const pBank = s.partnerBankDetails || s.partnerBankSnapshot || {};
+    const rBank = s.riderBankDetails || s.riderBankSnapshot || {};
+    const partnerPaid = s.partnerPayoutStatus === 'approved_paid' || s.partnerPayoutStatus === 'paid';
+    const riderPaid = s.riderPayoutStatus === 'approved_paid' || s.riderPayoutStatus === 'paid';
+    const partnerRef = s.partnerPayoutRef || s.partnerPayoutReference || 'UTR';
+    const riderRef = s.riderPayoutRef || s.riderPayoutReference || 'UTR';
+    const hasRider = Boolean(s.riderId);
+    const partnerCodeLabel = s.partnerCode || (s.partnerId ? `${s.orderType === 'shop' ? 'SHOP' : 'REST'}-${String(s.partnerId).slice(-6).toUpperCase()}` : '');
+    const riderCodeLabel = s.riderCode || (s.riderId ? `RDR-${String(s.riderId).slice(-6).toUpperCase()}` : '');
+    const receiptDateLabel = formatSettlementDateTime(s.tomatoReceivedAt || s.createdAt);
+    const partnerPaidDateLabel = formatSettlementDateTime(s.partnerPaidAt);
+    const riderPaidDateLabel = formatSettlementDateTime(s.riderPaidAt);
+    return `<tr>
+    <td>
+    <div style="font-weight:700; color:var(--ink);">Order #${escapeHtml(s.orderNumber || String(s.orderId).slice(-6))}</div>
+    ${receiptDateLabel ? `<div style="font-size:0.73rem; color:#475569; font-weight:600; margin-top:1px;">📅 ${escapeHtml(receiptDateLabel)}</div>` : ''}
+    <div style="font-size:0.88rem; font-weight:800; color:#15803d; margin-top:2px;">Received: ₹${Number(s.totalAmount || 0).toLocaleString('en-IN')}</div>
+    <div style="font-size:0.75rem; color:var(--muted);">Method: <strong>${escapeHtml((s.paymentMethod || 'online').toUpperCase())}</strong> • Status: <strong>${escapeHtml(s.orderStatus || 'placed')}</strong></div>
+    <div style="margin-top:3px;"><span class="badge ${s.tomatoAccountStatus === 'received' ? 'badge-approved' : 'badge-pending'}" style="font-size:0.68rem;">${s.tomatoAccountStatus === 'received' ? '🏦 In Tomato Account' : '⏳ COD Pending Collection'}</span></div>
+    </td>
+    <td>
+    <div style="font-weight:700; display:flex; align-items:center; gap:0.35rem; flex-wrap:wrap;">
+    <span>${s.orderType === 'shop' ? '🏬' : '🏪'} ${escapeHtml(s.partnerName || 'Partner')}</span>
+    ${partnerCodeLabel ? `<span onclick="quickFilterSettlementsById('${escapeHtml(partnerCodeLabel)}')" title="Click to filter settlements by ${escapeHtml(partnerCodeLabel)}" style="cursor:pointer; font-family:monospace; font-size:0.72rem; font-weight:700; background:#dbeafe; color:#1e40af; padding:1px 6px; border-radius:5px; border:1px solid #bfdbfe;">🆔 ${escapeHtml(partnerCodeLabel)}</span>` : ''}
+    </div>
+    <div style="font-size:0.84rem; color:#1d4ed8; font-weight:700; margin-top:2px;">Payout: ₹${Number(s.partnerPayoutAmount || 0).toLocaleString('en-IN')} <span style="font-size:0.74rem; color:var(--muted); font-weight:500;">(Agr: ${Number(s.agreementCommissionPercent || 15)}% comm)</span></div>
+    ${pBank.accountNumber ? `<div style="font-family:monospace; font-size:0.74rem; color:var(--muted);">A/C: ${escapeHtml(pBank.accountNumber)} (${escapeHtml(pBank.ifscCode || '')})</div>` : '<div style="font-size:0.73rem; color:#dc2626;">⚠️ Partner Bank Not Approved</div>'}
+    <div style="margin-top:4px;">
+    <span class="badge ${partnerPaid ? 'badge-delivered' : 'badge-pending'}" style="font-size:0.7rem;">${partnerPaid ? `✅ Paid (${escapeHtml(partnerRef)})` : '⏳ Pending Transfer'}</span>
+    ${partnerPaid && partnerPaidDateLabel ? `<div style="font-size:0.7rem; color:#15803d; margin-top:2px;">Paid: ${escapeHtml(partnerPaidDateLabel)}</div>` : ''}
+    </div>
+    </td>
+    <td>
+    ${hasRider ? `
+    <div style="font-weight:700; display:flex; align-items:center; gap:0.35rem; flex-wrap:wrap;">
+    <span>🚴 ${escapeHtml(s.riderName || 'Rider')}</span>
+    ${riderCodeLabel ? `<span onclick="quickFilterSettlementsById('${escapeHtml(riderCodeLabel)}')" title="Click to filter settlements by ${escapeHtml(riderCodeLabel)}" style="cursor:pointer; font-family:monospace; font-size:0.72rem; font-weight:700; background:#fef3c7; color:#92400e; padding:1px 6px; border-radius:5px; border:1px solid #fde68a;">🆔 ${escapeHtml(riderCodeLabel)}</span>` : ''}
+    </div>
+    <div style="font-size:0.84rem; color:#15803d; font-weight:700; margin-top:2px;">Payout: ₹${Number(s.riderPayoutAmount || 0).toLocaleString('en-IN')}</div>
+    ${rBank.accountNumber ? `<div style="font-family:monospace; font-size:0.74rem; color:var(--muted);">A/C: ${escapeHtml(rBank.accountNumber)} (${escapeHtml(rBank.ifscCode || '')})</div>` : '<div style="font-size:0.73rem; color:#dc2626;">⚠️ Rider Bank Not Approved</div>'}
+    <div style="margin-top:4px;">
+    <span class="badge ${riderPaid ? 'badge-delivered' : 'badge-pending'}" style="font-size:0.7rem;">${riderPaid ? `✅ Paid (${escapeHtml(riderRef)})` : '⏳ Pending Transfer'}</span>
+    ${riderPaid && riderPaidDateLabel ? `<div style="font-size:0.7rem; color:#15803d; margin-top:2px;">Paid: ${escapeHtml(riderPaidDateLabel)}</div>` : ''}
+    </div>
+    ` : '<span style="color:var(--muted); font-size:0.8rem;">No Rider Assigned Yet</span>'}
+    </td>
+    <td>
+    <div style="font-weight:800; color:#0f172a;">₹${Number(s.tomatoCommissionAmount || 0).toLocaleString('en-IN')}</div>
+    <div style="font-size:0.74rem; color:var(--muted);">Commission (${Number(s.agreementCommissionPercent || 15)}%)</div>
+    </td>
+    <td>
+    <div style="display:flex; flex-direction:column; gap:0.35rem;">
+    <button type="button" class="btn btn-outline btn-sm" onclick="openAdminSettlementAgreementModal('${escapeHtml(String(s._id))}')">⚙️ Configure Agreement</button>
+    ${!partnerPaid ? `<button type="button" class="btn btn-success btn-sm" onclick="approveAndSendTomatoPayout('${escapeHtml(String(s._id))}', 'partner')">💸 Pay ${s.orderType === 'shop' ? 'Shop' : 'Restaurant'} (₹${Number(s.partnerPayoutAmount || 0)})</button>` : ''}
+    ${hasRider && !riderPaid ? `<button type="button" class="btn btn-primary btn-sm" onclick="approveAndSendTomatoPayout('${escapeHtml(String(s._id))}', 'rider')">🚴 Pay Rider (₹${Number(s.riderPayoutAmount || 0)})</button>` : ''}
+    ${!partnerPaid && hasRider && !riderPaid ? `<button type="button" class="btn btn-outline btn-sm" style="background:#f0fdf4; border-color:#86efac; color:#15803d; font-weight:700;" onclick="approveAndSendTomatoPayout('${escapeHtml(String(s._id))}', 'both')">✓ Approve &amp; Pay Both</button>` : ''}
+    </div>
+    </td>
+    </tr>`;
+    }).join('')}
+    </tbody>
+    </table>
     </div>
   `;
 }
@@ -11442,6 +11454,1042 @@ window.approveAndSendTomatoPayout = approveAndSendTomatoPayout;
 window.loadPartnerBankPanel = loadPartnerBankPanel;
 window.checkPartnerBankNameMatchLive = checkPartnerBankNameMatchLive;
 window.savePartnerBankDetails = savePartnerBankDetails;
+
+
+// =========================================================================
+// ADMIN: COUPON & DISCOUNT MANAGEMENT + CUSTOMER BILLING COUPONS (MAX 2)
+// =========================================================================
+const MAX_COUPONS_PER_ORDER_LIMIT = 2;
+const COUPON_TYPE_META = {
+  restaurant_item_category: { icon: '🍽️', label: 'Restaurant Item Category', badgeBg: '#ffedd5', badgeColor: '#c2410c' },
+  category_occasion: { icon: '🥂', label: 'Category Occasion', badgeBg: '#fae8ff', badgeColor: '#a21caf' },
+  new_user: { icon: '🆕', label: 'New Users', badgeBg: '#dcfce7', badgeColor: '#15803d' },
+  festival: { icon: '🪔', label: 'Festivals', badgeBg: '#fef3c7', badgeColor: '#b45309' },
+  specific_user: { icon: '👤', label: 'Specific User', badgeBg: '#dbeafe', badgeColor: '#1d4ed8' },
+  settlement: { icon: '🤝', label: 'Settlement', badgeBg: '#f1f5f9', badgeColor: '#334155' },
+  special_occasion: { icon: '🎉', label: 'Special Occasion', badgeBg: '#fce7f3', badgeColor: '#be185d' },
+  shop: { icon: '🏬', label: 'Shop', badgeBg: '#ede9fe', badgeColor: '#6d28d9' },
+  grocery: { icon: '🥦', label: 'Grocery', badgeBg: '#d1fae5', badgeColor: '#047857' },
+};
+
+let adminCouponsCache = [];
+let adminCouponsSummary = {};
+let customerAvailableCoupons = [];
+let customerIsNewUserFlag = false;
+let appliedCouponCodes = [];
+let appliedCouponsBreakdown = [];
+let appliedTotalDiscount = 0;
+
+function resetAppliedCouponsState() {
+  appliedCouponCodes = [];
+  appliedCouponsBreakdown = [];
+  appliedTotalDiscount = 0;
+}
+
+function getActiveCartDiscountAmount(subtotalOverride) {
+  const subtotal = typeof subtotalOverride === 'number'
+    ? subtotalOverride
+    : cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  if (!subtotal || subtotal <= 0 || !appliedCouponCodes.length) return 0;
+  return Number(Math.min(subtotal, Math.max(0, appliedTotalDiscount || 0)).toFixed(2));
+}
+
+let cartCouponSyncTimer = null;
+function syncCartCouponsOnCartChange() {
+  if (!appliedCouponCodes.length || !cart.length) return;
+  if (cartCouponSyncTimer) clearTimeout(cartCouponSyncTimer);
+  cartCouponSyncTimer = setTimeout(() => {
+    validateAndSyncCartCoupons({ silent: true });
+  }, 180);
+}
+
+async function fetchAdminCoupons() {
+  const tableContainer = document.getElementById('admin-coupons-table-container');
+  try {
+    const res = await apiFetch('/api/admin/coupons');
+    adminCouponsCache = Array.isArray(res.coupons) ? res.coupons : [];
+    adminCouponsSummary = res.summary || {};
+    renderAdminCouponsKPIs();
+    renderAdminCouponsTable();
+    populateAdminCouponDatalists();
+  } catch (err) {
+    if (tableContainer) {
+      tableContainer.innerHTML = `<p style="color:var(--tomato); padding:1rem;">Failed to load coupons: ${escapeHtml(err.message)}</p>`;
+    }
+  }
+}
+
+function populateAdminCouponDatalists() {
+  const catList = document.getElementById('adm-coupon-categories-datalist');
+  if (catList) {
+    const defaultCats = ['Main Course', 'Starters', 'Sweets', 'Desserts', 'Beverages', 'Biryani', 'Breads', 'Snacks', 'South Indian', 'Chinese', 'Groceries', 'Fresh Produce', 'Dairy & Bakery', 'Household'];
+    const dynamicCats = new Set(defaultCats);
+    (allMenuItems || []).forEach((m) => { if (m.category) dynamicCats.add(m.category); });
+    (allShopItems || []).forEach((s) => { if (s.category) dynamicCats.add(s.category); });
+    (adminCouponsCache || []).forEach((c) => { if (c.targetItemCategory) dynamicCats.add(c.targetItemCategory); });
+    catList.innerHTML = Array.from(dynamicCats).map((c) => `<option value="${escapeHtml(c)}"></option>`).join('');
+  }
+}
+
+function renderAdminCouponsKPIs() {
+  const kpiEl = document.getElementById('admin-coupons-kpis');
+  if (!kpiEl) return;
+  const total = adminCouponsCache.length;
+  const activeCount = adminCouponsCache.filter((c) => c.isActive).length;
+  const redemptions = adminCouponsCache.reduce((sum, c) => sum + Number(c.usedCount || 0), 0);
+  const categoryCovered = new Set(adminCouponsCache.map((c) => c.couponType)).size;
+
+  kpiEl.innerHTML = `
+    <div style="background:#fff; border:1px solid var(--line); border-radius:10px; padding:0.85rem 1rem;">
+      <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:700;">Total Coupons</div>
+      <div style="font-size:1.5rem; font-weight:800; color:var(--ink); margin-top:0.2rem;">${total}</div>
+      <div style="font-size:0.74rem; color:var(--muted); margin-top:0.15rem;">Across ${categoryCovered} of 9 coupon categories</div>
+    </div>
+    <div style="background:#fff; border:1px solid var(--line); border-radius:10px; padding:0.85rem 1rem;">
+      <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:700;">Active for Billing</div>
+      <div style="font-size:1.5rem; font-weight:800; color:var(--green); margin-top:0.2rem;">${activeCount}</div>
+      <div style="font-size:0.74rem; color:var(--muted); margin-top:0.15rem;">Inactive / Paused: ${total - activeCount}</div>
+    </div>
+    <div style="background:#fff; border:1px solid var(--line); border-radius:10px; padding:0.85rem 1rem;">
+      <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:700;">Total Redemptions</div>
+      <div style="font-size:1.5rem; font-weight:800; color:#c2410c; margin-top:0.2rem;">${redemptions}</div>
+      <div style="font-size:0.74rem; color:var(--muted); margin-top:0.15rem;">Tracked per user &amp; order</div>
+    </div>
+    <div style="background:#fff; border:1px solid var(--line); border-radius:10px; padding:0.85rem 1rem;">
+      <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:700;">Stacking Policy</div>
+      <div style="font-size:1.35rem; font-weight:800; color:#1d4ed8; margin-top:0.2rem;">Max 2 / Billing</div>
+      <div style="font-size:0.74rem; color:var(--muted); margin-top:0.15rem;">Customers can combine up to 2 coupons</div>
+    </div>
+  `;
+}
+
+function renderAdminCouponsTable() {
+  const container = document.getElementById('admin-coupons-table-container');
+  if (!container) return;
+
+  const typeFilter = document.getElementById('admin-coupon-type-filter')?.value || 'all';
+  const storeFilter = document.getElementById('admin-coupon-store-filter')?.value || 'all';
+  const statusFilter = document.getElementById('admin-coupon-status-filter')?.value || 'all';
+  const searchVal = (document.getElementById('admin-coupon-search')?.value || '').trim().toLowerCase();
+
+  const filtered = adminCouponsCache.filter((c) => {
+    if (typeFilter !== 'all' && c.couponType !== typeFilter) return false;
+    if (storeFilter !== 'all' && c.applicableStoreType !== storeFilter && c.applicableStoreType !== 'all') return false;
+    if (statusFilter === 'active' && !c.isActive) return false;
+    if (statusFilter === 'inactive' && c.isActive) return false;
+    if (searchVal) {
+      const hay = `${c.code || ''} ${c.title || ''} ${c.description || ''} ${c.couponType || ''} ${c.targetItemCategory || ''} ${c.occasionName || ''} ${c.targetUserIdentifier || ''}`.toLowerCase();
+      if (!hay.includes(searchVal)) return false;
+    }
+    return true;
+  });
+
+  if (!filtered.length) {
+    container.innerHTML = '<p style="color:var(--muted); padding:1.2rem 0; text-align:center;">No coupons match the selected filters. Click "Create New Coupon" above to add one.</p>';
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Code &amp; Title</th>
+            <th>Coupon Category</th>
+            <th>Discount &amp; Billing Rules</th>
+            <th>Target / Eligibility</th>
+            <th>Store Scope</th>
+            <th>Usage &amp; Validity</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${filtered.map((c) => {
+            const meta = COUPON_TYPE_META[c.couponType] || { icon: '🎟️', label: c.couponType, badgeBg: '#f3f4f6', badgeColor: '#374151' };
+            const discountBadge = c.discountType === 'percentage'
+              ? `${c.discountValue}% OFF${c.maxDiscountAmount > 0 ? ` (Up to ₹${c.maxDiscountAmount})` : ''}`
+              : `Flat ₹${c.discountValue} OFF`;
+            const targetParts = [];
+            if (c.targetItemCategory) targetParts.push(`<span style="color:#1e3a8a; font-weight:700;">Category: ${escapeHtml(c.targetItemCategory)}</span>`);
+            if (c.occasionName) targetParts.push(`<span>Occasion: <strong>${escapeHtml(c.occasionName)}</strong></span>`);
+            if (c.targetUserIdentifier) targetParts.push(`<span style="color:#b45309; font-weight:700;">User: ${escapeHtml(c.targetUserIdentifier)}</span>`);
+            if (c.couponType === 'new_user') targetParts.push('<span style="color:#15803d; font-weight:700;">First Order / New Users</span>');
+            if (!targetParts.length) targetParts.push('<span style="color:var(--muted);">All Eligible Orders</span>');
+
+            const storeBadge = c.applicableStoreType === 'restaurant'
+              ? '🍽️ Restaurant'
+              : c.applicableStoreType === 'shop'
+              ? '🏬 Shop / Grocery'
+              : '🌐 All Stores';
+
+            const expiryStr = c.validUntil ? new Date(c.validUntil).toLocaleDateString() : 'No Expiry';
+            const isExpired = c.validUntil && new Date(c.validUntil).getTime() < Date.now();
+
+            return `
+              <tr>
+                <td>
+                  <div style="font-family:monospace; font-weight:800; font-size:0.92rem; color:#c2410c; background:#fff7ed; border:1px dashed #fdba74; display:inline-block; padding:0.15rem 0.5rem; border-radius:5px;">
+                    ${escapeHtml(c.code)}
+                  </div>
+                  <div style="font-weight:700; color:var(--ink); margin-top:0.25rem; font-size:0.84rem;">${escapeHtml(c.title)}</div>
+                  ${c.description ? `<div style="font-size:0.74rem; color:var(--muted); max-width:250px;">${escapeHtml(c.description)}</div>` : ''}
+                </td>
+                <td>
+                  <span style="display:inline-flex; align-items:center; gap:0.3rem; background:${meta.badgeBg}; color:${meta.badgeColor}; font-weight:700; font-size:0.75rem; padding:0.24rem 0.6rem; border-radius:999px;">
+                    <span>${meta.icon}</span>
+                    <span>${escapeHtml(meta.label)}</span>
+                  </span>
+                </td>
+                <td>
+                  <div style="font-weight:800; color:var(--green); font-size:0.86rem;">${escapeHtml(discountBadge)}</div>
+                  <div style="font-size:0.75rem; color:var(--muted);">Min Billing: <strong>₹${Number(c.minOrderAmount || 0)}</strong></div>
+                </td>
+                <td style="font-size:0.78rem; line-height:1.45;">
+                  ${targetParts.join('<br/>')}
+                </td>
+                <td style="font-size:0.79rem; font-weight:600;">${storeBadge}</td>
+                <td style="font-size:0.76rem;">
+                  <div>Used: <strong>${Number(c.usedCount || 0)}</strong>${c.totalUsageLimit > 0 ? ` / ${c.totalUsageLimit}` : ' (Unlimited)'}</div>
+                  <div style="color:var(--muted);">Per User: ${c.usageLimitPerUser > 0 ? c.usageLimitPerUser : '∞'}</div>
+                  <div style="color:${isExpired ? '#dc2626' : 'var(--muted)'};">Valid till: ${expiryStr}</div>
+                </td>
+                <td>
+                  <span class="badge ${c.isActive && !isExpired ? 'badge-approved' : 'badge-blocked'}">
+                    ${!c.isActive ? 'Paused' : isExpired ? 'Expired' : 'Active'}
+                  </span>
+                </td>
+                <td>
+                  <div style="display:flex; gap:0.35rem; flex-wrap:wrap;">
+                    <button type="button" class="btn btn-outline btn-sm" style="padding:0.22rem 0.55rem; font-size:0.74rem;" onclick="editAdminCoupon('${c._id}')">✏️ Edit</button>
+                    <button type="button" class="btn btn-outline btn-sm" style="padding:0.22rem 0.55rem; font-size:0.74rem;" onclick="toggleAdminCouponStatus('${c._id}')">${c.isActive ? '⏸ Pause' : '▶ Enable'}</button>
+                    <button type="button" class="btn btn-danger btn-sm" style="padding:0.22rem 0.55rem; font-size:0.74rem;" onclick="deleteAdminCoupon('${c._id}')">🗑️</button>
+                  </div>
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function onAdminCouponDiscountTypeChange() {
+  const mode = document.getElementById('adm-coupon-discount-type')?.value || 'percentage';
+  const label = document.getElementById('adm-coupon-discount-val-label');
+  const maxCapInput = document.getElementById('adm-coupon-max-discount');
+  if (label) {
+    label.innerHTML = mode === 'percentage'
+      ? 'Discount Value (%) <span style="color:var(--tomato);">*</span>'
+      : 'Flat Discount Amount (₹) <span style="color:var(--tomato);">*</span>';
+  }
+  if (maxCapInput && mode === 'flat') {
+    maxCapInput.value = '0';
+  }
+}
+
+function onAdminCouponTypeChange() {
+  const cType = document.getElementById('adm-coupon-type')?.value || 'restaurant_item_category';
+  const storeSelect = document.getElementById('adm-coupon-store-type');
+  const catInput = document.getElementById('adm-coupon-item-category');
+  const occasionInput = document.getElementById('adm-coupon-occasion');
+  const userInput = document.getElementById('adm-coupon-target-user');
+  const perUserInput = document.getElementById('adm-coupon-per-user-limit');
+
+  const catLabel = document.getElementById('adm-coupon-item-cat-label');
+  const occLabel = document.getElementById('adm-coupon-occasion-label');
+  const userLabel = document.getElementById('adm-coupon-user-label');
+
+  if (catLabel) catLabel.innerHTML = 'Target Item Category (Restaurant / Shop / Grocery)';
+  if (occLabel) occLabel.innerHTML = 'Occasion / Festival / Settlement Label';
+  if (userLabel) userLabel.innerHTML = 'Specific User (Customer ID, Email, or Phone)';
+
+  if (cType === 'restaurant_item_category') {
+    if (storeSelect) storeSelect.value = 'restaurant';
+    if (catLabel) catLabel.innerHTML = 'Target Restaurant Item Category <span style="color:var(--tomato);">*</span>';
+    if (catInput && !catInput.value) catInput.placeholder = 'e.g. Sweets, Main Course, Starters, Biryani';
+  } else if (cType === 'category_occasion') {
+    if (catLabel) catLabel.innerHTML = 'Target Item Category <span style="color:var(--tomato);">*</span>';
+    if (occLabel) occLabel.innerHTML = 'Category Occasion Name <span style="color:var(--tomato);">*</span>';
+  } else if (cType === 'new_user') {
+    if (storeSelect) storeSelect.value = 'all';
+    if (perUserInput) perUserInput.value = '1';
+    if (occasionInput && !occasionInput.value) occasionInput.value = 'First Order Welcome';
+  } else if (cType === 'festival') {
+    if (storeSelect) storeSelect.value = 'all';
+    if (occLabel) occLabel.innerHTML = 'Festival Name <span style="color:var(--tomato);">*</span>';
+  } else if (cType === 'specific_user') {
+    if (userLabel) userLabel.innerHTML = 'Specific User (Customer ID / Email / Phone) <span style="color:var(--tomato);">*</span>';
+  } else if (cType === 'settlement') {
+    if (occLabel) occLabel.innerHTML = 'Settlement Reference / Reason';
+    if (occasionInput && !occasionInput.value) occasionInput.value = 'Order Settlement Credit';
+  } else if (cType === 'special_occasion') {
+    if (occLabel) occLabel.innerHTML = 'Special Occasion (Birthday / Anniversary / Party) <span style="color:var(--tomato);">*</span>';
+  } else if (cType === 'shop') {
+    if (storeSelect) storeSelect.value = 'shop';
+  } else if (cType === 'grocery') {
+    if (storeSelect) storeSelect.value = 'shop';
+    if (catInput && !catInput.value) catInput.value = 'Groceries';
+  }
+}
+
+function generateAdminCouponCode() {
+  const cType = document.getElementById('adm-coupon-type')?.value || 'restaurant_item_category';
+  const prefixes = {
+    restaurant_item_category: 'ITEM',
+    category_occasion: 'CATOCC',
+    new_user: 'WELCOME',
+    festival: 'FEST',
+    specific_user: 'VIPUSER',
+    settlement: 'SETTLE',
+    special_occasion: 'SPECIAL',
+    shop: 'SHOP',
+    grocery: 'GROCERY',
+  };
+  const prefix = prefixes[cType] || 'TOMATO';
+  const rand = Math.floor(10 + Math.random() * 89);
+  const codeInput = document.getElementById('adm-coupon-code');
+  if (codeInput) codeInput.value = `${prefix}${rand}`;
+}
+
+function openAdminCouponForm(presetType) {
+  const card = document.getElementById('admin-coupon-form-card');
+  const form = document.getElementById('admin-coupon-form');
+  if (!card || !form) return;
+
+  form.reset();
+  document.getElementById('adm-coupon-id').value = '';
+  document.getElementById('admin-coupon-form-title').textContent = '➕ Create New Coupon';
+  document.getElementById('adm-coupon-active').checked = true;
+
+  // Set default expiry 90 days ahead
+  const future = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+  const yyyy = future.getFullYear();
+  const mm = String(future.getMonth() + 1).padStart(2, '0');
+  const dd = String(future.getDate()).padStart(2, '0');
+  const expiryEl = document.getElementById('adm-coupon-valid-until');
+  if (expiryEl) expiryEl.value = `${yyyy}-${mm}-${dd}`;
+
+  if (presetType) {
+    const typeSelect = document.getElementById('adm-coupon-type');
+    if (typeSelect) typeSelect.value = presetType;
+  }
+  onAdminCouponTypeChange();
+  onAdminCouponDiscountTypeChange();
+  generateAdminCouponCode();
+
+  card.style.display = 'block';
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function closeAdminCouponForm() {
+  const card = document.getElementById('admin-coupon-form-card');
+  if (card) card.style.display = 'none';
+}
+
+function editAdminCoupon(couponId) {
+  const c = adminCouponsCache.find((x) => String(x._id) === String(couponId));
+  if (!c) return;
+
+  const card = document.getElementById('admin-coupon-form-card');
+  if (!card) return;
+
+  document.getElementById('adm-coupon-id').value = c._id;
+  document.getElementById('admin-coupon-form-title').textContent = `✏️ Edit Coupon: ${c.code}`;
+  document.getElementById('adm-coupon-type').value = c.couponType || 'restaurant_item_category';
+  document.getElementById('adm-coupon-code').value = c.code || '';
+  document.getElementById('adm-coupon-title').value = c.title || '';
+  document.getElementById('adm-coupon-discount-type').value = c.discountType || 'percentage';
+  document.getElementById('adm-coupon-discount-value').value = c.discountValue ?? 20;
+  document.getElementById('adm-coupon-max-discount').value = c.maxDiscountAmount ?? 0;
+  document.getElementById('adm-coupon-min-order').value = c.minOrderAmount ?? 0;
+  document.getElementById('adm-coupon-item-category').value = c.targetItemCategory || '';
+  document.getElementById('adm-coupon-occasion').value = c.occasionName || '';
+  document.getElementById('adm-coupon-target-user').value = c.targetUserIdentifier || '';
+  document.getElementById('adm-coupon-store-type').value = c.applicableStoreType || 'all';
+  document.getElementById('adm-coupon-per-user-limit').value = c.usageLimitPerUser ?? 1;
+  document.getElementById('adm-coupon-total-limit').value = c.totalUsageLimit ?? 0;
+  document.getElementById('adm-coupon-description').value = c.description || '';
+  document.getElementById('adm-coupon-active').checked = Boolean(c.isActive);
+
+  if (c.validUntil) {
+    const d = new Date(c.validUntil);
+    if (!Number.isNaN(d.getTime())) {
+      document.getElementById('adm-coupon-valid-until').value = d.toISOString().split('T')[0];
+    }
+  } else {
+    document.getElementById('adm-coupon-valid-until').value = '';
+  }
+
+  onAdminCouponTypeChange();
+  onAdminCouponDiscountTypeChange();
+
+  card.style.display = 'block';
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function saveAdminCoupon(event) {
+  event.preventDefault();
+  const couponId = document.getElementById('adm-coupon-id')?.value.trim();
+  const payload = {
+    code: (document.getElementById('adm-coupon-code')?.value || '').trim().toUpperCase(),
+    title: (document.getElementById('adm-coupon-title')?.value || '').trim(),
+    description: (document.getElementById('adm-coupon-description')?.value || '').trim(),
+    couponType: document.getElementById('adm-coupon-type')?.value || 'restaurant_item_category',
+    discountType: document.getElementById('adm-coupon-discount-type')?.value || 'percentage',
+    discountValue: Number(document.getElementById('adm-coupon-discount-value')?.value || 0),
+    maxDiscountAmount: Number(document.getElementById('adm-coupon-max-discount')?.value || 0),
+    minOrderAmount: Number(document.getElementById('adm-coupon-min-order')?.value || 0),
+    targetItemCategory: (document.getElementById('adm-coupon-item-category')?.value || '').trim(),
+    occasionName: (document.getElementById('adm-coupon-occasion')?.value || '').trim(),
+    targetUserIdentifier: (document.getElementById('adm-coupon-target-user')?.value || '').trim(),
+    applicableStoreType: document.getElementById('adm-coupon-store-type')?.value || 'all',
+    usageLimitPerUser: Number(document.getElementById('adm-coupon-per-user-limit')?.value || 0),
+    totalUsageLimit: Number(document.getElementById('adm-coupon-total-limit')?.value || 0),
+    validUntil: document.getElementById('adm-coupon-valid-until')?.value || null,
+    isActive: Boolean(document.getElementById('adm-coupon-active')?.checked),
+  };
+
+  try {
+    const endpoint = couponId ? `/api/admin/coupons/${couponId}` : '/api/admin/coupons';
+    const method = couponId ? 'PUT' : 'POST';
+    const res = await apiFetch(endpoint, {
+      method,
+      body: JSON.stringify(payload),
+    });
+    closeAdminCouponForm();
+    await fetchAdminCoupons();
+    if (typeof showAutoDismissNotice === 'function') {
+      showAutoDismissNotice({
+        title: couponId ? 'Coupon Updated' : 'Coupon Created',
+        message: res.message || `Coupon ${payload.code} saved successfully.`,
+        icon: '🎟️',
+      });
+    } else {
+      alert(res.message || 'Coupon saved!');
+    }
+  } catch (err) {
+    alert(err.message || 'Failed to save coupon.');
+  }
+}
+
+async function toggleAdminCouponStatus(couponId) {
+  const c = adminCouponsCache.find((x) => String(x._id) === String(couponId));
+  if (!c) return;
+  try {
+    await apiFetch(`/api/admin/coupons/${couponId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ isActive: !c.isActive }),
+    });
+    await fetchAdminCoupons();
+  } catch (err) {
+    alert(err.message || 'Unable to update coupon status.');
+  }
+}
+
+async function deleteAdminCoupon(couponId) {
+  const c = adminCouponsCache.find((x) => String(x._id) === String(couponId));
+  if (!c) return;
+  if (!window.confirm(`Delete coupon "${c.code}" (${c.title}) permanently?`)) return;
+  try {
+    await apiFetch(`/api/admin/coupons/${couponId}`, { method: 'DELETE' });
+    await fetchAdminCoupons();
+  } catch (err) {
+    alert(err.message || 'Unable to delete coupon.');
+  }
+}
+
+// =========================================================================
+// CUSTOMER BILLING: APPLY UP TO 2 COUPONS AT A TIME
+// =========================================================================
+async function fetchCustomerAvailableCoupons() {
+  try {
+    const isShopOrder = cart[0]?.storeType === 'shop' || customerBrowseMode === 'shop';
+    const storeType = isShopOrder ? 'shop' : 'restaurant';
+    const res = await apiFetch(`/api/customer/coupons?storeType=${encodeURIComponent(storeType)}`);
+    customerAvailableCoupons = Array.isArray(res.coupons) ? res.coupons : [];
+    customerIsNewUserFlag = Boolean(res.isNewUser);
+    renderCheckoutCouponsSection();
+  } catch (err) {
+    console.warn('Could not load available coupons:', err);
+  }
+}
+
+function setCheckoutCouponFeedback(message, isError = false) {
+  const msgEl = document.getElementById('checkout-coupon-message');
+  if (!msgEl) return;
+  if (!message) {
+    msgEl.style.display = 'none';
+    msgEl.textContent = '';
+    return;
+  }
+  msgEl.style.display = 'block';
+  msgEl.style.color = isError ? '#dc2626' : '#15803d';
+  msgEl.style.fontWeight = '600';
+  msgEl.textContent = message;
+}
+
+async function validateAndSyncCartCoupons({ silent = false } = {}) {
+  if (!cart.length || !appliedCouponCodes.length) {
+    appliedCouponsBreakdown = [];
+    appliedTotalDiscount = 0;
+    updateCartUI();
+    updateGatewayBillingSummaryUI();
+    renderCheckoutCouponsSection();
+    return { valid: true, totalDiscount: 0 };
+  }
+
+  if (appliedCouponCodes.length > MAX_COUPONS_PER_ORDER_LIMIT) {
+    appliedCouponCodes = appliedCouponCodes.slice(0, MAX_COUPONS_PER_ORDER_LIMIT);
+  }
+
+  const isShopOrder = cart[0]?.storeType === 'shop' || customerBrowseMode === 'shop';
+  const payload = {
+    couponCodes: appliedCouponCodes,
+    storeType: isShopOrder ? 'shop' : 'restaurant',
+    restaurantId: cart[0]?.restaurantId,
+    shopId: cart[0]?.restaurantId,
+    items: cart.map((i) => ({
+      foodItemId: i.itemId,
+      name: i.name,
+      price: i.price,
+      quantity: i.quantity,
+      category: i.category || '',
+    })),
+  };
+
+  try {
+    const res = await apiFetch('/api/customer/coupons/validate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    appliedCouponsBreakdown = Array.isArray(res.appliedCoupons) ? res.appliedCoupons : [];
+    appliedCouponCodes = appliedCouponsBreakdown.map((c) => c.code);
+    appliedTotalDiscount = Number(res.totalDiscount || 0);
+    if (!silent) {
+      setCheckoutCouponFeedback(res.message || `Applied ${appliedCouponCodes.length} coupon(s)! Saved ₹${appliedTotalDiscount.toFixed(2)}`, false);
+    }
+    updateCartUI();
+    updateGatewayBillingSummaryUI();
+    renderCheckoutCouponsSection();
+    return { valid: true, totalDiscount: appliedTotalDiscount };
+  } catch (err) {
+    if (!silent) {
+      setCheckoutCouponFeedback(err.message || 'Coupon is not valid for current cart.', true);
+    }
+    return { valid: false, message: err.message };
+  }
+}
+
+async function applyManualCouponCode() {
+  const input = document.getElementById('checkout-coupon-input');
+  const raw = (input?.value || '').trim().toUpperCase();
+  if (!raw) {
+    setCheckoutCouponFeedback('Please enter a coupon code to apply.', true);
+    return;
+  }
+  await toggleCheckoutCouponCode(raw, true);
+  if (input) input.value = '';
+}
+
+async function toggleCheckoutCouponCode(code, forceAdd = false) {
+  const cleanCode = String(code || '').trim().toUpperCase();
+  if (!cleanCode) return;
+
+  const existingIdx = appliedCouponCodes.indexOf(cleanCode);
+  if (existingIdx !== -1 && !forceAdd) {
+    appliedCouponCodes.splice(existingIdx, 1);
+    setCheckoutCouponFeedback(`Removed coupon ${cleanCode}.`, false);
+    await validateAndSyncCartCoupons({ silent: true });
+    return;
+  }
+
+  if (existingIdx !== -1 && forceAdd) {
+    setCheckoutCouponFeedback(`Coupon "${cleanCode}" is already applied.`, true);
+    return;
+  }
+
+  if (appliedCouponCodes.length >= MAX_COUPONS_PER_ORDER_LIMIT) {
+    setCheckoutCouponFeedback(`Maximum ${MAX_COUPONS_PER_ORDER_LIMIT} coupons can be availed at a time per order. Remove one coupon to apply another.`, true);
+    return;
+  }
+
+  const prevCodes = [...appliedCouponCodes];
+  appliedCouponCodes.push(cleanCode);
+  const check = await validateAndSyncCartCoupons({ silent: false });
+  if (!check.valid) {
+    appliedCouponCodes = prevCodes;
+    await validateAndSyncCartCoupons({ silent: true });
+    setCheckoutCouponFeedback(check.message || `Cannot apply coupon ${cleanCode}.`, true);
+  }
+}
+
+async function removeCheckoutCouponCode(code) {
+  const cleanCode = String(code || '').trim().toUpperCase();
+  appliedCouponCodes = appliedCouponCodes.filter((c) => c !== cleanCode);
+  setCheckoutCouponFeedback(`Removed coupon ${cleanCode}.`, false);
+  await validateAndSyncCartCoupons({ silent: true });
+}
+
+function updateGatewayBillingSummaryUI() {
+  const subtotal = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  const tax = Number((subtotal * 0.05).toFixed(2));
+  const deliveryFee = cart.length ? 40 : 0;
+  const discountAmt = getActiveCartDiscountAmount(subtotal);
+  const finalPayable = Number(Math.max(0, subtotal + tax + deliveryFee - discountAmt).toFixed(2));
+
+  const gwAmount = document.getElementById('gateway-amount');
+  if (gwAmount) gwAmount.textContent = `₹${finalPayable.toFixed(2)}`;
+
+  const savingsBadge = document.getElementById('gateway-savings-badge');
+  if (savingsBadge) {
+    savingsBadge.textContent = discountAmt > 0
+      ? `🎉 You save ₹${discountAmt.toFixed(2)} with ${appliedCouponCodes.length} coupon(s)!`
+      : 'No extra gateway fees';
+  }
+
+  const breakdownEl = document.getElementById('gateway-bill-breakdown');
+  if (breakdownEl) {
+    breakdownEl.innerHTML = `
+      <div style="display:flex; justify-content:space-between;">
+        <span>Item Subtotal:</span>
+        <strong>₹${subtotal.toFixed(2)}</strong>
+      </div>
+      <div style="display:flex; justify-content:space-between;">
+        <span>GST &amp; Restaurant Taxes (5%):</span>
+        <span>₹${tax.toFixed(2)}</span>
+      </div>
+      <div style="display:flex; justify-content:space-between;">
+        <span>Packing &amp; Delivery Fee:</span>
+        <span>₹${deliveryFee.toFixed(2)}</span>
+      </div>
+      ${discountAmt > 0 ? `
+      <div style="display:flex; justify-content:space-between; color:var(--green); font-weight:700;">
+        <span>🎟️ Coupons Applied (${appliedCouponCodes.map((c) => escapeHtml(c)).join(' + ')}):</span>
+        <span>-₹${discountAmt.toFixed(2)}</span>
+      </div>` : ''}
+    `;
+  }
+}
+
+function renderCheckoutCouponsSection() {
+  const countBadge = document.getElementById('checkout-coupon-count-badge');
+  if (countBadge) {
+    countBadge.textContent = `${appliedCouponCodes.length} / ${MAX_COUPONS_PER_ORDER_LIMIT} Applied`;
+  }
+
+  const appliedListEl = document.getElementById('checkout-applied-coupons-list');
+  if (appliedListEl) {
+    if (!appliedCouponsBreakdown.length) {
+      appliedListEl.innerHTML = '<span style="font-size:0.75rem; color:var(--muted);">No coupons applied yet. Select up to 2 coupons below or enter a code above.</span>';
+    } else {
+      appliedListEl.innerHTML = appliedCouponsBreakdown.map((c) => `
+        <div style="display:inline-flex; align-items:center; gap:0.4rem; background:#dcfce7; border:1px solid #86efac; color:#166534; padding:0.24rem 0.6rem; border-radius:999px; font-size:0.76rem; font-weight:700;">
+          <span>✓ ${escapeHtml(c.code)} (-₹${Number(c.discountAmount || 0).toFixed(2)})</span>
+          <button type="button" onclick="removeCheckoutCouponCode('${escapeHtml(c.code)}')" style="border:none; background:transparent; color:#166534; font-weight:900; cursor:pointer; padding:0 0.15rem; font-size:0.82rem;" title="Remove coupon">✕</button>
+        </div>
+      `).join('');
+    }
+  }
+
+  const availListEl = document.getElementById('checkout-available-coupons-list');
+  if (!availListEl) return;
+
+  if (!customerAvailableCoupons.length) {
+    availListEl.innerHTML = '<span style="font-size:0.77rem; color:var(--muted);">No active coupons available right now.</span>';
+    return;
+  }
+
+  const subtotal = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  const cartCategories = new Set(cart.map((i) => String(i.category || '').trim().toLowerCase()).filter(Boolean));
+
+  availListEl.innerHTML = customerAvailableCoupons.map((c) => {
+    const isApplied = appliedCouponCodes.includes(c.code);
+    const meta = COUPON_TYPE_META[c.couponType] || { icon: '🎟️', label: c.couponType, badgeBg: '#f3f4f6', badgeColor: '#374151' };
+    const offerText = c.discountType === 'percentage'
+      ? `${c.discountValue}% OFF${c.maxDiscountAmount > 0 ? ` up to ₹${c.maxDiscountAmount}` : ''}`
+      : `FLAT ₹${c.discountValue} OFF`;
+
+    const hints = [];
+    if (c.minOrderAmount > 0) hints.push(`Min ₹${c.minOrderAmount}`);
+    if (c.targetItemCategory) hints.push(`Category: ${c.targetItemCategory}`);
+    if (c.occasionName) hints.push(c.occasionName);
+    if (c.couponType === 'new_user') hints.push(customerIsNewUserFlag ? 'Eligible New User' : 'New Users Only');
+
+    const catMismatch = c.targetItemCategory && !Array.from(cartCategories).some((cat) => cat.includes(String(c.targetItemCategory).toLowerCase()) || String(c.targetItemCategory).toLowerCase().includes(cat));
+    const belowMin = c.minOrderAmount > 0 && subtotal < c.minOrderAmount;
+    const maxReached = !isApplied && appliedCouponCodes.length >= MAX_COUPONS_PER_ORDER_LIMIT;
+
+    return `
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; background:${isApplied ? '#f0fdf4' : '#fff'}; border:1px solid ${isApplied ? '#86efac' : '#e5e0d5'}; border-radius:6px; padding:0.45rem 0.6rem;">
+        <div style="min-width:0; flex:1;">
+          <div style="display:flex; align-items:center; gap:0.35rem; flex-wrap:wrap;">
+            <span style="font-family:monospace; font-weight:800; font-size:0.79rem; color:#c2410c; background:#fff7ed; border:1px dashed #fdba74; padding:0.08rem 0.4rem; border-radius:4px;">${escapeHtml(c.code)}</span>
+            <span style="font-weight:700; font-size:0.77rem; color:var(--green);">${escapeHtml(offerText)}</span>
+            <span style="font-size:0.68rem; background:${meta.badgeBg}; color:${meta.badgeColor}; padding:0.08rem 0.4rem; border-radius:999px; font-weight:700;">${meta.icon} ${escapeHtml(meta.label)}</span>
+          </div>
+          <div style="font-size:0.75rem; color:var(--ink); font-weight:600; margin-top:0.15rem;">${escapeHtml(c.title)}</div>
+          <div style="font-size:0.7rem; color:${(catMismatch || belowMin) ? '#b45309' : 'var(--muted)'};">
+            ${escapeHtml(hints.join(' • '))}
+            ${belowMin ? ` • Add ₹${(c.minOrderAmount - subtotal).toFixed(0)} more` : ''}
+          </div>
+        </div>
+        <button
+          type="button"
+          class="btn ${isApplied ? 'btn-secondary' : 'btn-outline'} btn-sm"
+          style="font-size:0.74rem; padding:0.25rem 0.6rem; white-space:nowrap;"
+          ${maxReached ? 'disabled title="Max 2 coupons already applied"' : ''}
+          onclick="toggleCheckoutCouponCode('${escapeHtml(c.code)}')"
+        >
+          ${isApplied ? '✓ Applied' : maxReached ? 'Max 2 Reached' : 'Apply'}
+        </button>
+      </div>
+    `;
+  }).join('');
+}
+
+window.fetchAdminCoupons = fetchAdminCoupons;
+window.renderAdminCouponsTable = renderAdminCouponsTable;
+window.openAdminCouponForm = openAdminCouponForm;
+window.closeAdminCouponForm = closeAdminCouponForm;
+window.onAdminCouponTypeChange = onAdminCouponTypeChange;
+window.onAdminCouponDiscountTypeChange = onAdminCouponDiscountTypeChange;
+window.generateAdminCouponCode = generateAdminCouponCode;
+window.editAdminCoupon = editAdminCoupon;
+window.saveAdminCoupon = saveAdminCoupon;
+window.toggleAdminCouponStatus = toggleAdminCouponStatus;
+window.deleteAdminCoupon = deleteAdminCoupon;
+window.fetchCustomerAvailableCoupons = fetchCustomerAvailableCoupons;
+window.validateAndSyncCartCoupons = validateAndSyncCartCoupons;
+window.applyManualCouponCode = applyManualCouponCode;
+window.toggleCheckoutCouponCode = toggleCheckoutCouponCode;
+window.removeCheckoutCouponCode = removeCheckoutCouponCode;
+
+
+// =========================================================================
+// ADMIN: RESET USER PASSWORD (DEFAULT: Tomato<DDMMYYYY> OR CUSTOM PASSWORD)
+// =========================================================================
+function formatDobToDDMMYYYYFrontend(rawDob) {
+  if (!rawDob) return "";
+  const str = String(rawDob).trim().split("T")[0];
+  const isoMatch = str.match(/^(\d{4})[-/](\d{2})[-/](\d{2})$/);
+  if (isoMatch) {
+    return `${isoMatch[3]}${isoMatch[2]}${isoMatch[1]}`;
+  }
+  const dmyMatch = str.match(/^(\d{2})[-/](\d{2})[-/](\d{4})$/);
+  if (dmyMatch) {
+    return `${dmyMatch[1]}${dmyMatch[2]}${dmyMatch[3]}`;
+  }
+  const digits = str.replace(/\D/g, "");
+  return digits.length === 8 ? digits : "";
+}
+
+function normalizeDobForDateInput(rawDob) {
+  if (!rawDob) return "";
+  const str = String(rawDob).trim().split("T")[0];
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  const dmyMatch = str.match(/^(\d{2})[-/](\d{2})[-/](\d{4})$/);
+  if (dmyMatch) {
+    return `${dmyMatch[3]}-${dmyMatch[2]}-${dmyMatch[1]}`;
+  }
+  return "";
+}
+
+function openAdminResetPasswordModal(userId, userName, targetRole, userDob = "", userContact = "") {
+  const idInput = document.getElementById("admin-reset-pwd-user-id");
+  const roleInput = document.getElementById("admin-reset-pwd-user-role");
+  const summaryEl = document.getElementById("admin-reset-pwd-user-summary");
+  const dobInput = document.getElementById("admin-reset-pwd-dob");
+  const pwdInput = document.getElementById("admin-reset-pwd-input");
+  const hintEl = document.getElementById("admin-reset-pwd-dob-hint");
+
+  if (idInput) idInput.value = userId;
+  if (roleInput) roleInput.value = targetRole;
+
+  const roleLabels = {
+    shop: "🏬 Shop Partner",
+    restaurant: "🏪 Restaurant Partner",
+    deliveryPartner: "🚴 Delivery Partner (Rider)",
+    customer: "👥 Customer",
+    subadmin: "🛡️ Sub-Admin",
+    admin: "👑 Admin",
+  };
+  const roleDisplay = roleLabels[targetRole] || targetRole;
+  const normalizedDob = normalizeDobForDateInput(userDob);
+  const ddmmyyyy = formatDobToDDMMYYYYFrontend(normalizedDob || userDob);
+  const defaultPwd = ddmmyyyy ? `Tomato${ddmmyyyy}` : "";
+
+  if (summaryEl) {
+    summaryEl.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.4rem;">
+        <div>
+          <strong style="font-size:0.96rem; color:var(--ink);">${escapeHtml(userName || "User")}</strong>
+          ${userContact ? `<div style="font-size:0.78rem; color:var(--muted);">${escapeHtml(userContact)}</div>` : ""}
+        </div>
+        <span class="badge badge-approved" style="font-size:0.74rem;">${escapeHtml(roleDisplay)}</span>
+      </div>
+      <div style="margin-top:0.45rem; font-size:0.78rem; color:var(--charcoal);">
+        Saved DOB: <strong>${normalizedDob ? escapeHtml(normalizedDob) + " (" + escapeHtml(ddmmyyyy) + ")" : "Not set yet — select DOB below or enter custom password"}</strong>
+      </div>
+    `;
+  }
+
+  if (dobInput) {
+    dobInput.max = new Date().toISOString().split("T")[0];
+    dobInput.value = normalizedDob;
+  }
+
+  if (pwdInput) {
+    pwdInput.value = defaultPwd;
+  }
+
+  if (hintEl) {
+    hintEl.innerHTML = defaultPwd
+      ? `Default password generated from DOB: <strong style="font-family:monospace; color:#15803d;">${escapeHtml(defaultPwd)}</strong> (You can also edit the password below if needed).`
+      : `Select the user's DOB above to auto-generate <strong style="font-family:monospace; color:var(--ink);">Tomato&lt;DDMMYYYY&gt;</strong>, or type a custom password directly below.`;
+  }
+
+  openModal("admin-reset-password-modal");
+}
+
+function onAdminResetPasswordDobChange() {
+  const dobInput = document.getElementById("admin-reset-pwd-dob");
+  const pwdInput = document.getElementById("admin-reset-pwd-input");
+  const hintEl = document.getElementById("admin-reset-pwd-dob-hint");
+  const ddmmyyyy = formatDobToDDMMYYYYFrontend(dobInput?.value || "");
+  if (ddmmyyyy) {
+    const defaultPwd = `Tomato${ddmmyyyy}`;
+    if (pwdInput) pwdInput.value = defaultPwd;
+    if (hintEl) {
+      hintEl.innerHTML = `Default password generated from DOB: <strong style="font-family:monospace; color:#15803d;">${escapeHtml(defaultPwd)}</strong> (You can also edit the password below if needed).`;
+    }
+  }
+}
+
+function fillDefaultDobPasswordInResetModal() {
+  const dobInput = document.getElementById("admin-reset-pwd-dob");
+  const pwdInput = document.getElementById("admin-reset-pwd-input");
+  const ddmmyyyy = formatDobToDDMMYYYYFrontend(dobInput?.value || "");
+  if (!ddmmyyyy) {
+    alert("Please select the user's DOB from the calendar first to generate Tomato<DDMMYYYY>.");
+    dobInput?.focus();
+    return;
+  }
+  if (pwdInput) pwdInput.value = `Tomato${ddmmyyyy}`;
+}
+
+async function submitAdminResetPassword(event) {
+  event.preventDefault();
+  const userId = document.getElementById("admin-reset-pwd-user-id")?.value?.trim();
+  const targetRole = document.getElementById("admin-reset-pwd-user-role")?.value?.trim();
+  const dob = document.getElementById("admin-reset-pwd-dob")?.value?.trim() || "";
+  const newPassword = document.getElementById("admin-reset-pwd-input")?.value?.trim() || "";
+  const submitBtn = document.getElementById("admin-reset-pwd-submit-btn");
+
+  if (!userId) return;
+  if (!newPassword && !dob) {
+    alert("Please select the user's DOB to generate Tomato<DDMMYYYY> or enter a custom password.");
+    return;
+  }
+
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Resetting...";
+  }
+
+  try {
+    const res = await apiFetch(`/api/admin/users/${encodeURIComponent(userId)}/reset-password`, {
+      method: "POST",
+      body: JSON.stringify({ dob, newPassword }),
+    });
+    closeModal("admin-reset-password-modal");
+    alert(`✅ ${res.message || "Password reset successfully!"}\n\nNew Password: ${res.resetPassword || newPassword}`);
+    if (targetRole === "subadmin") {
+      fetchAdminSubAdmins(true);
+    } else {
+      refreshAdminViews();
+    }
+  } catch (err) {
+    alert(`Reset Password Error: ${err.message}`);
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "🔑 Reset Password";
+    }
+  }
+}
+
+window.openAdminResetPasswordModal = openAdminResetPasswordModal;
+window.onAdminResetPasswordDobChange = onAdminResetPasswordDobChange;
+window.fillDefaultDobPasswordInResetModal = fillDefaultDobPasswordInResetModal;
+window.submitAdminResetPassword = submitAdminResetPassword;
+
+
+// =========================================================================
+// CUSTOMER ORDER ONLINE: INLINE RESTAURANT SEARCH BOX & DROPDOWN
+// =========================================================================
+let inlineRestaurantSearchQuery = "";
+
+function buildRestaurantFilterCardsHtml(query = "") {
+  const q = (query || "").toLowerCase().trim();
+  let html = "";
+  const isAllActive = currentSelectedRestaurantId === "all" && selectedCategory === "all";
+  if (!q || "all restaurants".includes(q)) {
+    html += `
+      <div class="filter-modal-card ${isAllActive ? "active" : ""}" data-filter-type="restaurant" data-filter-value="all" onclick="handleFilterModalCardClick(this, event)">
+        <div>
+          <div style="font-weight:700; font-size:0.92rem;">All Restaurants (Latest History &amp; Favorites)</div>
+          <div style="font-size:0.76rem; color:var(--muted);">View menus and dishes across all restaurants</div>
+        </div>
+        <span class="filter-modal-card-badge">${allMenuItems.length} dishes</span>
+      </div>
+    `;
+  }
+
+  const filteredRests = allRestaurants.filter((rest) => {
+    if (!q) return true;
+    const restId = String(rest.id || rest._id);
+    const name = (rest.name || rest.displayName || "").toLowerCase();
+    const cuisine = (rest.cuisine || "").toLowerCase();
+    const addr = (rest.restaurantAddress || rest.address || "").toLowerCase();
+    const itemMatch = allMenuItems.some(
+      (m) =>
+        String(m.restaurantId) === restId &&
+        ((m.name || "").toLowerCase().includes(q) || (m.category || "").toLowerCase().includes(q))
+    );
+    return name.includes(q) || cuisine.includes(q) || addr.includes(q) || itemMatch;
+  });
+
+  if (!filteredRests.length && q) {
+    html += `<p style="color:var(--muted); text-align:center; padding:1.2rem 0; margin:0; font-size:0.85rem;">No restaurants match "${escapeHtml(query)}"</p>`;
+  } else {
+    filteredRests.forEach((rest) => {
+      const restId = String(rest.id || rest._id);
+      const restItems = allMenuItems.filter((m) => String(m.restaurantId) === restId);
+      const count = restItems.length;
+      const restDisplay = formatCleanName(rest.name || rest.displayName || "Restaurant");
+      const isClosed = rest.isOpen === false || rest.isOnline === false;
+      const isActive = currentSelectedRestaurantId === restId;
+      const cuisineText = rest.cuisine ? ` • ${escapeHtml(rest.cuisine)}` : "";
+      const addrText = (rest.restaurantAddress || rest.address) ? ` • ${escapeHtml(rest.restaurantAddress || rest.address)}` : "";
+
+      const catMap = new Map();
+      restItems.forEach((m) => {
+        const raw = (m.category || "Main Course").trim() || "Main Course";
+        const key = raw.toLowerCase();
+        const formatted = raw.charAt(0).toUpperCase() + raw.slice(1);
+        if (!catMap.has(key)) {
+          catMap.set(key, { name: formatted, count: 0 });
+        }
+        catMap.get(key).count += 1;
+      });
+      const restCategories = Array.from(catMap.values());
+
+      const categoriesContentHtml =
+        restCategories.length > 0
+          ? `<div style="font-size:0.74rem; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:0.03em; margin-bottom:0.2rem;">Food Categories (Click to Open):</div>
+             <ul class="rest-category-bullet-list">
+              ${restCategories
+                .map((c) => {
+                  const isCatActive =
+                    isActive &&
+                    selectedCategory !== "all" &&
+                    selectedCategory.toLowerCase() === c.name.toLowerCase();
+                  return `<li>
+                    <button type="button" class="rest-category-bullet-btn ${isCatActive ? "active" : ""}" onclick="selectRestaurantCategoryFilter(event, '${escapeHtml(restId)}', '${escapeHtml(c.name)}')" title="Open ${escapeHtml(c.name)} from ${escapeHtml(restDisplay)}">
+                      <span>🍽️ ${escapeHtml(c.name)}</span>
+                      <span style="font-size:0.75rem; opacity:0.8; font-weight:500;">${c.count} ${c.count === 1 ? "item" : "items"} →</span>
+                    </button>
+                  </li>`;
+                })
+                .join("")}
+            </ul>`
+          : `<ul class="rest-category-bullet-list"><li style="color:#dc2626; font-weight:600; font-size:0.8rem;">Not selling any item</li></ul>`;
+
+      html += `
+        <div>
+          <div class="filter-modal-card ${isActive ? "active" : ""}" data-filter-type="restaurant" data-filter-value="${escapeHtml(restId)}" onclick="toggleRestaurantModalCategories(event, '${escapeHtml(restId)}')" title="Click to expand food categories sold by ${escapeHtml(restDisplay)}">
+            <div style="flex:1; min-width:0;">
+              <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
+                <span style="font-weight:600; font-size:0.9rem; color:var(--ink);">${escapeHtml(restDisplay)}</span>
+                ${isClosed ? '<span style="font-size:0.7em; color:#ef4444; font-weight:700; background:#fee2e2; padding:0.1rem 0.35rem; border-radius:4px;">[CLOSED]</span>' : ""}
+              </div>
+              <div style="font-size:0.75rem; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:0.15rem;">
+                ${count} menu items${cuisineText}${addrText}
+              </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:0.4rem; flex-shrink:0;">
+              <span class="filter-modal-card-badge">${count} items</span>
+              <button
+                type="button"
+                id="rest-cat-btn-${escapeHtml(restId)}"
+                class="rest-category-expand-btn"
+                onclick="toggleRestaurantModalCategories(event, '${escapeHtml(restId)}')"
+                title="Expand to see food categories sold by this restaurant"
+              >
+                ▾ Categories
+              </button>
+            </div>
+          </div>
+          <div id="rest-cat-panel-${escapeHtml(restId)}" class="rest-category-panel">
+            ${categoriesContentHtml}
+          </div>
+        </div>
+      `;
+    });
+  }
+  return html;
+}
+
+function handleInlineRestaurantSearchFocus(inputEl) {
+  if (mainCustomerTab !== "all_restaurants") {
+    mainCustomerTab = "all_restaurants";
+    selectedCategory = "all";
+    currentSelectedRestaurantId = "all";
+    selectedMenuItemId = "all";
+    renderSubFilterPills();
+    renderMenuItems();
+  }
+  const dropdown = document.getElementById("inline-restaurant-search-dropdown");
+  if (dropdown) {
+    dropdown.innerHTML = buildRestaurantFilterCardsHtml(inputEl?.value || "");
+    dropdown.style.display = "flex";
+  }
+}
+
+function handleInlineRestaurantSearchInput(inputEl) {
+  inlineRestaurantSearchQuery = inputEl?.value || "";
+  if (mainCustomerTab !== "all_restaurants") {
+    mainCustomerTab = "all_restaurants";
+    renderSubFilterPills();
+  }
+  const dropdown = document.getElementById("inline-restaurant-search-dropdown");
+  if (dropdown) {
+    dropdown.innerHTML = buildRestaurantFilterCardsHtml(inlineRestaurantSearchQuery);
+    dropdown.style.display = "flex";
+  }
+  // Also filter the restaurant tiles grid live using the existing Latest History & Favorites ordering
+  renderMenuItems();
+}
+
+function closeInlineRestaurantSearchDropdown() {
+  const dropdown = document.getElementById("inline-restaurant-search-dropdown");
+  if (dropdown) {
+    dropdown.style.display = "none";
+  }
+}
+
+document.addEventListener("click", (e) => {
+  const wrapper = document.getElementById("inline-restaurant-search-wrapper");
+  if (wrapper && !wrapper.contains(e.target)) {
+    closeInlineRestaurantSearchDropdown();
+  }
+});
+
+window.handleInlineRestaurantSearchFocus = handleInlineRestaurantSearchFocus;
+window.handleInlineRestaurantSearchInput = handleInlineRestaurantSearchInput;
+window.closeInlineRestaurantSearchDropdown = closeInlineRestaurantSearchDropdown;
 
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", () => {

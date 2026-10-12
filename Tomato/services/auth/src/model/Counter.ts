@@ -15,6 +15,7 @@ export interface ICounter {
   adminId?: number;
   shopId?: number;
   orderId?: number;
+  pincodes?: string[];
   updatedAt?: Date;
   createdAt?: Date;
 }
@@ -35,6 +36,7 @@ const counterSchema: Schema<ICounter> = new Schema(
     adminId: { type: Number },
     shopId: { type: Number },
     orderId: { type: Number },
+    pincodes: { type: [String], default: undefined },
   },
   {
     timestamps: true,

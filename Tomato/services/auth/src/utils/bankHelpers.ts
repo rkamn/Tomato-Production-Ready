@@ -5,6 +5,7 @@ import Rider from '../model/Rider.js';
 import Employee from '../model/Employee.js';
 import WalletCreditTrack from '../model/WalletCreditTrack.js';
 import Notification from '../model/Notification.js';
+import { Counter } from '../model/Counter.js';
 
 export async function adjustTomatoCentralBankBalance(deltaAmount: number) {
   const numDelta = Number(Number(deltaAmount || 0).toFixed(2));
@@ -257,4 +258,179 @@ export async function syncOrderToTomatoPayment(order: any, isShopOrder = false) 
     return null;
   }
 }
+
+export const SERVICEABLE_PINCODES_DOC_ID = 'serviceable_pincodes';
+export const DEFAULT_SERVICEABLE_PINCODES = ['560001', '560038', '560008', '560066'];
+
+export function extractPincodeFromText(raw?: string | null): string {
+  if (!raw || typeof raw !== 'string') return '';
+  const trimmed = raw.trim();
+  if (/^\d{5,6}$/.test(trimmed)) return trimmed;
+  const match6 = trimmed.match(/\b([1-9]\d{5})\b/);
+  if (match6 && match6[1]) return match6[1];
+  const matchAny = trimmed.match(/\b(\d{5,6})\b/);
+  return matchAny && matchAny[1] ? matchAny[1] : '';
+}
+
+export function resolvePartnerPincode(partner: any): string {
+  if (!partner) return '';
+  const explicit = extractPincodeFromText(partner.pincode || partner.postalCode || '');
+  if (explicit) return explicit;
+  const fromAddr = extractPincodeFromText(
+    partner.restaurantAddress || partner.shopAddress || partner.address || '',
+  );
+  if (fromAddr) return fromAddr;
+  const fromDigipin = extractPincodeFromText(partner.digipin || '');
+  if (fromDigipin) return fromDigipin;
+  return '';
+}
+
+export function resolveAddressPincode(addr: any): string {
+  if (!addr) return '';
+  const explicit = extractPincodeFromText(addr.postalCode || addr.pincode || '');
+  if (explicit) return explicit;
+  const fromLine = extractPincodeFromText(
+    `${addr.line1 || ''} ${addr.line2 || ''} ${addr.locality || ''} ${addr.city || ''}`,
+  );
+  return fromLine;
+}
+
+export async function getServiceablePincodes(): Promise<string[]> {
+  try {
+    const doc = await Counter.findById(SERVICEABLE_PINCODES_DOC_ID).lean();
+    if (doc && Array.isArray(doc.pincodes)) {
+      return Array.from(
+        new Set(doc.pincodes.map((p) => String(p || '').trim()).filter(Boolean)),
+      );
+    }
+
+    const seedSet = new Set<string>(DEFAULT_SERVICEABLE_PINCODES);
+    const [approvedRests, approvedShops] = await Promise.all([
+      Restaurant.find({ isApproved: true }).select('pincode restaurantAddress digipin').lean(),
+      Shop.find({ isApproved: true }).select('pincode shopAddress digipin').lean(),
+    ]);
+    for (const r of approvedRests) {
+      const pin = resolvePartnerPincode(r);
+      if (pin) seedSet.add(pin);
+    }
+    for (const s of approvedShops) {
+      const pin = resolvePartnerPincode(s);
+      if (pin) seedSet.add(pin);
+    }
+
+    const initialList = Array.from(seedSet);
+    await Counter.findOneAndUpdate(
+      { _id: SERVICEABLE_PINCODES_DOC_ID },
+      {
+        $set: {
+          name: SERVICEABLE_PINCODES_DOC_ID,
+          counterType: 'settings',
+          description: 'Admin-configured serviceable delivery pincodes',
+          pincodes: initialList,
+        },
+        $setOnInsert: { seq: 1000, lastNumber: 1000 },
+      },
+      { upsert: true, returnDocument: 'after' },
+    );
+    return initialList;
+  } catch (err) {
+    console.error('getServiceablePincodes error:', err);
+    return [...DEFAULT_SERVICEABLE_PINCODES];
+  }
+}
+
+export async function addServiceablePincodes(
+  rawInput: string | string[],
+): Promise<{ added: string[]; pincodes: string[] }> {
+  const current = await getServiceablePincodes();
+  const tokens = Array.isArray(rawInput)
+    ? rawInput
+    : String(rawInput || '').split(/[\s,;]+/);
+
+  const validNew: string[] = [];
+  for (const tok of tokens) {
+    const clean = String(tok || '').trim();
+    if (!clean) continue;
+    if (!/^\d{5,6}$/.test(clean)) {
+      throw new Error(`Invalid pincode "${clean}". Pincode must be a 5 or 6 digit number (e.g. 560001).`);
+    }
+    validNew.push(clean);
+  }
+
+  if (!validNew.length) {
+    throw new Error('Please provide at least one valid 6-digit pincode.');
+  }
+
+  const updatedSet = new Set(current);
+  const newlyAdded: string[] = [];
+  for (const pin of validNew) {
+    if (!updatedSet.has(pin)) {
+      updatedSet.add(pin);
+      newlyAdded.push(pin);
+    }
+  }
+
+  const pincodes = Array.from(updatedSet);
+  await Counter.findOneAndUpdate(
+    { _id: SERVICEABLE_PINCODES_DOC_ID },
+    {
+      $set: {
+        name: SERVICEABLE_PINCODES_DOC_ID,
+        counterType: 'settings',
+        description: 'Admin-configured serviceable delivery pincodes',
+        pincodes,
+      },
+      $setOnInsert: { seq: 1000, lastNumber: 1000 },
+    },
+    { upsert: true, returnDocument: 'after' },
+  );
+
+  return { added: newlyAdded, pincodes };
+}
+
+export async function removeServiceablePincode(
+  pincodeToRemove: string,
+): Promise<{ pincodes: string[]; unapprovedPartnersCount: number }> {
+  const cleanPin = String(pincodeToRemove || '').trim();
+  const current = await getServiceablePincodes();
+  const pincodes = current.filter((p) => p !== cleanPin);
+
+  await Counter.findOneAndUpdate(
+    { _id: SERVICEABLE_PINCODES_DOC_ID },
+    {
+      $set: {
+        name: SERVICEABLE_PINCODES_DOC_ID,
+        counterType: 'settings',
+        description: 'Admin-configured serviceable delivery pincodes',
+        pincodes,
+      },
+      $setOnInsert: { seq: 1000, lastNumber: 1000 },
+    },
+    { upsert: true, returnDocument: 'after' },
+  );
+
+  // Any approved restaurant or shop whose pincode matches the removed pincode is automatically unapproved so it cannot provide service
+  let unapprovedPartnersCount = 0;
+  const [rests, shops] = await Promise.all([
+    Restaurant.find({ isApproved: true }),
+    Shop.find({ isApproved: true }),
+  ]);
+  for (const r of rests) {
+    if (resolvePartnerPincode(r) === cleanPin) {
+      r.isApproved = false;
+      await r.save();
+      unapprovedPartnersCount++;
+    }
+  }
+  for (const s of shops) {
+    if (resolvePartnerPincode(s) === cleanPin) {
+      s.isApproved = false;
+      await s.save();
+      unapprovedPartnersCount++;
+    }
+  }
+
+  return { pincodes, unapprovedPartnersCount };
+}
+
 

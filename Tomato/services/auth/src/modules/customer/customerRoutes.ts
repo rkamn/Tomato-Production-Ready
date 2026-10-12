@@ -12,6 +12,10 @@ import Shop from '../../model/Shop.js';
 import ShopOrder from '../../model/ShopOrder.js';
 import Customer from '../../model/Customer.js';
 import Review from '../../model/Review.js';
+import Coupon, {
+  COUPON_TYPE_LABELS,
+  ensureDefaultCouponsSeeded,
+} from '../../model/Coupon.js';
 import {
   authenticate,
   AuthenticatedRequest,
@@ -22,11 +26,168 @@ import {
   formatBill,
   buildOrderLiveTrackingData,
 } from '../../utils/orderHelpers.js';
-import { syncOrderToTomatoPayment } from '../../utils/bankHelpers.js';
+import {
+  syncOrderToTomatoPayment,
+  resolvePartnerPincode,
+  resolveAddressPincode,
+  getServiceablePincodes,
+} from '../../utils/bankHelpers.js';
+import {
+  MAX_COUPONS_PER_ORDER,
+  doesUserMatchTargetIdentifier,
+  evaluateCouponsForCart,
+  recordCouponRedemptions,
+} from '../../utils/couponHelpers.js';
 
 const createCustomerRouter = () => {
   const router = express.Router();
   router.use(authenticate, requireRole('customer'));
+
+  router.get('/serviceable-pincodes', async (_req: Request, res: Response) => {
+    try {
+      const pincodes = await getServiceablePincodes();
+      return res.json({ pincodes });
+    } catch (error) {
+      console.error('Customer serviceable pincodes fetch failed:', error);
+      return res.status(500).json({ message: 'Unable to fetch serviceable pincodes' });
+    }
+  });
+
+  // Get available coupons for customer billing (maximum 2 coupons can be availed at a time)
+  router.get('/coupons', async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user?.userId) {
+        return res.status(401).json({ message: 'Authentication required' });
+      }
+
+      await ensureDefaultCouponsSeeded();
+      const now = new Date();
+      const [customer, previousOrdersCount, activeCoupons] = await Promise.all([
+        Customer.findById(user.userId).lean(),
+        Order.countDocuments({
+          customerId: new mongoose.Types.ObjectId(user.userId),
+          status: { $ne: 'cancelled' },
+        }),
+        Coupon.find({ isActive: true }).sort({ createdAt: -1 }).lean(),
+      ]);
+
+      const userContext = {
+        userId: String(user.userId),
+        customerId:
+          (customer as any)?.customerId ||
+          `cust-${String(user.userId).slice(-4).toLowerCase()}`,
+        email: customer?.email || '',
+        phone: customer?.phone || '',
+        name: customer?.name || '',
+      };
+
+      // Filter out coupons targeted exclusively to another specific user
+      const visibleCoupons = activeCoupons
+        .filter((c) => {
+          if (c.validUntil && new Date(c.validUntil) < now) return false;
+          if (c.totalUsageLimit > 0 && c.usedCount >= c.totalUsageLimit) return false;
+          if (
+            c.couponType === 'specific_user' ||
+            (c.couponType === 'settlement' && String(c.targetUserIdentifier || '').trim())
+          ) {
+            return doesUserMatchTargetIdentifier(c.targetUserIdentifier, userContext);
+          }
+          return true;
+        })
+        .map((c) => {
+          const userUses = (c.usedBy || []).filter(
+            (u) => String(u.userId) === String(user.userId),
+          ).length;
+          const remainingForUser =
+            c.usageLimitPerUser > 0 ? Math.max(0, c.usageLimitPerUser - userUses) : 999;
+          const isNewUserEligible = c.couponType !== 'new_user' || previousOrdersCount === 0;
+          return {
+            id: String(c._id),
+            code: c.code,
+            title: c.title,
+            description: c.description,
+            couponType: c.couponType,
+            couponTypeLabel: COUPON_TYPE_LABELS[c.couponType] || c.couponType,
+            discountType: c.discountType,
+            discountValue: c.discountValue,
+            maxDiscountAmount: c.maxDiscountAmount,
+            minOrderAmount: c.minOrderAmount,
+            targetItemCategory: c.targetItemCategory || '',
+            occasionName: c.occasionName || '',
+            targetUserIdentifier: c.targetUserIdentifier || '',
+            applicableStoreType: c.applicableStoreType || 'all',
+            usageLimitPerUser: c.usageLimitPerUser,
+            userUses,
+            remainingForUser,
+            isEligibleForUser: remainingForUser > 0 && isNewUserEligible,
+            ineligibleReason: !isNewUserEligible
+              ? 'Valid only for new users on their 1st order'
+              : remainingForUser <= 0
+              ? 'Already redeemed maximum allowed times'
+              : '',
+            validUntil: c.validUntil,
+          };
+        });
+
+      return res.json({
+        coupons: visibleCoupons,
+        maxCouponsAllowed: MAX_COUPONS_PER_ORDER,
+        isNewUser: previousOrdersCount === 0,
+      });
+    } catch (error) {
+      console.error('Customer coupons fetch failed:', error);
+      return res.status(500).json({ message: 'Unable to fetch available coupons' });
+    }
+  });
+
+  // Validate up to 2 coupons against customer's current cart items during billing
+  router.post('/coupons/validate', async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user?.userId) {
+        return res.status(401).json({ message: 'Authentication required' });
+      }
+
+      const rawCodes = Array.isArray(req.body?.couponCodes)
+        ? req.body.couponCodes
+        : req.body?.couponCode
+        ? [req.body.couponCode]
+        : [];
+      const items = Array.isArray(req.body?.items) ? req.body.items : [];
+      const isShopOrder = Boolean(req.body?.isShopOrder);
+
+      if (rawCodes.length > MAX_COUPONS_PER_ORDER) {
+        return res.status(400).json({
+          valid: false,
+          message: `Maximum ${MAX_COUPONS_PER_ORDER} coupons can be availed at a time by any user.`,
+          maxCouponsAllowed: MAX_COUPONS_PER_ORDER,
+        });
+      }
+
+      const result = await evaluateCouponsForCart({
+        couponCodes: rawCodes,
+        userId: String(user.userId),
+        isShopOrder,
+        items,
+      });
+
+      if (!result.valid) {
+        return res.status(400).json({
+          ...result,
+          maxCouponsAllowed: MAX_COUPONS_PER_ORDER,
+        });
+      }
+
+      return res.json({
+        ...result,
+        maxCouponsAllowed: MAX_COUPONS_PER_ORDER,
+      });
+    } catch (error) {
+      console.error('Customer coupon validation failed:', error);
+      return res.status(500).json({ message: 'Unable to validate coupon' });
+    }
+  });
 
   router.get('/overview', (req: Request, res: Response) => {
     const user = (req as AuthenticatedRequest).user;
@@ -60,13 +221,16 @@ const createCustomerRouter = () => {
   // 1. View all restaurants
   router.get('/restaurants', async (_req: Request, res: Response) => {
     try {
-      const restaurants = await Restaurant.find({
-        isBlocked: { $ne: true },
-      })
-        .select(
-          'name restaurantId digipin email phone image restaurantAddress restaurantLocation cuisine isApproved isOpen isOnline',
-        )
-        .lean();
+      const [restaurants, serviceablePincodes] = await Promise.all([
+        Restaurant.find({
+          isBlocked: { $ne: true },
+        })
+          .select(
+            'name restaurantId digipin pincode email phone image restaurantAddress restaurantLocation cuisine isApproved isOpen isOnline',
+          )
+          .lean(),
+        getServiceablePincodes(),
+      ]);
 
       const restObjIds = restaurants.map((r) => r._id);
       const restItems = await FoodItem.find({
@@ -110,11 +274,17 @@ const createCustomerRouter = () => {
       }
 
       return res.json({
+        serviceablePincodes,
         restaurants: restaurants.map((r) => {
           const restKey = String(r._id);
           const restId = r.restaurantId || '';
           const displayName = r.name;
-          const isOpen = r.isOpen ?? r.isOnline ?? true;
+          const partnerPin = resolvePartnerPincode(r);
+          const isApproved = r.isApproved ?? true;
+          const isServiceable = Boolean(
+            isApproved && partnerPin && serviceablePincodes.includes(partnerPin),
+          );
+          const isOpen = Boolean((r.isOpen ?? r.isOnline ?? true) && isServiceable);
 
           const itemIdsForRest = itemsByRestId.get(restKey) || [];
           const itemAverages: number[] = [];
@@ -148,13 +318,15 @@ const createCustomerRouter = () => {
             restaurantId: restId,
             displayName,
             digipin: r.digipin || '',
+            pincode: partnerPin,
+            isServiceable,
             email: r.email,
             phone: r.phone,
             image: r.image,
             address: r.restaurantAddress || 'Bengaluru Food Quarter',
             location: r.restaurantLocation || { lat: 12.9716, lng: 77.5946 },
             cuisine: r.cuisine || 'North Indian, Continental, Fast Food',
-            isApproved: r.isApproved ?? true,
+            isApproved,
             isOpen,
             isOnline: isOpen,
             rating,
@@ -172,19 +344,28 @@ const createCustomerRouter = () => {
   // 1b. View all shops
   router.get('/shops', async (_req: Request, res: Response) => {
     try {
-      const shops = await Shop.find({
-        isBlocked: { $ne: true },
-      })
-        .select(
-          'name shopId digipin email phone image shopAddress shopLocation category isApproved isOpen isOnline',
-        )
-        .lean();
+      const [shops, serviceablePincodes] = await Promise.all([
+        Shop.find({
+          isBlocked: { $ne: true },
+        })
+          .select(
+            'name shopId digipin pincode email phone image shopAddress shopLocation category isApproved isOpen isOnline',
+          )
+          .lean(),
+        getServiceablePincodes(),
+      ]);
 
       return res.json({
+        serviceablePincodes,
         shops: shops.map((s) => {
           const shopCode = s.shopId || '';
           const displayName = s.name;
-          const isOpen = s.isOpen ?? s.isOnline ?? true;
+          const partnerPin = resolvePartnerPincode(s);
+          const isApproved = s.isApproved ?? true;
+          const isServiceable = Boolean(
+            isApproved && partnerPin && serviceablePincodes.includes(partnerPin),
+          );
+          const isOpen = Boolean((s.isOpen ?? s.isOnline ?? true) && isServiceable);
           return {
             id: s._id,
             _id: s._id,
@@ -192,6 +373,8 @@ const createCustomerRouter = () => {
             shopId: shopCode,
             displayName,
             digipin: s.digipin || '',
+            pincode: partnerPin,
+            isServiceable,
             email: s.email,
             phone: s.phone,
             image: s.image,
@@ -199,7 +382,7 @@ const createCustomerRouter = () => {
             location: s.shopLocation || { lat: 12.9784, lng: 77.6408 },
             category: s.category || 'Retail, Supermarket & Groceries',
             cuisine: s.category || 'Retail, Supermarket & Groceries',
-            isApproved: s.isApproved ?? true,
+            isApproved,
             isOpen,
             isOnline: isOpen,
           };
@@ -1438,29 +1621,43 @@ const createCustomerRouter = () => {
         }
       }
 
+      const serviceablePincodes = await getServiceablePincodes();
+
       if (isShopOrder) {
         if (!shopUser) {
           shopUser = await Shop.findOne({ isBlocked: { $ne: true } });
         }
-        if (
-          shopUser &&
-          (shopUser.isOpen === false || shopUser.isOnline === false)
-        ) {
-          return res.status(400).json({
-            message: `${shopUser.name} is currently closed and not accepting orders. Please choose another shop or try again later.`,
-          });
+        if (shopUser) {
+          const shopPin = resolvePartnerPincode(shopUser);
+          if (shopUser.isApproved === false || !shopPin || !serviceablePincodes.includes(shopPin)) {
+            return res.status(400).json({
+              message: `Shop "${shopUser.name}" pincode (${shopPin || 'N/A'}) is not in the serviceable range or shop is not approved to provide service.`,
+              code: 'STORE_NOT_SERVICEABLE',
+            });
+          }
+          if (shopUser.isOpen === false || shopUser.isOnline === false) {
+            return res.status(400).json({
+              message: `${shopUser.name} is currently closed and not accepting orders. Please choose another shop or try again later.`,
+            });
+          }
         }
       } else {
         if (!restaurantUser) {
           restaurantUser = await Restaurant.findOne({ isBlocked: { $ne: true } });
         }
-        if (
-          restaurantUser &&
-          (restaurantUser.isOpen === false || restaurantUser.isOnline === false)
-        ) {
-          return res.status(400).json({
-            message: `${restaurantUser.name} is currently closed and not accepting orders. Please choose another restaurant or try again later.`,
-          });
+        if (restaurantUser) {
+          const restPin = resolvePartnerPincode(restaurantUser);
+          if (restaurantUser.isApproved === false || !restPin || !serviceablePincodes.includes(restPin)) {
+            return res.status(400).json({
+              message: `Restaurant "${restaurantUser.name}" pincode (${restPin || 'N/A'}) is not in the serviceable range or restaurant is not approved to provide service.`,
+              code: 'STORE_NOT_SERVICEABLE',
+            });
+          }
+          if (restaurantUser.isOpen === false || restaurantUser.isOnline === false) {
+            return res.status(400).json({
+              message: `${restaurantUser.name} is currently closed and not accepting orders. Please choose another restaurant or try again later.`,
+            });
+          }
         }
       }
 
@@ -1521,11 +1718,63 @@ const createCustomerRouter = () => {
             phone: customer?.phone || '+91 99000 00001',
             line1: 'Customer delivery address',
             city: 'Bengaluru',
-            postalCode: '560001',
+            postalCode: '',
             coordinates: [77.5946, 12.9716],
           };
         }
       }
+
+      const customerPincode = resolveAddressPincode(deliveryAddress);
+      if (!customerPincode || !serviceablePincodes.includes(customerPincode)) {
+        return res.status(400).json({
+          message: `Your area${customerPincode ? ` (Pincode: ${customerPincode})` : ''} is out of serviceable range. Delivery services are currently available only in pincodes: ${serviceablePincodes.join(', ') || 'None'}.`,
+          code: 'AREA_OUT_OF_SERVICEABLE_RANGE',
+          customerPincode: customerPincode || '',
+          serviceablePincodes,
+        });
+      }
+
+      // Evaluate up to 2 coupons during billing
+      const rawCouponCodes: string[] = Array.isArray(req.body?.couponCodes)
+        ? req.body.couponCodes
+        : req.body?.couponCode
+        ? [String(req.body.couponCode)]
+        : [];
+
+      if (rawCouponCodes.length > MAX_COUPONS_PER_ORDER) {
+        return res.status(400).json({
+          message: `Maximum ${MAX_COUPONS_PER_ORDER} coupons can be availed at a time per order.`,
+          code: 'MAX_COUPONS_EXCEEDED',
+        });
+      }
+
+      const couponEval = await evaluateCouponsForCart({
+        couponCodes: rawCouponCodes,
+        userId: String(user.userId),
+        isShopOrder,
+        items: sanitizedItems,
+      });
+
+      if (rawCouponCodes.length > 0 && !couponEval.valid) {
+        return res.status(400).json({
+          message: couponEval.message || 'One or more selected coupons are invalid for this order.',
+          code: 'INVALID_COUPON',
+          rejectedCoupons: couponEval.rejectedCoupons,
+        });
+      }
+
+      const discountAmount = Number(couponEval.totalDiscount || 0);
+      const appliedCoupons = couponEval.appliedCoupons.map((ac) => ({
+        code: ac.code,
+        title: ac.title,
+        couponType: ac.couponType,
+        discountAmount: ac.discountAmount,
+      }));
+      const couponCodes = appliedCoupons.map((ac) => ac.code);
+      const finalTotalAmount = Math.max(
+        1,
+        Number((subtotal + tax + deliveryFee - discountAmount).toFixed(2)),
+      );
 
       const paymentMethod = ['card', 'upi', 'netbanking', 'cod', 'razorpay'].includes(
         req.body?.paymentMethod,
@@ -1564,7 +1813,10 @@ const createCustomerRouter = () => {
         subtotal,
         tax,
         deliveryFee,
-        totalAmount,
+        discountAmount,
+        couponCodes,
+        appliedCoupons,
+        totalAmount: finalTotalAmount,
         deliveryAddress,
         paymentStatus,
         paymentMethod,
@@ -1575,7 +1827,7 @@ const createCustomerRouter = () => {
             status: 'placed',
             at: new Date(),
             by: String(user.userId),
-            note: `Order placed to ${isShopOrder ? 'shop' : 'restaurant'} and paid via ${paymentMethod.toUpperCase()}`,
+            note: `Order placed to ${isShopOrder ? 'shop' : 'restaurant'} and paid via ${paymentMethod.toUpperCase()}${couponCodes.length ? ` (Coupons: ${couponCodes.join(', ')}, Saved ₹${discountAmount})` : ''}`,
           },
         ],
       };
@@ -1588,6 +1840,17 @@ const createCustomerRouter = () => {
       }
 
       const order = (await Order.create(orderData)) as unknown as IOrder;
+
+      // Record coupon usage if any coupons were applied
+      if (couponEval.appliedCoupons.length > 0) {
+        await recordCouponRedemptions({
+          appliedCoupons: couponEval.appliedCoupons,
+          userId: String(user.userId),
+          customerCode: (customer as any)?.customerId || '',
+          customerName: customer?.name || 'Customer',
+          orderNumber,
+        });
+      }
 
       // Record order payment into Tomato's centralized payments ledger
       await syncOrderToTomatoPayment(order, isShopOrder);
@@ -1610,7 +1873,10 @@ const createCustomerRouter = () => {
           subtotal,
           tax,
           deliveryFee,
-          totalAmount,
+          discountAmount,
+          couponCodes,
+          appliedCoupons,
+          totalAmount: finalTotalAmount,
           deliveryAddress,
           paymentStatus,
           paymentMethod,
@@ -1621,7 +1887,7 @@ const createCustomerRouter = () => {
               status: 'placed',
               at: new Date(),
               by: String(user.userId),
-              note: `Order placed to shop and paid via ${paymentMethod.toUpperCase()}`,
+              note: `Order placed to shop and paid via ${paymentMethod.toUpperCase()}${couponCodes.length ? ` (Coupons: ${couponCodes.join(', ')}, Saved ₹${discountAmount})` : ''}`,
             },
           ],
           ...(paymentStatus === 'paid' ? { paidAt: new Date() } : {}),

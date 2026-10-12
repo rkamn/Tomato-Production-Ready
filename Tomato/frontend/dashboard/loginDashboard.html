@@ -218,6 +218,10 @@
                     <span>Delivery Fee</span>
                     <span>₹40.00</span>
                   </div>
+                  <div id="overview-cart-discount-row" style="display:none; justify-content:space-between; color:var(--green); font-weight:700;">
+                    <span id="overview-cart-discount-label">🎟️ Coupon Discount</span>
+                    <span id="overview-cart-discount-val">-₹0.00</span>
+                  </div>
                   <div class="cart-row-total">
                     <span>Grand Total</span>
                     <span id="overview-cart-grand-total" style="color:var(--tomato);">₹0.00</span>
@@ -228,7 +232,7 @@
                   <div style="font-size:0.85rem; color:var(--muted);">
                     Delivering to: <strong id="overview-cart-delivery-label">Default Address</strong>
                   </div>
-                  <button class="btn btn-primary" type="button" onclick="openPaymentGatewayModal()">Proceed to Payment &amp; Place Order</button>
+                  <button class="btn btn-primary" type="button" onclick="openPaymentGatewayModal()">🎟️ Apply Coupons &amp; Proceed to Billing</button>
                 </div>
               </div>
             </div>
@@ -250,9 +254,12 @@
         <section id="customer-order-view" class="view-section">
           <div class="panel">
             <div class="panel-header" style="flex-wrap:wrap; gap:1rem; align-items:center; justify-content:space-between;">
-              <!-- Left: Title & Subtitle -->
+              <!-- Left: Title & Dish Search Box -->
               <div style="flex:1 1 auto; min-width:220px;">
-                <h2 id="customer-browse-title" class="panel-title" style="margin-bottom:0.15rem;">Explore Restaurants &amp; Menus</h2>
+                <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap; margin-bottom:0.15rem;">
+                  <h2 id="customer-browse-title" class="panel-title" style="margin:0;">Explore Restaurants &amp; Menus</h2>
+                  <input id="dish-search" type="text" placeholder="Search dishes (e.g. Paneer, Pasta)..." style="padding:0.45rem 0.8rem; border:2px solid #1e3a8a; border-radius:6px; min-width:230px; outline:none;" oninput="filterMenu()" />
+                </div>
                 <p id="customer-browse-subtitle" class="food-meta" style="margin:0;">Fresh dishes prepared and delivered to your doorstep</p>
               </div>
 
@@ -280,9 +287,8 @@
                 </div>
               </div>
 
-              <!-- Right: Search & Cart Button -->
-              <div style="flex:1 1 auto; min-width:240px; display:flex; justify-content:flex-end; align-items:center; gap:0.6rem; flex-wrap:wrap;">
-                <input id="dish-search" type="text" placeholder="Search dishes (e.g. Paneer, Pasta)..." style="padding:0.5rem 0.8rem; border:1px solid var(--line); border-radius:6px; min-width:220px;" oninput="filterMenu()" />
+              <!-- Right: Cart Button -->
+              <div style="flex:0 0 auto; display:flex; justify-content:flex-end; align-items:center; gap:0.6rem; flex-wrap:wrap;">
                 <button
                   id="order-header-cart-btn"
                   class="btn btn-outline btn-sm order-header-cart-button"
@@ -334,6 +340,10 @@
                       <span>Delivery Fee</span>
                       <span>₹40.00</span>
                     </div>
+                    <div id="order-cart-discount-row" style="display:none; justify-content:space-between; color:var(--green); font-weight:700;">
+                      <span id="order-cart-discount-label">🎟️ Coupon Discount</span>
+                      <span id="order-cart-discount-val">-₹0.00</span>
+                    </div>
                     <div class="cart-row-total">
                       <span>Grand Total</span>
                       <span id="order-cart-grand-total" style="color:var(--tomato);">₹0.00</span>
@@ -344,7 +354,7 @@
                     <div style="font-size:0.85rem; color:var(--muted);">
                       Delivering to: <strong id="order-cart-delivery-label">Default Address</strong>
                     </div>
-                    <button class="btn btn-primary" type="button" onclick="openPaymentGatewayModal()">Proceed to Payment &amp; Place Order</button>
+                    <button class="btn btn-primary" type="button" onclick="openPaymentGatewayModal()">🎟️ Apply Coupons &amp; Proceed to Billing</button>
                   </div>
                 </div>
               </div>
@@ -705,6 +715,7 @@
                 <button class="btn btn-outline btn-sm" onclick="openAdminCreateUserModal('shop')">+ Add New Shop</button>
               </div>
             </div>
+            <div id="admin-shops-pincodes-bar" class="admin-serviceable-pincodes-bar" style="margin-bottom:1rem;"></div>
             <div id="admin-shops-search-status" style="display:none; margin-bottom:1rem; font-size:0.88rem; color:var(--muted);"></div>
             <div id="admin-shops-table"></div>
           </div>
@@ -733,6 +744,7 @@
                 <button class="btn btn-outline btn-sm" onclick="openAdminCreateUserModal('restaurant')">+ Add New Restaurant</button>
               </div>
             </div>
+            <div id="admin-restaurants-pincodes-bar" class="admin-serviceable-pincodes-bar" style="margin-bottom:1rem;"></div>
             <div id="admin-restaurants-search-status" style="display:none; margin-bottom:1rem; font-size:0.88rem; color:var(--muted);"></div>
             <div id="admin-restaurants-table"></div>
           </div>
@@ -1028,12 +1040,24 @@
                   <input id="set-phone" type="tel" />
                 </div>
               </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="set-dob">DOB (Date of Birth)</label>
+                  <input id="set-dob" type="date" style="cursor:pointer;" onclick="if(this.showPicker) this.showPicker();" />
+                </div>
+              </div>
 
               <!-- Restaurant & Shop specific -->
               <div id="restaurant-settings-group" style="display:none;">
-                <div class="form-group">
-                  <label id="set-restaurant-address-label">Restaurant Address</label>
-                  <input id="set-restaurant-address" type="text" placeholder="12 Indiranagar 100ft Road, Bengaluru" />
+                <div class="form-row">
+                  <div class="form-group">
+                    <label id="set-restaurant-address-label">Restaurant Address</label>
+                    <input id="set-restaurant-address" type="text" placeholder="12 Indiranagar 100ft Road, Bengaluru" />
+                  </div>
+                  <div class="form-group">
+                    <label id="set-restaurant-pincode-label">Service Pincode (6 Digits)</label>
+                    <input id="set-restaurant-pincode" type="text" maxlength="6" placeholder="e.g. 560038" />
+                  </div>
                 </div>
                 <div class="form-group">
                   <label id="set-cuisine-label">Cuisines Served</label>
@@ -1059,6 +1083,7 @@
               </div>
               <p id="profile-notice" style="margin-top:0.8rem; font-size:0.85rem; font-weight:600;"></p>
             </form>
+            <div id="admin-settings-pincodes-bar" class="admin-serviceable-pincodes-bar" style="display:none; margin-top:1.25rem;"></div>
           </div>
         </section>
 
@@ -1508,6 +1533,280 @@
         </section>
 
         <!-- =========================================================================
+             VIEW 17B: ADMIN COUPON & DISCOUNT PANEL (BELOW BANK PANEL)
+             ========================================================================= -->
+        <section id="admin-coupons-view" class="view-section">
+          <div class="panel-card" style="margin-bottom:1.25rem;">
+            <div class="panel-header" style="flex-wrap:wrap; gap:1rem; align-items:flex-start;">
+              <div>
+                <h2 class="panel-title" style="display:flex; align-items:center; gap:0.55rem; flex-wrap:wrap;">
+                  <span>🎟️ Coupon &amp; Discount Management</span>
+                  <span class="badge badge-approved" style="font-size:0.74rem; padding:0.2rem 0.65rem;">Max 2 Coupons / Billing</span>
+                </h2>
+                <p style="font-size:0.84rem; color:var(--muted); margin-top:0.25rem; max-width:820px;">
+                  Create and manage promotional &amp; settlement coupons for <strong>Specific Restaurant Item Categories</strong>, <strong>Category Occasions</strong>, <strong>New Users</strong>, <strong>Festivals</strong>, <strong>Specific Users</strong>, <strong>Settlements</strong>, <strong>Special Occasions</strong>, <strong>Shops</strong>, and <strong>Groceries</strong>. Customers can avail up to <strong>2 coupons at a time</strong> during billing.
+                </p>
+              </div>
+              <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                <button type="button" class="btn btn-primary btn-sm" onclick="openAdminCouponForm()">
+                  ➕ Create New Coupon
+                </button>
+                <button type="button" class="btn btn-outline btn-sm" onclick="fetchAdminCoupons()">
+                  ↻ Refresh
+                </button>
+              </div>
+            </div>
+
+            <!-- Quick Preset Category Buttons -->
+            <div style="background:#fcfaf5; border:1px solid var(--line); border-radius:10px; padding:0.75rem 0.95rem; margin-bottom:1.1rem;">
+              <div style="font-size:0.76rem; font-weight:700; text-transform:uppercase; color:var(--muted); margin-bottom:0.45rem; letter-spacing:0.04em;">
+                ⚡ Quick Create Coupon by Category:
+              </div>
+              <div style="display:flex; flex-wrap:wrap; gap:0.42rem;">
+                <button type="button" class="btn btn-outline btn-sm" style="font-size:0.76rem; padding:0.28rem 0.65rem;" onclick="openAdminCouponForm('restaurant_item_category')">🍽️ Restaurant Item Category</button>
+                <button type="button" class="btn btn-outline btn-sm" style="font-size:0.76rem; padding:0.28rem 0.65rem;" onclick="openAdminCouponForm('category_occasion')">🥂 Category Occasion</button>
+                <button type="button" class="btn btn-outline btn-sm" style="font-size:0.76rem; padding:0.28rem 0.65rem;" onclick="openAdminCouponForm('new_user')">🆕 New Users</button>
+                <button type="button" class="btn btn-outline btn-sm" style="font-size:0.76rem; padding:0.28rem 0.65rem;" onclick="openAdminCouponForm('festival')">🪔 Festivals</button>
+                <button type="button" class="btn btn-outline btn-sm" style="font-size:0.76rem; padding:0.28rem 0.65rem;" onclick="openAdminCouponForm('specific_user')">👤 Specific User</button>
+                <button type="button" class="btn btn-outline btn-sm" style="font-size:0.76rem; padding:0.28rem 0.65rem;" onclick="openAdminCouponForm('settlement')">🤝 Settlement</button>
+                <button type="button" class="btn btn-outline btn-sm" style="font-size:0.76rem; padding:0.28rem 0.65rem;" onclick="openAdminCouponForm('special_occasion')">🎉 Special Occasion</button>
+                <button type="button" class="btn btn-outline btn-sm" style="font-size:0.76rem; padding:0.28rem 0.65rem;" onclick="openAdminCouponForm('shop')">🏬 Shop</button>
+                <button type="button" class="btn btn-outline btn-sm" style="font-size:0.76rem; padding:0.28rem 0.65rem;" onclick="openAdminCouponForm('grocery')">🥦 Grocery</button>
+              </div>
+            </div>
+
+            <!-- KPI Summary Row -->
+            <div id="admin-coupons-kpis" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(175px, 1fr)); gap:0.85rem; margin-bottom:1.15rem;">
+              <!-- Rendered via JS -->
+            </div>
+
+            <!-- Create / Edit Coupon Form Card -->
+            <div id="admin-coupon-form-card" style="display:none; background:#fff; border:1.5px solid #fdba74; border-radius:12px; padding:1.15rem 1.25rem; margin-bottom:1.25rem; box-shadow:0 4px 14px rgba(234,88,12,0.08);">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.9rem; padding-bottom:0.6rem; border-bottom:1px solid var(--line);">
+                <h3 id="admin-coupon-form-title" style="margin:0; font-size:1.05rem; color:var(--ink);">➕ Create New Coupon</h3>
+                <button type="button" class="btn btn-outline btn-sm" onclick="closeAdminCouponForm()">✕ Close</button>
+              </div>
+
+              <form id="admin-coupon-form" onsubmit="saveAdminCoupon(event)">
+                <input type="hidden" id="adm-coupon-id" value="" />
+
+                <div class="form-row" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:0.85rem; margin-bottom:0.85rem;">
+                  <div class="form-group" style="margin:0;">
+                    <label for="adm-coupon-type">Coupon Category / Type <span style="color:var(--tomato);">*</span></label>
+                    <select id="adm-coupon-type" required onchange="onAdminCouponTypeChange()" style="width:100%; padding:0.48rem 0.65rem; border:1px solid var(--line); border-radius:6px; background:#fff;">
+                      <option value="restaurant_item_category">🍽️ Restaurant Item Category</option>
+                      <option value="category_occasion">🥂 Category Occasion</option>
+                      <option value="new_user">🆕 New Users (1st Order)</option>
+                      <option value="festival">🪔 Festivals (Diwali, Holi, Eid, etc.)</option>
+                      <option value="specific_user">👤 Specific User</option>
+                      <option value="settlement">🤝 Settlement / Goodwill Credit</option>
+                      <option value="special_occasion">🎉 Special Occasion (Birthday, Anniversary)</option>
+                      <option value="shop">🏬 Shop (Retail Partner)</option>
+                      <option value="grocery">🥦 Grocery &amp; Daily Essentials</option>
+                    </select>
+                  </div>
+
+                  <div class="form-group" style="margin:0;">
+                    <label for="adm-coupon-code">Coupon Code <span style="color:var(--tomato);">*</span></label>
+                    <div style="display:flex; gap:0.35rem;">
+                      <input
+                        type="text"
+                        id="adm-coupon-code"
+                        placeholder="e.g. SWEETS25, DIWALI50"
+                        maxlength="24"
+                        required
+                        style="flex:1; text-transform:uppercase; font-family:monospace; font-weight:700;"
+                      />
+                      <button type="button" class="btn btn-outline btn-sm" style="white-space:nowrap; padding:0.35rem 0.6rem;" onclick="generateAdminCouponCode()">⚡ Auto</button>
+                    </div>
+                  </div>
+
+                  <div class="form-group" style="margin:0;">
+                    <label for="adm-coupon-title">Coupon Title / Headline <span style="color:var(--tomato);">*</span></label>
+                    <input
+                      type="text"
+                      id="adm-coupon-title"
+                      placeholder="e.g. 25% Off on Sweets &amp; Desserts"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div class="form-row" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(175px, 1fr)); gap:0.85rem; margin-bottom:0.85rem;">
+                  <div class="form-group" style="margin:0;">
+                    <label for="adm-coupon-discount-type">Discount Mode <span style="color:var(--tomato);">*</span></label>
+                    <select id="adm-coupon-discount-type" onchange="onAdminCouponDiscountTypeChange()" style="width:100%; padding:0.48rem 0.65rem; border:1px solid var(--line); border-radius:6px; background:#fff;">
+                      <option value="percentage">Percentage (% Off)</option>
+                      <option value="flat">Flat Amount (₹ Off)</option>
+                    </select>
+                  </div>
+
+                  <div class="form-group" style="margin:0;">
+                    <label id="adm-coupon-discount-val-label" for="adm-coupon-discount-value">Discount Value (%) <span style="color:var(--tomato);">*</span></label>
+                    <input type="number" id="adm-coupon-discount-value" min="1" max="10000" step="1" placeholder="e.g. 20" required />
+                  </div>
+
+                  <div class="form-group" style="margin:0;">
+                    <label for="adm-coupon-max-discount">Max Discount Cap (₹, 0 = None)</label>
+                    <input type="number" id="adm-coupon-max-discount" min="0" step="1" value="150" placeholder="e.g. 150" />
+                  </div>
+
+                  <div class="form-group" style="margin:0;">
+                    <label for="adm-coupon-min-order">Min Billing Subtotal (₹)</label>
+                    <input type="number" id="adm-coupon-min-order" min="0" step="1" value="149" placeholder="e.g. 199" />
+                  </div>
+                </div>
+
+                <!-- Contextual Target Fields -->
+                <div class="form-row" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:0.85rem; margin-bottom:0.85rem; background:#f8fafc; padding:0.8rem; border-radius:8px; border:1px dashed #cbd5e1;">
+                  <div class="form-group" id="adm-coupon-item-cat-group" style="margin:0;">
+                    <label id="adm-coupon-item-cat-label" for="adm-coupon-item-category">Target Item Category (Restaurant / Shop / Grocery)</label>
+                    <input
+                      type="text"
+                      id="adm-coupon-item-category"
+                      list="adm-coupon-categories-datalist"
+                      placeholder="e.g. Main Course, Sweets, Starters, Groceries..."
+                    />
+                    <datalist id="adm-coupon-categories-datalist"></datalist>
+                  </div>
+
+                  <div class="form-group" id="adm-coupon-occasion-group" style="margin:0;">
+                    <label id="adm-coupon-occasion-label" for="adm-coupon-occasion">Occasion / Festival / Settlement Label</label>
+                    <input
+                      type="text"
+                      id="adm-coupon-occasion"
+                      list="adm-coupon-occasions-datalist"
+                      placeholder="e.g. Diwali, Weekend Feast, Birthday, Settlement..."
+                    />
+                    <datalist id="adm-coupon-occasions-datalist">
+                      <option value="Diwali Festival"></option>
+                      <option value="Holi Celebration"></option>
+                      <option value="Eid Special"></option>
+                      <option value="Christmas &amp; New Year"></option>
+                      <option value="Navratri &amp; Dussehra"></option>
+                      <option value="Weekend Feast"></option>
+                      <option value="Lunch Rush Hour"></option>
+                      <option value="Midnight Cravings"></option>
+                      <option value="Birthday / Anniversary"></option>
+                      <option value="Order Settlement Credit"></option>
+                    </datalist>
+                  </div>
+
+                  <div class="form-group" id="adm-coupon-user-group" style="margin:0;">
+                    <label id="adm-coupon-user-label" for="adm-coupon-target-user">Specific User (Customer ID, Email, or Phone)</label>
+                    <input
+                      type="text"
+                      id="adm-coupon-target-user"
+                      list="adm-coupon-customers-datalist"
+                      placeholder="e.g. cust-1001 or user@email.com (Leave blank for all)"
+                    />
+                    <datalist id="adm-coupon-customers-datalist"></datalist>
+                  </div>
+                </div>
+
+                <div class="form-row" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(175px, 1fr)); gap:0.85rem; margin-bottom:0.85rem;">
+                  <div class="form-group" style="margin:0;">
+                    <label for="adm-coupon-store-type">Applicable Store Type</label>
+                    <select id="adm-coupon-store-type" style="width:100%; padding:0.48rem 0.65rem; border:1px solid var(--line); border-radius:6px; background:#fff;">
+                      <option value="all">🌐 All (Restaurants &amp; Shops)</option>
+                      <option value="restaurant">🍽️ Restaurants Only</option>
+                      <option value="shop">🏬 Shops &amp; Grocery Only</option>
+                    </select>
+                  </div>
+
+                  <div class="form-group" style="margin:0;">
+                    <label for="adm-coupon-per-user-limit">Max Uses Per User (0 = Unlimited)</label>
+                    <input type="number" id="adm-coupon-per-user-limit" min="0" step="1" value="2" />
+                  </div>
+
+                  <div class="form-group" style="margin:0;">
+                    <label for="adm-coupon-total-limit">Total Usage Limit (0 = Unlimited)</label>
+                    <input type="number" id="adm-coupon-total-limit" min="0" step="1" value="500" />
+                  </div>
+
+                  <div class="form-group" style="margin:0;">
+                    <label for="adm-coupon-valid-until">Valid Until (Expiry Date)</label>
+                    <input type="date" id="adm-coupon-valid-until" />
+                  </div>
+                </div>
+
+                <div class="form-group" style="margin-bottom:0.85rem;">
+                  <label for="adm-coupon-description">Coupon Description &amp; Billing Terms</label>
+                  <input
+                    type="text"
+                    id="adm-coupon-description"
+                    placeholder="e.g. Valid on Sweets &amp; Desserts category items during billing. Can be combined with 1 other coupon (Max 2)."
+                  />
+                </div>
+
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem;">
+                  <label style="display:inline-flex; align-items:center; gap:0.45rem; font-size:0.86rem; font-weight:600; cursor:pointer;">
+                    <input type="checkbox" id="adm-coupon-active" checked /> Coupon is Active &amp; Available During Billing
+                  </label>
+                  <div style="display:flex; gap:0.6rem;">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="closeAdminCouponForm()">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm" id="adm-coupon-save-btn">💾 Save Coupon</button>
+                  </div>
+                </div>
+              </form>
+            </div>
+
+            <!-- Filter Bar -->
+            <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.95rem;">
+              <div style="display:inline-flex; align-items:center; gap:0.3rem; background:#fcfaf5; border:1px solid var(--line); border-radius:7px; padding:0.24rem 0.55rem;">
+                <label for="admin-coupon-type-filter" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0;">Category:</label>
+                <select id="admin-coupon-type-filter" onchange="renderAdminCouponsTable()" style="padding:0.2rem 0.4rem; border:1px solid #d9d4c8; border-radius:5px; font-size:0.78rem; background:#fff;">
+                  <option value="all">All Coupon Types</option>
+                  <option value="restaurant_item_category">🍽️ Restaurant Item Category</option>
+                  <option value="category_occasion">🥂 Category Occasion</option>
+                  <option value="new_user">🆕 New Users</option>
+                  <option value="festival">🪔 Festivals</option>
+                  <option value="specific_user">👤 Specific User</option>
+                  <option value="settlement">🤝 Settlement</option>
+                  <option value="special_occasion">🎉 Special Occasion</option>
+                  <option value="shop">🏬 Shop</option>
+                  <option value="grocery">🥦 Grocery</option>
+                </select>
+              </div>
+
+              <div style="display:inline-flex; align-items:center; gap:0.3rem; background:#fcfaf5; border:1px solid var(--line); border-radius:7px; padding:0.24rem 0.55rem;">
+                <label for="admin-coupon-store-filter" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0;">Store:</label>
+                <select id="admin-coupon-store-filter" onchange="renderAdminCouponsTable()" style="padding:0.2rem 0.4rem; border:1px solid #d9d4c8; border-radius:5px; font-size:0.78rem; background:#fff;">
+                  <option value="all">All Stores</option>
+                  <option value="restaurant">🍽️ Restaurant</option>
+                  <option value="shop">🏬 Shop / Grocery</option>
+                </select>
+              </div>
+
+              <div style="display:inline-flex; align-items:center; gap:0.3rem; background:#fcfaf5; border:1px solid var(--line); border-radius:7px; padding:0.24rem 0.55rem;">
+                <label for="admin-coupon-status-filter" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0;">Status:</label>
+                <select id="admin-coupon-status-filter" onchange="renderAdminCouponsTable()" style="padding:0.2rem 0.4rem; border:1px solid #d9d4c8; border-radius:5px; font-size:0.78rem; background:#fff;">
+                  <option value="all">All Statuses</option>
+                  <option value="active">🟢 Active</option>
+                  <option value="inactive">⚪ Inactive</option>
+                </select>
+              </div>
+
+              <div style="display:inline-flex; align-items:center; gap:0.3rem; background:#fcfaf5; border:1px solid var(--line); border-radius:7px; padding:0.24rem 0.55rem; flex:1; min-width:210px;">
+                <span style="font-size:0.82rem;">🔍</span>
+                <input
+                  type="text"
+                  id="admin-coupon-search"
+                  placeholder="Search code, title, item category, occasion, user..."
+                  oninput="renderAdminCouponsTable()"
+                  style="border:none; outline:none; background:transparent; font-size:0.8rem; width:100%;"
+                />
+              </div>
+            </div>
+
+            <!-- Coupons Table Container -->
+            <div id="admin-coupons-table-container">
+              <!-- Rendered via JS -->
+            </div>
+          </div>
+        </section>
+
+        <!-- =========================================================================
              VIEW 18: PARTNER BANK & PAN KYC + PAYOUTS PANEL (SHOP / RESTAURANT / RIDER)
              ========================================================================= -->
         <section id="partner-bank-view" class="view-section">
@@ -1734,24 +2033,68 @@
          MODAL 1: PAYMENT GATEWAY CHECKOUT (CUSTOMER)
          ===================================================================== -->
     <div id="payment-gateway-modal" class="modal-overlay">
-      <div class="modal-box">
+      <div class="modal-box" style="max-width:600px; max-height:92vh; overflow-y:auto;">
         <div class="modal-header">
           <div>
             <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--green); font-weight:700;">🔒 256-Bit SSL Encrypted</span>
-            <h2 style="font-size:1.4rem; margin-top:0.2rem;">Tomato Secure Payment Gateway</h2>
+            <h2 style="font-size:1.4rem; margin-top:0.2rem;">Tomato Secure Billing &amp; Payment</h2>
           </div>
           <button class="modal-close" onclick="closeModal('payment-gateway-modal')">&times;</button>
         </div>
 
-        <div style="background:#f7f4ed; padding:1rem; border-radius:8px; margin-bottom:1.2rem; display:flex; justify-content:space-between; align-items:center;">
-          <div>
-            <div style="font-size:0.82rem; color:var(--muted);">Amount Payable</div>
-            <strong style="font-size:1.35rem; color:var(--tomato);" id="gateway-amount">₹0.00</strong>
+        <div style="background:#f7f4ed; padding:0.9rem 1rem; border-radius:8px; margin-bottom:0.9rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <div style="font-size:0.8rem; color:var(--muted);">Final Amount Payable</div>
+              <strong style="font-size:1.4rem; color:var(--tomato);" id="gateway-amount">₹0.00</strong>
+            </div>
+            <div style="font-size:0.8rem; text-align:right;">
+              <div>Items: <strong id="gateway-items-count">0</strong></div>
+              <div id="gateway-savings-badge" style="color:var(--green); font-weight:700;">No extra gateway fees</div>
+            </div>
           </div>
-          <div style="font-size:0.82rem; text-align:right;">
-            <div>Items: <strong id="gateway-items-count">0</strong></div>
-            <div style="color:var(--green);">No extra gateway fees</div>
+          <div id="gateway-bill-breakdown" style="margin-top:0.55rem; padding-top:0.55rem; border-top:1px dashed #dcd6c8; font-size:0.79rem; color:var(--charcoal); display:grid; gap:0.2rem;">
+            <!-- Populated dynamically with Subtotal, GST, Delivery Fee, and up to 2 Applied Coupons -->
           </div>
+        </div>
+
+        <!-- COUPON & DISCOUNT BOX IN BILLING (MAX 2 COUPONS AT A TIME) -->
+        <div style="background:#fff; border:1.5px solid #fed7aa; border-radius:8px; padding:0.85rem 0.95rem; margin-bottom:0.95rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.45rem;">
+            <strong style="font-size:0.86rem; color:var(--ink); display:flex; align-items:center; gap:0.35rem;">
+              <span>🎟️ Apply Coupons &amp; Discounts</span>
+              <span id="checkout-coupon-count-badge" class="badge" style="background:#ffedd5; color:#c2410c; font-size:0.7rem; padding:0.12rem 0.45rem;">0 / 2 Applied</span>
+            </strong>
+            <span style="font-size:0.73rem; color:var(--muted);">Max 2 coupons per order</span>
+          </div>
+
+          <!-- Manual Code Entry -->
+          <div style="display:flex; gap:0.4rem; margin-bottom:0.5rem;">
+            <input
+              type="text"
+              id="checkout-coupon-input"
+              placeholder="Enter coupon code (e.g. WELCOME100, SWEETS25, FESTIVAL30)..."
+              style="flex:1; padding:0.42rem 0.65rem; border:1px solid var(--line); border-radius:6px; font-size:0.82rem; text-transform:uppercase; font-family:monospace;"
+              onkeydown="if(event.key==='Enter'){ event.preventDefault(); applyManualCouponCode(); }"
+            />
+            <button type="button" class="btn btn-primary btn-sm" style="padding:0.42rem 0.85rem; font-size:0.8rem;" onclick="applyManualCouponCode()">Apply</button>
+          </div>
+
+          <!-- Applied Coupons Chips -->
+          <div id="checkout-applied-coupons-list" style="display:flex; flex-wrap:wrap; gap:0.4rem; margin-bottom:0.45rem;"></div>
+
+          <!-- Status / Error message -->
+          <div id="checkout-coupon-message" style="font-size:0.76rem; margin-bottom:0.45rem; display:none;"></div>
+
+          <!-- Available Coupons Picker -->
+          <details id="checkout-available-coupons-details" open style="background:#fcfaf5; border:1px solid var(--line); border-radius:6px; padding:0.45rem 0.6rem;">
+            <summary style="font-size:0.78rem; font-weight:700; color:#1e3a8a; cursor:pointer; user-select:none;">
+              ✨ View Available Coupons for Billing (Tap to Apply up to 2)
+            </summary>
+            <div id="checkout-available-coupons-list" style="margin-top:0.5rem; max-height:165px; overflow-y:auto; display:grid; gap:0.4rem;">
+              <span style="font-size:0.78rem; color:var(--muted);">Loading available coupons...</span>
+            </div>
+          </details>
         </div>
 
         <!-- Delivery Destination Box -->
@@ -2115,9 +2458,15 @@
           </div>
 
           <div id="adm-restaurant-fields">
-            <div class="form-group">
-              <label id="adm-rest-address-label">Restaurant Address <span style="color:var(--tomato);">*</span></label>
-              <input id="adm-restaurant-address" type="text" placeholder="12 MG Road, Bengaluru" />
+            <div class="form-row">
+              <div class="form-group">
+                <label id="adm-rest-address-label">Restaurant Address <span style="color:var(--tomato);">*</span></label>
+                <input id="adm-restaurant-address" type="text" placeholder="12 MG Road, Bengaluru, 560001" />
+              </div>
+              <div class="form-group">
+                <label id="adm-rest-pincode-label">Service Pincode <span style="color:var(--tomato);">*</span></label>
+                <input id="adm-restaurant-pincode" type="text" maxlength="6" placeholder="e.g. 560001" />
+              </div>
             </div>
             <div class="form-row">
               <div class="form-group">
@@ -2882,6 +3231,72 @@
           <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:0.65rem;">
             <button type="button" class="btn btn-outline" onclick="closeModal('admin-settlement-agreement-modal')">Cancel</button>
             <button type="submit" class="btn btn-primary">💾 Update Payout Agreement</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- =====================================================================
+         ADMIN: RESET USER PASSWORD MODAL (SHOP, RESTAURANT, RIDER, CUSTOMER, SUBADMIN)
+         ===================================================================== -->
+    <div id="admin-reset-password-modal" class="modal-overlay">
+      <div class="modal-box" style="max-width:520px;">
+        <div class="modal-header">
+          <div>
+            <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--tomato); font-weight:700;">🔑 Admin Account Security</span>
+            <h2 style="font-size:1.25rem; margin-top:0.2rem;">Reset User Password</h2>
+          </div>
+          <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('admin-reset-password-modal')">&times;</button>
+        </div>
+
+        <form id="admin-reset-password-form" onsubmit="submitAdminResetPassword(event)">
+          <input type="hidden" id="admin-reset-pwd-user-id" value="" />
+          <input type="hidden" id="admin-reset-pwd-user-role" value="" />
+
+          <div id="admin-reset-pwd-user-summary" style="background:#fcfaf5; border:1px solid var(--line); border-radius:10px; padding:0.75rem 1rem; margin-bottom:1rem; font-size:0.86rem;"></div>
+
+          <div class="form-group">
+            <label for="admin-reset-pwd-dob">User DOB (Date of Birth) — Auto-fills Default Password</label>
+            <input
+              type="date"
+              id="admin-reset-pwd-dob"
+              style="cursor:pointer;"
+              onclick="if(this.showPicker) this.showPicker();"
+              onchange="onAdminResetPasswordDobChange()"
+            />
+            <small id="admin-reset-pwd-dob-hint" style="display:block; margin-top:0.35rem; font-size:0.78rem; color:var(--muted);">
+              Default format: <strong style="font-family:monospace; color:var(--ink);">Tomato&lt;DDMMYYYY&gt;</strong> based on the user's DOB.
+            </small>
+          </div>
+
+          <div class="form-group">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; margin-bottom:0.35rem;">
+              <label for="admin-reset-pwd-input" style="margin:0;">New Password (Default: <code style="color:var(--tomato); font-weight:700;">Tomato&lt;DDMMYYYY&gt;</code> or Custom)</label>
+              <button
+                type="button"
+                class="btn btn-outline btn-sm"
+                style="font-size:0.73rem; padding:0.18rem 0.55rem;"
+                onclick="fillDefaultDobPasswordInResetModal()"
+              >
+                ⚡ Use Default (Tomato&lt;DDMMYYYY&gt;)
+              </button>
+            </div>
+            <input
+              type="text"
+              id="admin-reset-pwd-input"
+              placeholder="e.g. Tomato15081995 or enter any custom password"
+              required
+              minlength="6"
+              style="font-family:monospace; font-weight:700; font-size:0.95rem;"
+            />
+            <small style="display:block; margin-top:0.35rem; font-size:0.76rem; color:var(--muted);">
+              Admin can keep the default <strong>Tomato&lt;DDMMYYYY&gt;</strong> password or type any custom password (min 6 characters).
+            </small>
+          </div>
+
+          <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:0.65rem; margin-top:1.25rem;">
+            <button type="button" class="btn btn-outline" onclick="closeModal('admin-reset-password-modal')">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="admin-reset-pwd-submit-btn">🔑 Reset Password</button>
           </div>
         </form>
       </div>

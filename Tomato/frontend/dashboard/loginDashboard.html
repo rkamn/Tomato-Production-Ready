@@ -1560,7 +1560,7 @@
                     type="button"
                     class="btn btn-sm"
                     style="padding:0.1rem 0.25rem; font-size:0.7rem; border:none; background:transparent; color:var(--muted); cursor:pointer; line-height:1;"
-                    onclick="document.getElementById('admin-bank-partner-id-filter').value=''; renderAdminBankPartnersTable();"
+                    onclick="clearAdminBankPartnerIdFilter()"
                     title="Clear User ID filter"
                   >✕</button>
                 </div>
@@ -1578,7 +1578,7 @@
                     type="button"
                     class="btn btn-sm"
                     style="padding:0.1rem 0.25rem; font-size:0.7rem; border:none; background:transparent; color:var(--muted); cursor:pointer; line-height:1;"
-                    onclick="document.getElementById('admin-bank-partner-search').value=''; renderAdminBankPartnersTable();"
+                    onclick="clearAdminBankPartnerSearch()"
                     title="Clear search"
                   >✕</button>
                 </div>
@@ -1867,7 +1867,7 @@
                       type="button"
                       class="btn btn-sm"
                       style="padding:0.1rem 0.25rem; font-size:0.7rem; border:none; background:transparent; color:var(--muted); cursor:pointer; line-height:1;"
-                      onclick="document.getElementById('admin-bank-settlement-search').value=''; renderAdminBankSettlementsTable();"
+                      onclick="clearAdminBankSettlementSearch()"
                       title="Clear search"
                     >✕</button>
                   </div>
@@ -2830,7 +2830,24 @@
           <!-- Filled by generateBillHTML -->
         </div>
 
-        <div style="display:flex; justify-content:space-between; align-items:center;">
+        <!-- Order Bill Coupon Application Controls (Customer / Partner) -->
+        <div id="bill-modal-coupon-section" style="margin-top:1rem; padding-top:0.85rem; border-top:1px dashed var(--line); display:flex; flex-direction:column; gap:0.5rem;">
+          <div style="display:flex; gap:0.5rem; align-items:center;">
+            <input
+              type="text"
+              id="bill-modal-coupon-input"
+              placeholder="Enter coupon code (e.g. WELCOME50)..."
+              style="flex:1; padding:0.42rem 0.65rem; border:1px solid var(--line); border-radius:6px; font-size:0.85rem; text-transform:uppercase;"
+              onkeydown="if(event.key==='Enter'){event.preventDefault(); applyCouponCodeInsideBillModal();}"
+            />
+            <button type="button" class="btn btn-primary btn-sm" onclick="applyCouponCodeInsideBillModal()">
+              Apply Coupon
+            </button>
+          </div>
+          <div id="bill-modal-coupon-feedback" style="display:none; font-size:0.8rem; padding:0.25rem 0.4rem; border-radius:4px;"></div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:1rem;">
           <button type="button" class="btn btn-secondary" onclick="closeModal('bill-modal')">Close</button>
           <button type="button" class="btn btn-primary" onclick="window.print()">🖨️ Print Invoice</button>
         </div>
@@ -3914,7 +3931,32 @@
     <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
     <!-- WEBSOCKET LIVE RIDER TRACKING -->
     <script src="../javascript/websocket.js"></script>
-    <!-- SCRIPT -->
+    <!-- SCRIPT: CORE APPLICATION SHELL -->
     <script src="../javascript/loginDashboard.js"></script>
+    <!-- MODULAR DOMAIN CONTROLLERS -->
+    <script src="../javascript/modules/customerController.js"></script>
+    <script src="../javascript/modules/partnerController.js"></script>
+    <script src="../javascript/modules/riderController.js"></script>
+    <script src="../javascript/modules/adminOrders.js"></script>
+    <script src="../javascript/modules/adminUsers.js"></script>
+    <script src="../javascript/modules/adminComplaints.js"></script>
+    <script src="../javascript/modules/adminCoupons.js"></script>
+    <script src="../javascript/modules/adminBank.js"></script>
+    <script src="../javascript/modules/partnerBilling.js"></script>
+    <!-- APPLICATION BOOTSTRAP -->
+    <script>
+      (function() {
+        function runInit() {
+          if (typeof window.initDashboard === 'function') {
+            window.initDashboard();
+          }
+        }
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', runInit);
+        } else {
+          runInit();
+        }
+      })();
+    </script>
   </body>
 </html>

@@ -18,7 +18,8 @@ import {
   riderRoutes,
   supportRoutes,
 } from './modules/index.js';
-import { cleanupExpiredClosedComplaints } from './model/index.js';
+import { cleanupExpiredClosedComplaints, Restaurant, Shop } from './model/index.js';
+import { attachWebSocketServer } from './utils/websocket.js';
 
 import { upload, uploadDir } from './middleware/upload.js';
 
@@ -151,8 +152,8 @@ app.get('/oauth/callback', async (req, res) => {
 });
 app.use('/api/auth', authRoute(upload));
 app.use('/api/customer', customerRoutes);
-app.use('/api/restaurant', restaurantRoutes);
-app.use('/api/shop', shopRoutes);
+app.use(['/api/restaurant', '/api/restaurants', '/api/restaurent', '/api/restaurents'], restaurantRoutes);
+app.use(['/api/shop', '/api/shops'], shopRoutes);
 app.use('/api/rider', riderRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/support', supportRoutes);
@@ -165,6 +166,18 @@ const startServer = async () => {
   try {
     await connectDB();
 
+    // Ensure all restaurant and shop partners have default GSN number 'NA' if not updated
+    await Promise.all([
+      Restaurant.updateMany(
+        { $or: [{ gsnNumber: { $exists: false } }, { gsnNumber: '' }, { gsnNumber: null }] },
+        { $set: { gsnNumber: 'NA' } },
+      ).catch(() => null),
+      Shop.updateMany(
+        { $or: [{ gsnNumber: { $exists: false } }, { gsnNumber: '' }, { gsnNumber: null }] },
+        { $set: { gsnNumber: 'NA' } },
+      ).catch(() => null),
+    ]);
+
     // Auto-delete closed complaints inactive for > 1 week on server startup
     await cleanupExpiredClosedComplaints();
 
@@ -175,12 +188,15 @@ const startServer = async () => {
       );
     }, 60 * 60 * 1000);
 
-    app.listen(PORT, () => {
-      console.log(`Auth service running on port ${PORT}`);
+    const mainServer = app.listen(PORT, () => {
+      console.log(`Auth service running on port ${PORT} (WebSocket /ws ready)`);
     });
+    attachWebSocketServer(mainServer);
+
     const frontendServer = app.listen(FRONTEND_PORT, '127.0.0.1', () => {
       console.log(`Frontend running on http://127.0.0.1:${FRONTEND_PORT}`);
     });
+    attachWebSocketServer(frontendServer);
     frontendServer.on('error', (error: NodeJS.ErrnoException) => {
       if (error.code === 'EADDRINUSE') {
         console.warn(

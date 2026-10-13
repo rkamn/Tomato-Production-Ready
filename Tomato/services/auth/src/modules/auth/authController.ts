@@ -163,6 +163,7 @@ export const userResponse = (user: {
 	adminRoleTitle?: string;
 	createdBy?: string;
 	dob?: string;
+	gsnNumber?: string;
 	bankDetails?: any;
 }) => {
 	const rawCustomerId = user.customerId || (user.role === 'customer' ? `cust-${String(user._id).slice(-4).toLowerCase()}` : '');
@@ -190,6 +191,9 @@ export const userResponse = (user: {
 		email: user.email,
 		phone: user.phone,
 		dob: (user as any).dob || '',
+		gsnNumber: (user as any).gsnNumber && String((user as any).gsnNumber).trim()
+			? String((user as any).gsnNumber).trim()
+			: ((user.role === 'restaurant' || user.role === 'shop') ? 'NA' : ''),
 		image: user.image || '',
 		role: user.role,
 		isApproved: user.isApproved ?? true,
@@ -722,8 +726,11 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 			: undefined;
 	const nextVehicle = typeof req.body?.deliveryVehicle === 'string' ? req.body.deliveryVehicle.trim() : undefined;
 	const nextDob = typeof req.body?.dob === 'string' ? req.body.dob.trim() : undefined;
+	const nextGsn = typeof req.body?.gsnNumber === 'string'
+		? (req.body.gsnNumber.trim().toUpperCase() || 'NA')
+		: undefined;
 
-	if (!nextName && !nextEmail && !nextPhone && !nextImage && !nextAddress && nextPincode === undefined && !nextCuisine && !nextVehicle && nextDob === undefined) {
+	if (!nextName && !nextEmail && !nextPhone && !nextImage && !nextAddress && nextPincode === undefined && !nextCuisine && !nextVehicle && nextDob === undefined && nextGsn === undefined) {
 		return res.status(400).json({
 			message: 'No profile changes provided',
 		});
@@ -740,6 +747,7 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 		if (nextPhone) updates.phone = nextPhone;
 		if (nextImage) updates.image = nextImage;
 		if (nextDob !== undefined) updates.dob = nextDob;
+		if (nextGsn !== undefined) updates.gsnNumber = nextGsn;
 		if (nextAddress !== undefined) {
 			updates.restaurantAddress = nextAddress;
 			updates.shopAddress = nextAddress;

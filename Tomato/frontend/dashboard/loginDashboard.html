@@ -179,6 +179,59 @@
                   <span id="overview-notif-label">Notifications</span>
                   <span id="overview-notif-badge" class="badge" style="background:#0369a1; color:#fff; font-size:0.7rem; font-weight:700; padding:0.12rem 0.45rem; border-radius:999px; display:none;">0</span>
                 </button>
+
+                <!-- Restaurant & Shop: Notification Icon (Left of Refresh) -->
+                <button
+                  id="partner-overview-notif-btn"
+                  class="btn btn-outline btn-sm overview-tab-btn notif-tab"
+                  type="button"
+                  onclick="handlePartnerOverviewNotifClick()"
+                  title="Live Notifications & Updates"
+                  style="display:none; align-items:center; gap:0.35rem; padding:0.35rem 0.65rem; border-radius:6px; cursor:pointer; font-weight:600;"
+                >
+                  <span style="font-size:0.95rem; line-height:1;">🔔</span>
+                  <span id="partner-overview-notif-badge" class="badge" style="background:#0369a1; color:#fff; font-size:0.7rem; font-weight:700; padding:0.12rem 0.45rem; border-radius:999px; display:none;">0</span>
+                </button>
+
+                <!-- Restaurant & Shop: Report Button (Left of Refresh) -->
+                <button
+                  id="partner-overview-report-btn"
+                  class="btn btn-outline btn-sm overview-tab-btn"
+                  type="button"
+                  onclick="showOverviewPartnerReportView()"
+                  title="Store Performance & Sales Report"
+                  style="display:none; align-items:center; gap:0.35rem; padding:0.35rem 0.75rem; border-radius:6px; cursor:pointer; font-weight:600;"
+                >
+                  <span style="font-size:0.95rem; line-height:1;">📊</span>
+                  <span>Report</span>
+                </button>
+
+                <!-- Admin: Notification Button (Left of Refresh) -->
+                <button
+                  id="admin-overview-notif-btn"
+                  class="btn btn-outline btn-sm overview-tab-btn notif-tab"
+                  type="button"
+                  onclick="handleAdminOverviewNotifClick()"
+                  title="Live Platform Activity & Notifications"
+                  style="display:none; align-items:center; gap:0.35rem; padding:0.35rem 0.65rem; border-radius:6px; cursor:pointer; font-weight:600;"
+                >
+                  <span style="font-size:0.95rem; line-height:1;">🔔</span>
+                  <span id="admin-overview-notif-badge" class="badge" style="background:#0369a1; color:#fff; font-size:0.7rem; font-weight:700; padding:0.12rem 0.45rem; border-radius:999px; display:none;">0</span>
+                </button>
+
+                <!-- Admin: Reports Button (Left of Refresh) -->
+                <button
+                  id="admin-overview-report-btn"
+                  class="btn btn-outline btn-sm overview-tab-btn"
+                  type="button"
+                  onclick="handleAdminOverviewReportClick()"
+                  title="Platform Business & Financial Reports"
+                  style="display:none; align-items:center; gap:0.35rem; padding:0.35rem 0.75rem; border-radius:6px; cursor:pointer; font-weight:600;"
+                >
+                  <span style="font-size:0.95rem; line-height:1;">📊</span>
+                  <span>Reports</span>
+                </button>
+
                 <button id="overview-refresh-btn" class="btn btn-outline btn-sm" type="button" onclick="handleOverviewRefreshClick()">↻ Refresh</button>
               </div>
             </div>
@@ -232,10 +285,160 @@
                   <div style="font-size:0.85rem; color:var(--muted);">
                     Delivering to: <strong id="overview-cart-delivery-label">Default Address</strong>
                   </div>
-                  <button class="btn btn-primary" type="button" onclick="openPaymentGatewayModal()">🎟️ Apply Coupons &amp; Proceed to Billing</button>
+                  <button class="btn btn-primary" type="button" onclick="openPaymentGatewayModal()">Proceed to Billing</button>
                 </div>
               </div>
             </div>
+
+            <!-- OVERVIEW: PARTNER BUSINESS & SALES REPORT PAGE -->
+            <div id="overview-partner-report-container" class="overview-partner-report-pane" style="display:none; padding:1.25rem 1.25rem 1.5rem 1.25rem;">
+              <!-- Filter & Date Controls Strip -->
+              <div style="background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:0.75rem 1rem; margin-bottom:1.15rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem;">
+                <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                  <label for="partner-report-period" style="font-size:0.82rem; font-weight:700; color:var(--charcoal); margin:0;">Period:</label>
+                  <select id="partner-report-period" onchange="renderPartnerReportData()" style="padding:0.35rem 0.65rem; border:1px solid #cbd5e1; border-radius:6px; font-size:0.82rem; background:#fff; font-weight:600;">
+                    <option value="all">All Time</option>
+                    <option value="today">Today</option>
+                    <option value="yesterday">Yesterday</option>
+                    <option value="last7">Last 7 Days</option>
+                    <option value="thisMonth">This Month</option>
+                  </select>
+                  <span id="partner-report-date-label" style="font-size:0.78rem; color:var(--muted); font-weight:600;"></span>
+                </div>
+
+                <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                  <button type="button" class="btn btn-outline btn-sm" onclick="exportPartnerReportCsv()">
+                    📥 Export CSV
+                  </button>
+                  <button type="button" class="btn btn-outline btn-sm" onclick="printPartnerReport()">
+                    🖨️ Print Report
+                  </button>
+                  <button type="button" class="btn btn-primary btn-sm" onclick="refreshPartnerReportData()">
+                    ↻ Refresh Data
+                  </button>
+                </div>
+              </div>
+
+              <!-- KPI Grid -->
+              <div id="partner-report-kpi-grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:0.85rem; margin-bottom:1.25rem;">
+                <!-- Populated by JS -->
+              </div>
+
+              <!-- Financial Breakdown Card -->
+              <div style="background:#fff; border:1px solid var(--line); border-radius:10px; padding:1.1rem; margin-bottom:1.25rem;">
+                <h3 style="margin:0 0 0.75rem 0; font-size:0.95rem; color:var(--ink); display:flex; align-items:center; gap:0.4rem;">
+                  <span>💰 Financial Settlement Summary</span>
+                </h3>
+                <div id="partner-report-financial-breakdown" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(165px, 1fr)); gap:0.75rem;">
+                  <!-- Populated by JS -->
+                </div>
+              </div>
+
+              <!-- Order Status Breakdown & Top Items Row -->
+              <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:1.15rem; margin-bottom:1.15rem;">
+                <!-- Status Counts -->
+                <div style="background:#fff; border:1px solid var(--line); border-radius:10px; padding:1.1rem;">
+                  <h3 style="margin:0 0 0.75rem 0; font-size:0.95rem; color:var(--ink); display:flex; align-items:center; gap:0.4rem;">
+                    <span>📦 Orders by Status</span>
+                  </h3>
+                  <div id="partner-report-status-breakdown">
+                    <!-- Populated by JS -->
+                  </div>
+                </div>
+
+                <!-- Top Selling Items -->
+                <div style="background:#fff; border:1px solid var(--line); border-radius:10px; padding:1.1rem;">
+                  <h3 style="margin:0 0 0.75rem 0; font-size:0.95rem; color:var(--ink); display:flex; align-items:center; gap:0.4rem;">
+                    <span>🏆 Top Selling Items</span>
+                  </h3>
+                  <div id="partner-report-top-items">
+                    <!-- Populated by JS -->
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- OVERVIEW: ADMIN PLATFORM BUSINESS & SALES REPORT PAGE -->
+            <div id="overview-admin-report-container" class="overview-partner-report-pane" style="display:none; padding:1.25rem 1.25rem 1.5rem 1.25rem;">
+              <!-- Filter & Date Controls Strip -->
+              <div style="background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:0.75rem 1rem; margin-bottom:1.15rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem;">
+                <div style="display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap;">
+                  <div style="display:inline-flex; align-items:center; gap:0.35rem;">
+                    <label for="admin-report-period" style="font-size:0.82rem; font-weight:700; color:var(--charcoal); margin:0;">Period:</label>
+                    <select id="admin-report-period" onchange="renderAdminReportData()" style="padding:0.35rem 0.65rem; border:1px solid #cbd5e1; border-radius:6px; font-size:0.82rem; background:#fff; font-weight:600;">
+                      <option value="today">Today</option>
+                      <option value="yesterday">Yesterday</option>
+                      <option value="last7">Last 7 Days</option>
+                      <option value="thisMonth">This Month</option>
+                      <option value="all" selected>All Time</option>
+                    </select>
+                  </div>
+                  <div style="display:inline-flex; align-items:center; gap:0.35rem;">
+                    <label for="admin-report-channel" style="font-size:0.82rem; font-weight:700; color:var(--charcoal); margin:0;">Channel:</label>
+                    <select id="admin-report-channel" onchange="renderAdminReportData()" style="padding:0.35rem 0.65rem; border:1px solid #cbd5e1; border-radius:6px; font-size:0.82rem; background:#fff; font-weight:600;">
+                      <option value="all">All Channels (Dining &amp; Retail)</option>
+                      <option value="restaurant">Restaurants Only</option>
+                      <option value="shop">Shops Only</option>
+                    </select>
+                  </div>
+                  <span id="admin-report-date-label" style="font-size:0.78rem; color:var(--muted); font-weight:600;"></span>
+                </div>
+
+                <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                  <button type="button" class="btn btn-outline btn-sm" onclick="exportAdminReportCsv()">
+                    📥 Export CSV
+                  </button>
+                  <button type="button" class="btn btn-outline btn-sm" onclick="printAdminReport()">
+                    🖨️ Print Report
+                  </button>
+                  <button type="button" class="btn btn-outline btn-sm" onclick="switchView('admin-analytics')" title="View in-depth platform analytics &amp; charts">
+                    📈 Deep-Dive Analytics
+                  </button>
+                  <button type="button" class="btn btn-primary btn-sm" onclick="refreshAdminReportData()">
+                    ↻ Refresh Data
+                  </button>
+                </div>
+              </div>
+
+              <!-- KPI Grid -->
+              <div id="admin-report-kpi-grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:0.85rem; margin-bottom:1.25rem;">
+                <!-- Populated by JS -->
+              </div>
+
+              <!-- Financial Breakdown Card -->
+              <div style="background:#fff; border:1px solid var(--line); border-radius:10px; padding:1.1rem; margin-bottom:1.25rem;">
+                <h3 style="margin:0 0 0.75rem 0; font-size:0.95rem; color:var(--ink); display:flex; align-items:center; gap:0.4rem;">
+                  <span>💰 Platform Financial &amp; Commission Summary</span>
+                </h3>
+                <div id="admin-report-financial-breakdown" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(165px, 1fr)); gap:0.75rem;">
+                  <!-- Populated by JS -->
+                </div>
+              </div>
+
+              <!-- Order Status Breakdown & Top Items Row -->
+              <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:1.15rem; margin-bottom:1.15rem;">
+                <!-- Status Counts -->
+                <div style="background:#fff; border:1px solid var(--line); border-radius:10px; padding:1.1rem;">
+                  <h3 style="margin:0 0 0.75rem 0; font-size:0.95rem; color:var(--ink); display:flex; align-items:center; gap:0.4rem;">
+                    <span>📦 Platform Orders by Status</span>
+                  </h3>
+                  <div id="admin-report-status-breakdown">
+                    <!-- Populated by JS -->
+                  </div>
+                </div>
+
+                <!-- Top Selling Items Platform-Wide -->
+                <div style="background:#fff; border:1px solid var(--line); border-radius:10px; padding:1.1rem;">
+                  <h3 style="margin:0 0 0.75rem 0; font-size:0.95rem; color:var(--ink); display:flex; align-items:center; gap:0.4rem;">
+                    <span>🏆 Top Selling Items Platform-Wide</span>
+                  </h3>
+                  <div id="admin-report-top-items">
+                    <!-- Populated by JS -->
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div id="activity-feed" class="activity-feed-container"></div>
             <div id="notif-pagination-container" class="notif-pagination-bar" style="display:none;">
               <div class="notif-pagination-info" id="notif-pagination-info">Showing 1–5 of 5</div>
@@ -354,7 +557,7 @@
                     <div style="font-size:0.85rem; color:var(--muted);">
                       Delivering to: <strong id="order-cart-delivery-label">Default Address</strong>
                     </div>
-                    <button class="btn btn-primary" type="button" onclick="openPaymentGatewayModal()">🎟️ Apply Coupons &amp; Proceed to Billing</button>
+                    <button class="btn btn-primary" type="button" onclick="openPaymentGatewayModal()">Proceed to Billing</button>
                   </div>
                 </div>
               </div>
@@ -471,17 +674,40 @@
              ================================================================= -->
         <section id="restaurant-orders-view" class="view-section">
           <div class="panel">
-            <div class="panel-header">
+            <div class="panel-header" style="flex-wrap:wrap; gap:0.75rem; align-items:center; justify-content:space-between;">
               <div>
                 <h2 class="panel-title">Incoming Kitchen Orders</h2>
                 <p class="food-meta">Accept orders, update preparation stage, and generate bills</p>
               </div>
-              <button class="btn btn-outline btn-sm" onclick="fetchRestaurantOrders()">Refresh</button>
+              <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                <!-- Date Range Search Box -->
+                <div style="display:flex; align-items:center; gap:0.35rem; background:#fcfaf5; border:1px solid var(--line); border-radius:8px; padding:0.35rem 0.65rem;">
+                  <label for="rest-orders-start-date" style="font-size:0.8rem; font-weight:600; color:var(--charcoal); margin:0;">From:</label>
+                  <input
+                    type="date"
+                    id="rest-orders-start-date"
+                    style="padding:0.28rem 0.45rem; border:1px solid #d9d4c8; border-radius:6px; font-size:0.82rem; background:#fff; font-family:inherit; outline:none;"
+                    onkeydown="if(event.key === 'Enter') { event.preventDefault(); applyRestaurantOrdersDateFilter(); }"
+                  />
+                  <span style="color:var(--muted); font-size:0.85rem; font-weight:bold;">—</span>
+                  <label for="rest-orders-end-date" style="font-size:0.8rem; font-weight:600; color:var(--charcoal); margin:0;">To:</label>
+                  <input
+                    type="date"
+                    id="rest-orders-end-date"
+                    style="padding:0.28rem 0.45rem; border:1px solid #d9d4c8; border-radius:6px; font-size:0.82rem; background:#fff; font-family:inherit; outline:none;"
+                    onkeydown="if(event.key === 'Enter') { event.preventDefault(); applyRestaurantOrdersDateFilter(); }"
+                  />
+                  <button type="button" class="btn btn-primary btn-sm" style="padding:0.28rem 0.65rem; font-size:0.78rem;" onclick="applyRestaurantOrdersDateFilter()" title="Search orders in date range">🔍 Search</button>
+                  <button type="button" class="btn btn-outline btn-sm" style="padding:0.28rem 0.55rem; font-size:0.78rem;" onclick="clearRestaurantOrdersDateFilter()" title="Reset date filters">✕ Clear</button>
+                </div>
+                <button class="btn btn-outline btn-sm" onclick="fetchRestaurantOrders()">Refresh</button>
+              </div>
             </div>
             <div id="restaurant-orders-filter-bar" style="display:flex; align-items:center; gap:0.5rem; margin-bottom:1rem; flex-wrap:wrap; padding:0.25rem 0;">
               <button id="rest-filter-all" class="btn btn-sm btn-outline active" onclick="setRestaurantOrdersFilter('all')">All Orders</button>
               <button id="rest-filter-cooking" class="btn btn-sm btn-outline" onclick="setRestaurantOrdersFilter('cooking')">🍳 On Stove / Cooking</button>
               <button id="rest-filter-incoming" class="btn btn-sm btn-outline" onclick="setRestaurantOrdersFilter('incoming')">🔔 New Incoming</button>
+              <span id="rest-date-filter-indicator" style="display:none; font-size:0.8rem; color:#1e3a8a; font-weight:600; background:#eff6ff; border:1px solid #bfdbfe; border-radius:999px; padding:0.18rem 0.65rem;"></span>
               <span id="rest-filter-indicator" style="display:none; font-size:0.8rem; color:var(--tomato); font-weight:600; margin-left:auto;"></span>
             </div>
             <div id="restaurant-orders-table"></div>
@@ -506,17 +732,40 @@
              ================================================================= -->
         <section id="shop-orders-view" class="view-section">
           <div class="panel">
-            <div class="panel-header">
+            <div class="panel-header" style="flex-wrap:wrap; gap:0.75rem; align-items:center; justify-content:space-between;">
               <div>
                 <h2 class="panel-title">Incoming Shop Orders</h2>
                 <p class="food-meta">Accept orders, pack items, update dispatch stage, and generate bills</p>
               </div>
-              <button class="btn btn-outline btn-sm" onclick="fetchShopOrders()">Refresh</button>
+              <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                <!-- Date Range Search Box -->
+                <div style="display:flex; align-items:center; gap:0.35rem; background:#fcfaf5; border:1px solid var(--line); border-radius:8px; padding:0.35rem 0.65rem;">
+                  <label for="shop-orders-start-date" style="font-size:0.8rem; font-weight:600; color:var(--charcoal); margin:0;">From:</label>
+                  <input
+                    type="date"
+                    id="shop-orders-start-date"
+                    style="padding:0.28rem 0.45rem; border:1px solid #d9d4c8; border-radius:6px; font-size:0.82rem; background:#fff; font-family:inherit; outline:none;"
+                    onkeydown="if(event.key === 'Enter') { event.preventDefault(); applyShopOrdersDateFilter(); }"
+                  />
+                  <span style="color:var(--muted); font-size:0.85rem; font-weight:bold;">—</span>
+                  <label for="shop-orders-end-date" style="font-size:0.8rem; font-weight:600; color:var(--charcoal); margin:0;">To:</label>
+                  <input
+                    type="date"
+                    id="shop-orders-end-date"
+                    style="padding:0.28rem 0.45rem; border:1px solid #d9d4c8; border-radius:6px; font-size:0.82rem; background:#fff; font-family:inherit; outline:none;"
+                    onkeydown="if(event.key === 'Enter') { event.preventDefault(); applyShopOrdersDateFilter(); }"
+                  />
+                  <button type="button" class="btn btn-primary btn-sm" style="padding:0.28rem 0.65rem; font-size:0.78rem;" onclick="applyShopOrdersDateFilter()" title="Search orders in date range">🔍 Search</button>
+                  <button type="button" class="btn btn-outline btn-sm" style="padding:0.28rem 0.55rem; font-size:0.78rem;" onclick="clearShopOrdersDateFilter()" title="Reset date filters">✕ Clear</button>
+                </div>
+                <button class="btn btn-outline btn-sm" onclick="fetchShopOrders()">Refresh</button>
+              </div>
             </div>
             <div id="shop-orders-filter-bar" style="display:flex; align-items:center; gap:0.5rem; margin-bottom:1rem; flex-wrap:wrap; padding:0.25rem 0;">
               <button id="shop-filter-all" class="btn btn-sm btn-outline active" onclick="setShopOrdersFilter('all')">All Orders</button>
               <button id="shop-filter-cooking" class="btn btn-sm btn-outline" onclick="setShopOrdersFilter('cooking')">📦 In Packing / Processing</button>
               <button id="shop-filter-incoming" class="btn btn-sm btn-outline" onclick="setShopOrdersFilter('incoming')">🔔 New Incoming</button>
+              <span id="shop-date-filter-indicator" style="display:none; font-size:0.8rem; color:#1e3a8a; font-weight:600; background:#eff6ff; border:1px solid #bfdbfe; border-radius:999px; padding:0.18rem 0.65rem;"></span>
               <span id="shop-filter-indicator" style="display:none; font-size:0.8rem; color:var(--tomato); font-weight:600; margin-left:auto;"></span>
             </div>
             <div id="shop-orders-table"></div>
@@ -1045,6 +1294,10 @@
                   <label for="set-dob">DOB (Date of Birth)</label>
                   <input id="set-dob" type="date" style="cursor:pointer;" onclick="if(this.showPicker) this.showPicker();" />
                 </div>
+                <div class="form-group" id="set-gsn-group" style="display:none;">
+                  <label for="set-gsn" id="set-gsn-label">GST Number</label>
+                  <input id="set-gsn" type="text" maxlength="20" placeholder="e.g. 29AABCT1337M1Z4 (Default: NA)" style="text-transform:uppercase; font-family:monospace;" />
+                </div>
               </div>
 
               <!-- Restaurant & Shop specific -->
@@ -1240,32 +1493,16 @@
           <div class="panel-card" style="margin-bottom:1.25rem;">
             <div class="panel-header" style="flex-wrap:wrap; gap:1rem;">
               <div>
-                <h2 class="panel-title">🏦 Bank &amp; Partner Payout Settlements</h2>
+                <h2 class="panel-title">🏦 Partner Bank &amp; PAN KYC Verification</h2>
                 <p style="font-size:0.84rem; color:var(--muted); margin-top:0.2rem;">
-                  Verify &amp; approve Shop, Restaurant, and Rider bank + PAN details (Account Holder Name must match PAN Card Name), configure commission agreements, and release payouts from Tomato's central account.
+                  Verify &amp; approve Shop, Restaurant, and Rider bank + PAN details (Account Holder Name must match PAN Card Name) and configure commission agreements.
                 </p>
               </div>
               <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
                 <button
                   type="button"
-                  id="admin-bank-tab-partners-btn"
-                  class="btn btn-primary btn-sm"
-                  onclick="switchAdminBankTab('partners')"
-                >
-                  🪪 Partner Bank &amp; PAN KYC
-                </button>
-                <button
-                  type="button"
-                  id="admin-bank-tab-settlements-btn"
                   class="btn btn-outline btn-sm"
-                  onclick="switchAdminBankTab('settlements')"
-                >
-                  💸 Tomato Account &amp; Order Payouts
-                </button>
-                <button
-                  type="button"
-                  class="btn btn-outline btn-sm"
-                  onclick="refreshAdminBankCurrentTab()"
+                  onclick="fetchAdminBankPartners()"
                 >
                   ↻ Refresh
                 </button>
@@ -1352,9 +1589,130 @@
                 <!-- Rendered via JS -->
               </div>
             </div>
+          </div>
+        </section>
+
+        <!-- =========================================================================
+             VIEW 17.5: ADMIN PARTNERS BILLING (WEEKLY SETTLEMENTS & PAYOUT REPORT)
+             ========================================================================= -->
+        <section id="admin-partner-billing-view" class="view-section">
+          <div class="panel-card" style="margin-bottom:1.25rem;">
+            <div class="panel-header" style="flex-wrap:wrap; gap:1rem; align-items:flex-start;">
+              <div>
+                <h2 class="panel-title" style="display:flex; align-items:center; gap:0.55rem; flex-wrap:wrap;">
+                  <span>📑 Partners Billing</span>
+                  <span class="badge badge-delivered" style="font-size:0.74rem; padding:0.2rem 0.65rem;">Weekly Settlement Engine</span>
+                </h2>
+                <p style="font-size:0.84rem; color:var(--muted); margin-top:0.25rem; max-width:880px;">
+                  Weekly billing management for <strong>Restaurants</strong>, <strong>Shops</strong>, and <strong>Delivery Riders</strong>. Track weekly orders fulfilled, platform commission cuts, store discounts absorbed, <strong>total amount paid</strong> vs. <strong>amount still pending</strong> from Tomato, and disburse weekly batch payouts with real-time status.
+                </p>
+              </div>
+              <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
+                <button
+                  type="button"
+                  id="admin-billing-tab-weekly-btn"
+                  class="btn btn-primary btn-sm"
+                  onclick="switchAdminPartnerBillingTab('weekly')"
+                  title="View weekly billing summaries and batch payouts"
+                >
+                  📑 Weekly Billing Overview
+                </button>
+                <button
+                  type="button"
+                  id="admin-billing-tab-settlements-btn"
+                  class="btn btn-outline btn-sm"
+                  onclick="switchAdminPartnerBillingTab('settlements')"
+                  title="View individual order settlement records &amp; agreement commissions"
+                >
+                  💸 Tomato Account &amp; Order Payouts
+                </button>
+                <button type="button" class="btn btn-outline btn-sm" onclick="exportAdminPartnerBillingCsv()">
+                  📥 Export Billing CSV
+                </button>
+                <button type="button" class="btn btn-outline btn-sm" onclick="refreshAdminPartnerBillingCurrentTab()">
+                  ↻ Refresh
+                </button>
+              </div>
+            </div>
+
+            <!-- SUB-TAB 1: WEEKLY BILLING & BATCH SETTLEMENTS -->
+            <div id="admin-billing-tab-weekly" style="display:block;">
+              <!-- KPI Cards Row -->
+              <div id="admin-partner-billing-kpis" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:0.85rem; margin-bottom:1.1rem;">
+                <!-- Rendered via JS -->
+              </div>
+
+              <!-- Controls Toolbar (Week picker, Role filter, Status filter, Search) -->
+              <div style="background:#fcfaf5; border:1px solid var(--line); border-radius:10px; padding:0.75rem 0.95rem; margin-bottom:1rem; display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                <!-- Week selector -->
+                <div style="display:inline-flex; align-items:center; gap:0.35rem; background:#fff; border:1px solid #d9d4c8; border-radius:7px; padding:0.24rem 0.55rem;">
+                  <label for="admin-billing-week-input" style="font-size:0.76rem; font-weight:700; color:var(--charcoal); margin:0;">Week:</label>
+                  <input
+                    type="week"
+                    id="admin-billing-week-input"
+                    style="border:none; outline:none; font-size:0.78rem; font-family:inherit; background:transparent; width:135px;"
+                    onchange="fetchAdminPartnerBilling()"
+                  />
+                </div>
+
+                <!-- Quick buttons -->
+                <button type="button" class="btn btn-primary btn-sm" style="font-size:0.76rem; padding:0.25rem 0.55rem; height:29px;" onclick="setAdminBillingCurrentWeek()">📅 This Week</button>
+                <button type="button" class="btn btn-outline btn-sm" style="font-size:0.76rem; padding:0.25rem 0.55rem; height:29px;" onclick="setAdminBillingPrevWeek()">⏮️ Last Week</button>
+                <button type="button" class="btn btn-outline btn-sm" style="font-size:0.76rem; padding:0.25rem 0.55rem; height:29px;" onclick="setAdminBillingAllTime()">All Time</button>
+
+                <!-- Partner Role filter -->
+                <div style="display:inline-flex; align-items:center; gap:0.35rem; background:#fff; border:1px solid #d9d4c8; border-radius:7px; padding:0.24rem 0.55rem;">
+                  <label for="admin-billing-role-filter" style="font-size:0.76rem; font-weight:700; color:var(--charcoal); margin:0;">Role:</label>
+                  <select
+                    id="admin-billing-role-filter"
+                    style="border:none; outline:none; font-size:0.78rem; font-family:inherit; background:transparent;"
+                    onchange="fetchAdminPartnerBilling()"
+                  >
+                    <option value="all">All Partners &amp; Riders</option>
+                    <option value="restaurant">🏪 Restaurants Only</option>
+                    <option value="shop">🏬 Shops Only</option>
+                    <option value="deliveryPartner">🚴 Riders Only</option>
+                  </select>
+                </div>
+
+                <!-- Status filter -->
+                <div style="display:inline-flex; align-items:center; gap:0.35rem; background:#fff; border:1px solid #d9d4c8; border-radius:7px; padding:0.24rem 0.55rem;">
+                  <label for="admin-billing-status-filter" style="font-size:0.76rem; font-weight:700; color:var(--charcoal); margin:0;">Status:</label>
+                  <select
+                    id="admin-billing-status-filter"
+                    style="border:none; outline:none; font-size:0.78rem; font-family:inherit; background:transparent;"
+                    onchange="fetchAdminPartnerBilling()"
+                  >
+                    <option value="all">All Payout Statuses</option>
+                    <option value="pending">⏳ Pending Payment</option>
+                    <option value="settled">✅ Fully Settled</option>
+                    <option value="no_orders">⚪ No Orders This Week</option>
+                  </select>
+                </div>
+
+                <!-- Search filter -->
+                <div style="display:inline-flex; align-items:center; gap:0.35rem; background:#fff; border:1px solid #d9d4c8; border-radius:7px; padding:0.24rem 0.55rem; flex:1; min-width:180px;">
+                  <span style="font-size:0.8rem;">🔍</span>
+                  <input
+                    type="text"
+                    id="admin-billing-search-input"
+                    placeholder="Search partner name, ID, mobile..."
+                    style="border:none; outline:none; font-size:0.78rem; font-family:inherit; background:transparent; width:100%;"
+                    oninput="renderAdminPartnerBillingTable()"
+                  />
+                </div>
+
+                <button type="button" class="btn btn-outline btn-sm" style="font-size:0.75rem; padding:0.25rem 0.55rem; height:29px;" onclick="resetAdminBillingFilters()">✕ Reset</button>
+              </div>
+
+              <!-- Table Container -->
+              <div id="admin-partner-billing-table-container">
+                <!-- Rendered via JS -->
+              </div>
+            </div>
 
             <!-- SUB-TAB 2: TOMATO CENTRAL ACCOUNT & ORDER PAYOUT SETTLEMENTS -->
-            <div id="admin-bank-tab-settlements" style="display:none;">
+            <div id="admin-billing-tab-settlements" style="display:none;">
               <!-- Tomato Central Account Banner -->
               <div style="background:linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color:#fff; border-radius:12px; padding:0.85rem 1.15rem; margin-bottom:0.95rem; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.75rem;">
                 <div>
@@ -1541,10 +1899,10 @@
               <div>
                 <h2 class="panel-title" style="display:flex; align-items:center; gap:0.55rem; flex-wrap:wrap;">
                   <span>🎟️ Coupon &amp; Discount Management</span>
-                  <span class="badge badge-approved" style="font-size:0.74rem; padding:0.2rem 0.65rem;">Max 2 Coupons / Billing</span>
+                  <span class="badge badge-approved" style="font-size:0.74rem; padding:0.2rem 0.65rem;">Max 1 Coupon / Billing</span>
                 </h2>
                 <p style="font-size:0.84rem; color:var(--muted); margin-top:0.25rem; max-width:820px;">
-                  Create and manage promotional &amp; settlement coupons for <strong>Specific Restaurant Item Categories</strong>, <strong>Category Occasions</strong>, <strong>New Users</strong>, <strong>Festivals</strong>, <strong>Specific Users</strong>, <strong>Settlements</strong>, <strong>Special Occasions</strong>, <strong>Shops</strong>, and <strong>Groceries</strong>. Customers can avail up to <strong>2 coupons at a time</strong> during billing.
+                  Create and manage promotional &amp; settlement coupons for <strong>Specific Restaurant Item Categories</strong>, <strong>Category Occasions</strong>, <strong>New Users</strong>, <strong>Festivals</strong>, <strong>Specific Users</strong>, <strong>Settlements</strong>, <strong>Special Occasions</strong>, <strong>Shops</strong>, and <strong>Groceries</strong>. Customers can avail <strong>1 coupon code</strong> per order during billing.
                 </p>
               </div>
               <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
@@ -1591,6 +1949,14 @@
                 <input type="hidden" id="adm-coupon-id" value="" />
 
                 <div class="form-row" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:0.85rem; margin-bottom:0.85rem;">
+                  <div class="form-group" style="margin:0;">
+                    <label for="adm-coupon-sponsor-type">Sponsor &amp; Funding Mode <span style="color:var(--tomato);">*</span></label>
+                    <select id="adm-coupon-sponsor-type" required style="width:100%; padding:0.48rem 0.65rem; border:1px solid var(--line); border-radius:6px; background:#fff; font-weight:600;">
+                      <option value="tomato">🍅 Tomato Specific (Discount Paid 100% by Tomato)</option>
+                      <option value="common">🤝 Common Coupon (Shared by Agreement Commission %)</option>
+                    </select>
+                  </div>
+
                   <div class="form-group" style="margin:0;">
                     <label for="adm-coupon-type">Coupon Category / Type <span style="color:var(--tomato);">*</span></label>
                     <select id="adm-coupon-type" required onchange="onAdminCouponTypeChange()" style="width:100%; padding:0.48rem 0.65rem; border:1px solid var(--line); border-radius:6px; background:#fff;">
@@ -1735,7 +2101,7 @@
                   <input
                     type="text"
                     id="adm-coupon-description"
-                    placeholder="e.g. Valid on Sweets &amp; Desserts category items during billing. Can be combined with 1 other coupon (Max 2)."
+                    placeholder="e.g. Valid on Sweets &amp; Desserts category items during billing. Only 1 coupon can be used per order."
                   />
                 </div>
 
@@ -1766,6 +2132,17 @@
                   <option value="special_occasion">🎉 Special Occasion</option>
                   <option value="shop">🏬 Shop</option>
                   <option value="grocery">🥦 Grocery</option>
+                </select>
+              </div>
+
+              <div style="display:inline-flex; align-items:center; gap:0.3rem; background:#fcfaf5; border:1px solid var(--line); border-radius:7px; padding:0.24rem 0.55rem;">
+                <label for="admin-coupon-sponsor-filter" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0;">Sponsor:</label>
+                <select id="admin-coupon-sponsor-filter" onchange="renderAdminCouponsTable()" style="padding:0.2rem 0.4rem; border:1px solid #d9d4c8; border-radius:5px; font-size:0.78rem; background:#fff;">
+                  <option value="all">All Sponsors</option>
+                  <option value="tomato">🍅 Tomato Specific (Paid by Tomato)</option>
+                  <option value="common">🤝 Common Coupon (Shared %)</option>
+                  <option value="restaurant">🍽️ Restaurant Specific</option>
+                  <option value="shop">🛍️ Shop Specific</option>
                 </select>
               </div>
 
@@ -1950,7 +2327,7 @@
 
               <div class="form-group">
                 <label id="partner-bank-note-label" for="partner-bank-note">
-                  Admin Verification / Agreement Note (FSSAI Registration No. &amp; Expiry / Driving Licence No. &amp; Expiry) *
+                  Agreement Note (FSSAI Registration No. &amp; Expiry / Driving Licence No. &amp; Expiry) *
                 </label>
                 <input
                   type="text"
@@ -1970,6 +2347,192 @@
                 </button>
               </div>
             </form>
+          </div>
+        </section>
+
+        <!-- =========================================================================
+             VIEW 19: PARTNER COUPON & OFFERS PANEL (RESTAURANT / SHOP)
+             ========================================================================= -->
+        <section id="partner-coupons-view" class="view-section">
+          <div class="panel-card" style="margin-bottom:1.25rem;">
+            <div class="panel-header" style="flex-wrap:wrap; gap:1rem; align-items:flex-start;">
+              <div>
+                <h2 class="panel-title" style="display:flex; align-items:center; gap:0.55rem; flex-wrap:wrap;">
+                  <span>🎟️ Store Coupons &amp; Promotional Offers</span>
+                  <span id="partner-coupons-role-badge" class="badge badge-approved" style="font-size:0.74rem; padding:0.2rem 0.65rem;">Store Specific</span>
+                </h2>
+                <p style="font-size:0.84rem; color:var(--muted); margin-top:0.25rem; max-width:820px;">
+                  Create and manage promotional discount coupons for your store. When customers order from your store, they can apply these coupons during billing. <strong>Important: Store-specific coupon discounts are funded by your store</strong> and settled in your order payout.
+                </p>
+              </div>
+              <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                <button type="button" class="btn btn-primary btn-sm" onclick="openPartnerCouponForm()">
+                  ➕ Create Store Coupon
+                </button>
+                <button type="button" class="btn btn-outline btn-sm" onclick="fetchPartnerCoupons()">
+                  ↻ Refresh
+                </button>
+              </div>
+            </div>
+
+            <!-- Agreement Funding Notice Banner -->
+            <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:0.8rem 1rem; margin-bottom:1.15rem; display:flex; align-items:center; gap:0.65rem; color:#1e40af;">
+              <span style="font-size:1.25rem;">💡</span>
+              <div style="font-size:0.83rem; line-height:1.45;">
+                <strong>How coupon funding works:</strong> Store-specific coupons created here are valid only for items ordered from your store. You fund 100% of this discount. For common platform coupons created by Tomato, discount funding is shared between Tomato and your store based on your agreed commission percentage.
+              </div>
+            </div>
+
+            <!-- KPI Summary Row -->
+            <div id="partner-coupons-kpis" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(175px, 1fr)); gap:0.85rem; margin-bottom:1.15rem;">
+              <!-- Rendered via JS -->
+            </div>
+
+            <!-- Create / Edit Partner Coupon Form Card -->
+            <div id="partner-coupon-form-card" style="display:none; background:#fff; border:1.5px solid #fdba74; border-radius:12px; padding:1.15rem 1.25rem; margin-bottom:1.25rem; box-shadow:0 4px 14px rgba(234,88,12,0.08);">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.9rem; padding-bottom:0.6rem; border-bottom:1px solid var(--line);">
+                <h3 id="partner-coupon-form-title" style="margin:0; font-size:1.05rem; color:var(--ink);">➕ Create Store Coupon</h3>
+                <button type="button" class="btn btn-outline btn-sm" onclick="closePartnerCouponForm()">✕ Close</button>
+              </div>
+
+              <form id="partner-coupon-form" onsubmit="savePartnerCoupon(event)">
+                <input type="hidden" id="partner-coupon-id" value="" />
+
+                <div class="form-row" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:0.85rem; margin-bottom:0.85rem;">
+                  <div class="form-group" style="margin:0;">
+                    <label for="partner-coupon-code">Coupon Code <span style="color:var(--tomato);">*</span></label>
+                    <div style="display:flex; gap:0.35rem;">
+                      <input
+                        type="text"
+                        id="partner-coupon-code"
+                        placeholder="e.g. STORE20, FEAST10"
+                        maxlength="24"
+                        required
+                        style="flex:1; text-transform:uppercase; font-family:monospace; font-weight:700;"
+                      />
+                      <button type="button" class="btn btn-outline btn-sm" style="white-space:nowrap; padding:0.35rem 0.6rem;" onclick="generatePartnerCouponCode()">⚡ Auto</button>
+                    </div>
+                  </div>
+
+                  <div class="form-group" style="margin:0;">
+                    <label for="partner-coupon-title">Coupon Title / Headline <span style="color:var(--tomato);">*</span></label>
+                    <input
+                      type="text"
+                      id="partner-coupon-title"
+                      placeholder="e.g. 20% Off on All Orders"
+                      required
+                    />
+                  </div>
+
+                  <div class="form-group" style="margin:0;">
+                    <label for="partner-coupon-item-category">Target Category (Optional)</label>
+                    <input
+                      type="text"
+                      id="partner-coupon-item-category"
+                      placeholder="e.g. Main Course, Desserts, Grocery (blank = all items)"
+                    />
+                  </div>
+                </div>
+
+                <div class="form-row" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(175px, 1fr)); gap:0.85rem; margin-bottom:0.85rem;">
+                  <div class="form-group" style="margin:0;">
+                    <label for="partner-coupon-discount-type">Discount Mode <span style="color:var(--tomato);">*</span></label>
+                    <select id="partner-coupon-discount-type" onchange="onPartnerCouponDiscountTypeChange()" style="width:100%; padding:0.48rem 0.65rem; border:1px solid var(--line); border-radius:6px; background:#fff;">
+                      <option value="percentage">Percentage (% Off)</option>
+                      <option value="flat">Flat Amount (₹ Off)</option>
+                    </select>
+                  </div>
+
+                  <div class="form-group" style="margin:0;">
+                    <label id="partner-coupon-discount-val-label" for="partner-coupon-discount-value">Discount Value (%) <span style="color:var(--tomato);">*</span></label>
+                    <input type="number" id="partner-coupon-discount-value" min="1" max="10000" step="1" placeholder="e.g. 15" required />
+                  </div>
+
+                  <div class="form-group" style="margin:0;">
+                    <label for="partner-coupon-max-discount">Max Discount Cap (₹, 0 = None)</label>
+                    <input type="number" id="partner-coupon-max-discount" min="0" step="1" value="100" placeholder="e.g. 100" />
+                  </div>
+
+                  <div class="form-group" style="margin:0;">
+                    <label for="partner-coupon-min-order">Min Order Amount (₹)</label>
+                    <input type="number" id="partner-coupon-min-order" min="0" step="1" value="199" placeholder="e.g. 199" />
+                  </div>
+                </div>
+
+                <div class="form-row" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(175px, 1fr)); gap:0.85rem; margin-bottom:0.85rem;">
+                  <div class="form-group" style="margin:0;">
+                    <label for="partner-coupon-occasion">Occasion / Promotion Tag (Optional)</label>
+                    <input
+                      type="text"
+                      id="partner-coupon-occasion"
+                      placeholder="e.g. Weekend Delight, Festival Special"
+                    />
+                  </div>
+
+                  <div class="form-group" style="margin:0;">
+                    <label for="partner-coupon-per-user-limit">Max Uses Per Customer (0 = Unlimited)</label>
+                    <input type="number" id="partner-coupon-per-user-limit" min="0" step="1" value="2" />
+                  </div>
+
+                  <div class="form-group" style="margin:0;">
+                    <label for="partner-coupon-total-limit">Total Usage Limit (0 = Unlimited)</label>
+                    <input type="number" id="partner-coupon-total-limit" min="0" step="1" value="200" />
+                  </div>
+
+                  <div class="form-group" style="margin:0;">
+                    <label for="partner-coupon-valid-until">Valid Until (Expiry Date)</label>
+                    <input type="date" id="partner-coupon-valid-until" />
+                  </div>
+                </div>
+
+                <div class="form-group" style="margin-bottom:0.85rem;">
+                  <label for="partner-coupon-description">Description &amp; Terms for Customers</label>
+                  <input
+                    type="text"
+                    id="partner-coupon-description"
+                    placeholder="e.g. Get 20% off on your bill up to ₹100. Minimum order ₹199."
+                  />
+                </div>
+
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem;">
+                  <label style="display:inline-flex; align-items:center; gap:0.45rem; font-size:0.86rem; font-weight:600; cursor:pointer;">
+                    <input type="checkbox" id="partner-coupon-active" checked /> Coupon is Active &amp; Redeemable by Customers
+                  </label>
+                  <div style="display:flex; gap:0.6rem;">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="closePartnerCouponForm()">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm" id="partner-coupon-save-btn">💾 Save Coupon</button>
+                  </div>
+                </div>
+              </form>
+            </div>
+
+            <!-- Filter & Search Bar -->
+            <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.95rem;">
+              <div style="display:inline-flex; align-items:center; gap:0.3rem; background:#fcfaf5; border:1px solid var(--line); border-radius:7px; padding:0.24rem 0.55rem;">
+                <label for="partner-coupon-status-filter" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0;">Status:</label>
+                <select id="partner-coupon-status-filter" onchange="renderPartnerCouponsTable()" style="padding:0.2rem 0.4rem; border:1px solid #d9d4c8; border-radius:5px; font-size:0.78rem; background:#fff;">
+                  <option value="all">All Statuses</option>
+                  <option value="active">🟢 Active</option>
+                  <option value="inactive">⚪ Paused / Inactive</option>
+                </select>
+              </div>
+
+              <div style="display:inline-flex; align-items:center; gap:0.3rem; background:#fcfaf5; border:1px solid var(--line); border-radius:7px; padding:0.24rem 0.55rem; flex:1; min-width:210px;">
+                <span style="font-size:0.82rem;">🔍</span>
+                <input
+                  type="text"
+                  id="partner-coupon-search"
+                  placeholder="Search store coupons by code, title, occasion..."
+                  oninput="renderPartnerCouponsTable()"
+                  style="border:none; outline:none; background:transparent; font-size:0.8rem; width:100%;"
+                />
+              </div>
+            </div>
+
+            <!-- Coupons Table Container -->
+            <div id="partner-coupons-table-container">
+              <!-- Rendered via JS -->
+            </div>
           </div>
         </section>
       </main>
@@ -2054,18 +2617,18 @@
             </div>
           </div>
           <div id="gateway-bill-breakdown" style="margin-top:0.55rem; padding-top:0.55rem; border-top:1px dashed #dcd6c8; font-size:0.79rem; color:var(--charcoal); display:grid; gap:0.2rem;">
-            <!-- Populated dynamically with Subtotal, GST, Delivery Fee, and up to 2 Applied Coupons -->
+            <!-- Populated dynamically with Subtotal, GST, Delivery Fee, and 1 Applied Coupon -->
           </div>
         </div>
 
-        <!-- COUPON & DISCOUNT BOX IN BILLING (MAX 2 COUPONS AT A TIME) -->
+        <!-- COUPON & DISCOUNT BOX IN BILLING (MAX 1 COUPON AT A TIME) -->
         <div style="background:#fff; border:1.5px solid #fed7aa; border-radius:8px; padding:0.85rem 0.95rem; margin-bottom:0.95rem;">
           <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.45rem;">
             <strong style="font-size:0.86rem; color:var(--ink); display:flex; align-items:center; gap:0.35rem;">
-              <span>🎟️ Apply Coupons &amp; Discounts</span>
-              <span id="checkout-coupon-count-badge" class="badge" style="background:#ffedd5; color:#c2410c; font-size:0.7rem; padding:0.12rem 0.45rem;">0 / 2 Applied</span>
+              <span>🎟️ Apply Coupon &amp; Discount</span>
+              <span id="checkout-coupon-count-badge" class="badge" style="background:#ffedd5; color:#c2410c; font-size:0.7rem; padding:0.12rem 0.45rem;">0 / 1 Applied</span>
             </strong>
-            <span style="font-size:0.73rem; color:var(--muted);">Max 2 coupons per order</span>
+            <span style="font-size:0.73rem; color:var(--muted);">Max 1 coupon per order</span>
           </div>
 
           <!-- Manual Code Entry -->
@@ -2089,7 +2652,7 @@
           <!-- Available Coupons Picker -->
           <details id="checkout-available-coupons-details" open style="background:#fcfaf5; border:1px solid var(--line); border-radius:6px; padding:0.45rem 0.6rem;">
             <summary style="font-size:0.78rem; font-weight:700; color:#1e3a8a; cursor:pointer; user-select:none;">
-              ✨ View Available Coupons for Billing (Tap to Apply up to 2)
+              ✨ View Available Coupons for Billing (Tap to Apply 1 Coupon)
             </summary>
             <div id="checkout-available-coupons-list" style="margin-top:0.5rem; max-height:165px; overflow-y:auto; display:grid; gap:0.4rem;">
               <span style="font-size:0.78rem; color:var(--muted);">Loading available coupons...</span>
@@ -2259,7 +2822,7 @@
     <div id="bill-modal" class="modal-overlay">
       <div class="modal-box" style="max-width:580px;">
         <div class="modal-header">
-          <h2 style="font-size:1.3rem;">Order Tax Invoice & Bill</h2>
+          <h2 style="font-size:1.3rem;">Order Tax Invoice &amp; Bill</h2>
           <button class="modal-close" onclick="closeModal('bill-modal')">&times;</button>
         </div>
 
@@ -3140,7 +3703,7 @@
           </div>
 
           <div class="form-group">
-            <label id="admin-bank-note-label" for="admin-bank-note">Admin Verification / Agreement Note</label>
+            <label id="admin-bank-note-label" for="admin-bank-note">Agreement Note</label>
             <input
               type="text"
               id="admin-bank-note"
@@ -3302,8 +3865,55 @@
       </div>
     </div>
 
-    <!-- Razorpay Checkout SDK -->
+    <!-- =====================================================================
+         ADMIN: ACTIVE PARTNER FLEET LIST MODAL (RESTAURANTS / SHOPS / RIDERS)
+         ===================================================================== -->
+    <div id="admin-partner-fleet-modal" class="modal-overlay">
+      <div class="modal-box" style="max-width:720px; max-height:88vh; display:flex; flex-direction:column;">
+        <div class="modal-header" style="flex-shrink:0;">
+          <div>
+            <span id="admin-partner-fleet-modal-subtitle" style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.08em; color:var(--tomato); font-weight:700;">⚡ Active Partner Fleet</span>
+            <h2 id="admin-partner-fleet-modal-title" style="font-size:1.25rem; margin-top:0.2rem; display:flex; align-items:center; gap:0.4rem;">
+              <span>Partner Fleet Directory</span>
+            </h2>
+          </div>
+          <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('admin-partner-fleet-modal')">&times;</button>
+        </div>
+
+        <!-- Filter tabs: All, Restaurants, Shops, Riders -->
+        <div style="padding:0.75rem 1.25rem 0.5rem; flex-shrink:0; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.6rem;">
+          <div style="display:flex; gap:0.35rem; flex-wrap:wrap;">
+            <button type="button" id="admin-fleet-tab-all" class="btn btn-outline btn-sm" onclick="filterAdminFleetModal('all')">All Partners</button>
+            <button type="button" id="admin-fleet-tab-restaurant" class="btn btn-outline btn-sm" onclick="filterAdminFleetModal('restaurant')">🏪 Restaurants</button>
+            <button type="button" id="admin-fleet-tab-shop" class="btn btn-outline btn-sm" onclick="filterAdminFleetModal('shop')">🏬 Shops</button>
+            <button type="button" id="admin-fleet-tab-deliveryPartner" class="btn btn-outline btn-sm" onclick="filterAdminFleetModal('deliveryPartner')">🚴 Riders</button>
+          </div>
+          <div style="display:inline-flex; align-items:center; gap:0.3rem; background:#fcfaf5; border:1px solid var(--line); border-radius:6px; padding:0.2rem 0.45rem;">
+            <span style="font-size:0.8rem;">🔍</span>
+            <input
+              type="text"
+              id="admin-fleet-search-input"
+              placeholder="Search by name, ID, phone..."
+              style="border:none; outline:none; background:transparent; font-size:0.78rem; width:160px;"
+              oninput="onAdminFleetSearchInput(this.value)"
+            />
+          </div>
+        </div>
+
+        <!-- Content list with scroll -->
+        <div id="admin-partner-fleet-modal-content" style="padding:1rem 1.25rem; overflow-y:auto; flex:1; min-height:220px;">
+          <!-- Rendered via JS -->
+        </div>
+
+        <div class="modal-actions" style="padding:0.75rem 1.25rem; border-top:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
+          <div id="admin-fleet-modal-footer-count" style="font-size:0.8rem; color:var(--muted);"></div>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal('admin-partner-fleet-modal')">Close</button>
+        </div>
+      </div>
+    </div>
     <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+    <!-- WEBSOCKET LIVE RIDER TRACKING -->
+    <script src="../javascript/websocket.js"></script>
     <!-- SCRIPT -->
     <script src="../javascript/loginDashboard.js"></script>
   </body>

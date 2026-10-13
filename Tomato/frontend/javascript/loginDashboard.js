@@ -198,20 +198,41 @@ window.handleProductImageSelection = handleProductImageSelection;
 
 // Global state - Default landing view per role:
 // - Admin: Analytics ('admin-analytics')
-// - Shop: Shop Orders ('shop-orders')
-// - Restaurant: Kitchen Orders ('restaurant-orders')
+// - Shop: Overview ('overview')
+// - Restaurant: Overview ('overview')
 // - Rider: Available Pickups ('rider-available')
 // - Customer: Order Online ('customer-order')
 const getDefaultRoleView = () => {
   if (role === 'admin' || (role === 'subadmin' && hasPerm('dashboard_view'))) return 'admin-analytics';
-  if (role === 'shop') return 'shop-orders';
-  if (role === 'restaurant') return 'restaurant-orders';
+  if (role === 'shop') return 'overview';
+  if (role === 'restaurant') return 'overview';
   if (role === 'deliveryPartner') return 'rider-available';
   if (role === 'customer') return 'customer-order';
   return 'overview';
 };
 
-let activeView = getDefaultRoleView();
+const getActiveViewStorageKey = () => {
+  const uid = (user && (user._id || user.id || user.email)) || 'session';
+  return `tomato_active_view_${uid}_${role}`;
+};
+
+const getInitialActiveView = () => {
+  try {
+    // 1. Check URL hash (e.g., #admin-bank)
+    const hash = (window.location.hash || '').replace(/^#/, '').trim();
+    if (hash && document.getElementById(`${hash}-view`)) {
+      return hash;
+    }
+    // 2. Check sessionStorage for refreshed tab state
+    const saved = sessionStorage.getItem(getActiveViewStorageKey()) || sessionStorage.getItem('tomato_active_view');
+    if (saved && document.getElementById(`${saved}-view`)) {
+      return saved;
+    }
+  } catch (_) {}
+  return getDefaultRoleView();
+};
+
+let activeView = getInitialActiveView();
 let customerBrowseMode = 'restaurant'; // 'restaurant' | 'shop'
 let allRestaurants = [];
 let allMenuItems = [];
@@ -223,7 +244,48 @@ let mainCustomerTab = 'all_restaurants'; // 'all_restaurants' | 'all_menus' | 'c
 let selectedCategory = 'all';
 let selectedMenuItemId = 'all';
 let openDropdownTab = null;
-const cart = [];
+function getCustomerCartStorageKey() {
+  const uid = (user && (user._id || user.id || user.email)) || 'guest';
+  return `tomato_customer_cart_${uid}`;
+}
+
+function getCustomerCartCouponsStorageKey() {
+  const uid = (user && (user._id || user.id || user.email)) || 'guest';
+  return `tomato_customer_cart_coupons_${uid}`;
+}
+
+function loadSavedCartFromStorage() {
+  try {
+    const raw = localStorage.getItem(getCustomerCartStorageKey());
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item) => item && item.itemId && Number(item.quantity) > 0)
+      .map((item) => ({
+        itemId: String(item.itemId),
+        name: String(item.name || 'Item'),
+        price: Number(item.price || 0),
+        quantity: Number(item.quantity || 1),
+        restaurantId: String(item.restaurantId || ''),
+        storeType: item.storeType === 'shop' ? 'shop' : 'restaurant',
+        category: String(item.category || ''),
+      }));
+  } catch (e) {
+    console.warn('Could not load cart from localStorage:', e);
+    return [];
+  }
+}
+
+function saveCartToStorage() {
+  try {
+    localStorage.setItem(getCustomerCartStorageKey(), JSON.stringify(cart));
+  } catch (e) {
+    console.warn('Could not save cart to localStorage:', e);
+  }
+}
+
+const cart = loadSavedCartFromStorage();
 let isCustomerCartViewActive = false;
 let customerAddresses = [];
 let selectedPaymentMethod = 'razorpay';
@@ -504,6 +566,11 @@ function updateRiderTelemetryUI(lat, lng) {
 async function broadcastRiderLocation(lat, lng, label = '') {
   currentRiderCoords = { lat: Number(lat), lng: Number(lng) };
   updateRiderTelemetryUI(currentRiderCoords.lat, currentRiderCoords.lng);
+
+  // Push real-time GPS coordinates over WebSocket immediately
+  if (window.TomatoWS && typeof window.TomatoWS.sendRiderLocationPing === 'function') {
+    window.TomatoWS.sendRiderLocationPing(currentRiderCoords.lat, currentRiderCoords.lng, true);
+  }
 
   try {
     await apiFetch('/api/rider/location', {
@@ -809,6 +876,18 @@ function initNotificationStream() {
         actionLabel,
         onAction,
       });
+
+      const notifOrderId = String(data.entityId || data.metadata?.orderId || '');
+      const notifStatus = String(data.metadata?.status || '').toLowerCase();
+      if (
+        (notifStatus === 'delivered' || notifStatus === 'cancelled') &&
+        typeof activeTrackingOrderId !== 'undefined' &&
+        activeTrackingOrderId &&
+        String(activeTrackingOrderId) === notifOrderId &&
+        typeof closeOrderLiveTrackingModal === 'function'
+      ) {
+        closeOrderLiveTrackingModal();
+      }
 
       refreshActiveViewData();
       loadNotifications();
@@ -1223,6 +1302,40 @@ function initDashboard() {
   if (overviewNotifBtn) {
     overviewNotifBtn.style.display = role === 'customer' ? 'inline-flex' : 'none';
   }
+  const isPartner = role === 'restaurant' || role === 'shop';
+  const partnerOverviewNotifBtn = document.getElementById('partner-overview-notif-btn');
+  if (partnerOverviewNotifBtn) {
+    partnerOverviewNotifBtn.style.display = isPartner ? 'inline-flex' : 'none';
+    if (isPartner && overviewPartnerSubView === 'report') {
+      partnerOverviewNotifBtn.classList.remove('active');
+    }
+  }
+  const partnerOverviewReportBtn = document.getElementById('partner-overview-report-btn');
+  if (partnerOverviewReportBtn) {
+    partnerOverviewReportBtn.style.display = isPartner ? 'inline-flex' : 'none';
+    if (isPartner && overviewPartnerSubView === 'report') {
+      partnerOverviewReportBtn.classList.add('active');
+    }
+  }
+  const isAdmin = role === 'admin' || role === 'subadmin';
+  const adminOverviewNotifBtn = document.getElementById('admin-overview-notif-btn');
+  if (adminOverviewNotifBtn) {
+    adminOverviewNotifBtn.style.display = isAdmin ? 'inline-flex' : 'none';
+    if (isAdmin && typeof overviewAdminSubView !== 'undefined' && overviewAdminSubView === 'report') {
+      adminOverviewNotifBtn.classList.remove('active');
+    } else if (isAdmin) {
+      adminOverviewNotifBtn.classList.add('active');
+    }
+  }
+  const adminOverviewReportBtn = document.getElementById('admin-overview-report-btn');
+  if (adminOverviewReportBtn) {
+    adminOverviewReportBtn.style.display = isAdmin ? 'inline-flex' : 'none';
+    if (isAdmin && typeof overviewAdminSubView !== 'undefined' && overviewAdminSubView === 'report') {
+      adminOverviewReportBtn.classList.add('active');
+    } else if (isAdmin) {
+      adminOverviewReportBtn.classList.remove('active');
+    }
+  }
   const orderHeaderCartBtn = document.getElementById('order-header-cart-btn');
   if (orderHeaderCartBtn) {
     orderHeaderCartBtn.style.display = role === 'customer' ? 'inline-flex' : 'none';
@@ -1280,8 +1393,17 @@ function initDashboard() {
   // Load overview stats & data
   loadRoleOverview();
 
-  // Activate role-based default view (Analytics for Admin, Shop Orders for Shop, Kitchen Orders for Restaurant, Available Pickups for Rider, Order Online for Customer)
+  // Activate view: restores current active page on browser refresh, or falls back to default landing page on fresh load
+  activeView = getInitialActiveView();
   switchView(activeView, null, true);
+
+  // Restore Cart UI & Badges from persisted localStorage cart
+  if (role === 'customer') {
+    updateCartUI();
+    if (typeof renderCheckoutCouponsSection === 'function') {
+      renderCheckoutCouponsSection();
+    }
+  }
 
   // Start real-time notifications stream
   initNotificationStream();
@@ -1296,6 +1418,10 @@ function initDashboard() {
     }
     localStorage.removeItem('tomatoToken');
     localStorage.removeItem('tomatoUser');
+    try {
+      sessionStorage.removeItem(getActiveViewStorageKey());
+      sessionStorage.removeItem('tomato_active_view');
+    } catch (_) {}
     window.alert('Signed out from Tomato. Visit again soon!');
     window.location.href = '../index.html';
   });
@@ -1361,6 +1487,7 @@ function buildNav() {
     ...(hasPerm('riders_manage') ? [{ id: 'admin-riders', icon: '🚴', label: 'Riders' }] : []),
     ...(hasPerm('customers_manage') ? [{ id: 'admin-customers', icon: '👥', label: 'Customers' }] : []),
     { id: 'admin-bank', icon: '🏦', label: 'Bank' },
+    { id: 'admin-partner-billing', icon: '📑', label: 'Partners Billing' },
     { id: 'admin-coupons', icon: '🎟️', label: 'Coupon & Discount' },
     ...(hasPerm('dashboard_view') ? [{ id: 'admin-analytics', icon: '📈', label: 'Analytics' }] : []),
     { id: 'admin-complaints', icon: '⚖️', label: 'Complaint Review' },
@@ -1381,6 +1508,7 @@ function buildNav() {
       { id: 'overview', icon: '🏠', label: 'Overview' },
       { id: 'restaurant-orders', icon: '🔔', label: 'Kitchen Orders' },
       { id: 'restaurant-menu', icon: '📋', label: 'Menu Management' },
+      { id: 'partner-coupons', icon: '🎟️', label: 'Coupons & Offers' },
       { id: 'partner-bank', icon: '🏦', label: 'Bank & Payouts' },
       { id: 'support', icon: '🛟', label: 'Help & Support' },
       { id: 'settings', icon: '⚙️', label: 'Restaurant Profile' },
@@ -1389,6 +1517,7 @@ function buildNav() {
       { id: 'overview', icon: '🏠', label: 'Overview' },
       { id: 'shop-orders', icon: '🛍️', label: 'Shop Orders' },
       { id: 'shop-items', icon: '📋', label: 'Item Management' },
+      { id: 'partner-coupons', icon: '🎟️', label: 'Coupons & Offers' },
       { id: 'partner-bank', icon: '🏦', label: 'Bank & Payouts' },
       { id: 'support', icon: '🛟', label: 'Help & Support' },
       { id: 'settings', icon: '⚙️', label: 'Shop Profile' },
@@ -1424,14 +1553,25 @@ function buildNav() {
         itemMap.delete(id);
       }
     });
-    // Ensure newly added tabs appear above settings if not in savedOrder (and 'admin-coupons' sits right below 'admin-bank')
-    ['admin-bank', 'admin-coupons', 'partner-bank', 'support', 'admin-complaints'].forEach((newId) => {
+    // Ensure newly added tabs appear above settings if not in savedOrder (and 'admin-partner-billing' sits right below 'admin-bank')
+    ['admin-bank', 'admin-partner-billing', 'admin-coupons', 'partner-coupons', 'partner-bank', 'support', 'admin-complaints'].forEach((newId) => {
+      if (newId === 'admin-partner-billing' && itemMap.has('admin-partner-billing')) {
+        const billingItem = itemMap.get('admin-partner-billing');
+        itemMap.delete('admin-partner-billing');
+        const bankIdx = items.findIndex((it) => it.id === 'admin-bank');
+        if (bankIdx !== -1) {
+          items.splice(bankIdx + 1, 0, billingItem);
+          return;
+        }
+      }
       if (newId === 'admin-coupons' && itemMap.has('admin-coupons')) {
         const couponItem = itemMap.get('admin-coupons');
         itemMap.delete('admin-coupons');
+        const billingIdx = items.findIndex((it) => it.id === 'admin-partner-billing');
         const bankIdx = items.findIndex((it) => it.id === 'admin-bank');
-        if (bankIdx !== -1) {
-          items.splice(bankIdx + 1, 0, couponItem);
+        const insertIdx = billingIdx !== -1 ? billingIdx + 1 : bankIdx !== -1 ? bankIdx + 1 : -1;
+        if (insertIdx !== -1) {
+          items.splice(insertIdx, 0, couponItem);
           return;
         }
       }
@@ -1667,14 +1807,34 @@ function switchView(viewId, filter = null, force = false) {
     } else if (viewId === 'overview') {
       if (role === 'customer') {
         showOverviewCartView();
+      } else if (role === 'restaurant' || role === 'shop') {
+        showOverviewPartnerReportView();
+      } else if (role === 'admin' || role === 'subadmin') {
+        if (typeof overviewAdminSubView !== 'undefined' && overviewAdminSubView === 'notifications') {
+          showOverviewNotificationsView();
+          loadNotifications();
+        } else {
+          showOverviewAdminReportView();
+        }
       } else {
         showOverviewNotificationsView();
         loadNotifications();
       }
+    } else if (viewId === 'admin-partner-billing') {
+      fetchAdminPartnerBilling();
     }
     return;
   }
   activeView = viewId;
+
+  // Persist current active view so page refresh keeps user on the same page
+  try {
+    sessionStorage.setItem(getActiveViewStorageKey(), viewId);
+    sessionStorage.setItem('tomato_active_view', viewId);
+    if (window.history && window.history.replaceState) {
+      window.history.replaceState(null, '', `#${viewId}`);
+    }
+  } catch (_) {}
 
   // Nav active state
   document.querySelectorAll('#dynamic-nav .nav-item').forEach((btn) => {
@@ -1702,6 +1862,15 @@ function switchView(viewId, filter = null, force = false) {
   if (viewId === 'overview') {
     if (role === 'customer') {
       showOverviewCartView();
+    } else if (role === 'restaurant' || role === 'shop') {
+      showOverviewPartnerReportView();
+    } else if (role === 'admin' || role === 'subadmin') {
+      if (typeof overviewAdminSubView !== 'undefined' && overviewAdminSubView === 'report') {
+        showOverviewAdminReportView();
+      } else {
+        showOverviewNotificationsView();
+        loadNotifications();
+      }
     } else {
       showOverviewNotificationsView();
       loadNotifications();
@@ -1747,10 +1916,14 @@ function switchView(viewId, filter = null, force = false) {
     fetchAdminComplaints();
   } else if (viewId === 'admin-bank') {
     loadAdminBankPanel();
+  } else if (viewId === 'admin-partner-billing') {
+    fetchAdminPartnerBilling();
   } else if (viewId === 'admin-coupons') {
     fetchAdminCoupons();
   } else if (viewId === 'partner-bank') {
     loadPartnerBankPanel();
+  } else if (viewId === 'partner-coupons') {
+    fetchPartnerCoupons();
   } else if (viewId === 'support') {
     loadSupportPanel();
   } else if (viewId === 'settings') {
@@ -2062,6 +2235,11 @@ function isOverviewCartDrawerOpen() {
   return !!(drawer && drawer.style.display !== 'none');
 }
 
+function isOverviewPartnerReportOpen() {
+  const container = document.getElementById('overview-partner-report-container');
+  return !!(container && container.style.display !== 'none');
+}
+
 async function loadNotifications(targetPage = null) {
   const feed = document.getElementById('activity-feed');
   if (!feed) return;
@@ -2102,6 +2280,26 @@ async function loadNotifications(targetPage = null) {
       }
     }
 
+    const partnerNotifBadge = document.getElementById('partner-overview-notif-badge');
+    if (partnerNotifBadge) {
+      if (currentNotifications.length > 0) {
+        partnerNotifBadge.textContent = String(currentNotifications.length);
+        partnerNotifBadge.style.display = 'inline-block';
+      } else {
+        partnerNotifBadge.style.display = 'none';
+      }
+    }
+
+    const adminNotifBadge = document.getElementById('admin-overview-notif-badge');
+    if (adminNotifBadge) {
+      if (currentNotifications.length > 0) {
+        adminNotifBadge.textContent = String(currentNotifications.length);
+        adminNotifBadge.style.display = 'inline-block';
+      } else {
+        adminNotifBadge.style.display = 'none';
+      }
+    }
+
     if (!currentNotifications.length) {
       feed.innerHTML = `
         <div style="text-align:center; padding:2rem 1rem; color:var(--muted);">
@@ -2111,7 +2309,7 @@ async function loadNotifications(targetPage = null) {
         </div>
       `;
       if (paginationBar) paginationBar.style.display = 'none';
-      if (isOverviewCartDrawerOpen()) {
+      if (isOverviewCartDrawerOpen() || isOverviewPartnerReportOpen()) {
         feed.style.display = 'none';
       }
       return;
@@ -2124,7 +2322,7 @@ async function loadNotifications(targetPage = null) {
     renderNotifPage(currentNotifPage);
     renderNotifPaginationControls();
 
-    if (isOverviewCartDrawerOpen()) {
+    if (isOverviewCartDrawerOpen() || isOverviewPartnerReportOpen()) {
       if (feed) feed.style.display = 'none';
       if (paginationBar) paginationBar.style.display = 'none';
       if (countBadge) countBadge.style.display = 'none';
@@ -2135,7 +2333,7 @@ async function loadNotifications(targetPage = null) {
       feed.innerHTML = '<p style="color:var(--muted); font-size:0.85rem; padding:0.5rem 0;">Unable to load notifications.</p>';
       if (paginationBar) paginationBar.style.display = 'none';
     }
-    if (isOverviewCartDrawerOpen()) {
+    if (isOverviewCartDrawerOpen() || isOverviewPartnerReportOpen()) {
       if (feed) feed.style.display = 'none';
       if (paginationBar) paginationBar.style.display = 'none';
     }
@@ -2281,6 +2479,7 @@ async function loadCustomerMenuSection() {
     allShops = shopsData.shops || [];
     allShopItems = shopItemsData.menu || [];
     customerAddresses = addrData.addresses || [];
+    window.cachedPlatformGsnNumber = restData.platformGsnNumber || shopsData.platformGsnNumber || '';
 
     updateBrowseModeUI();
     renderRestaurantPills();
@@ -4216,10 +4415,14 @@ function updateCartUI() {
       if (ovLabelEl) ovLabelEl.innerHTML = addrHtml;
     }
   }
+  if (typeof saveCartToStorage === 'function') {
+    saveCartToStorage();
+  }
   if (typeof syncCartCouponsOnCartChange === 'function') {
     syncCartCouponsOnCartChange();
   }
 }
+const renderCart = updateCartUI;
 
 function toggleCustomerOrderCart(forceOpen) {
   const cartContainer = document.getElementById('customer-cart-view-container');
@@ -4286,11 +4489,15 @@ function toggleCustomerOrderCart(forceOpen) {
 window.toggleCustomerOrderCart = toggleCustomerOrderCart;
 
 let overviewCustomerSubView = 'cart'; // 'cart' | 'notifications'
+let overviewPartnerSubView = 'report'; // 'report' | 'notifications'
+let overviewAdminSubView = 'report'; // 'report' | 'notifications'
 
 function showOverviewCartView() {
   overviewCustomerSubView = 'cart';
   const drawer = document.getElementById('overview-cart-drawer');
   const feed = document.getElementById('activity-feed');
+  const partnerReportContainer = document.getElementById('overview-partner-report-container');
+  const adminReportContainer = document.getElementById('overview-admin-report-container');
   const paginationBar = document.getElementById('notif-pagination-container');
   const titleEl = document.getElementById('overview-activity-title');
   const countBadge = document.getElementById('notif-count-badge');
@@ -4303,6 +4510,8 @@ function showOverviewCartView() {
 
   if (drawer) drawer.style.display = 'block';
   if (feed) feed.style.display = 'none';
+  if (partnerReportContainer) partnerReportContainer.style.display = 'none';
+  if (adminReportContainer) adminReportContainer.style.display = 'none';
   if (paginationBar) paginationBar.style.display = 'none';
   if (countBadge) countBadge.style.display = 'none';
   if (refreshBtn) refreshBtn.style.display = 'inline-block';
@@ -4343,8 +4552,49 @@ function showOverviewCartView() {
 }
 window.showOverviewCartView = showOverviewCartView;
 
+function showOverviewPartnerReportView() {
+  overviewPartnerSubView = 'report';
+  const reportContainer = document.getElementById('overview-partner-report-container');
+  const adminReportContainer = document.getElementById('overview-admin-report-container');
+  const drawer = document.getElementById('overview-cart-drawer');
+  const feed = document.getElementById('activity-feed');
+  const paginationBar = document.getElementById('notif-pagination-container');
+  const titleEl = document.getElementById('overview-activity-title');
+  const countBadge = document.getElementById('notif-count-badge');
+  const refreshBtn = document.getElementById('overview-refresh-btn');
+  const reportBtn = document.getElementById('partner-overview-report-btn');
+  const notifBtn = document.getElementById('partner-overview-notif-btn');
+
+  if (drawer) drawer.style.display = 'none';
+  if (feed) feed.style.display = 'none';
+  if (adminReportContainer) adminReportContainer.style.display = 'none';
+  if (paginationBar) paginationBar.style.display = 'none';
+  if (countBadge) countBadge.style.display = 'none';
+  if (refreshBtn) refreshBtn.style.display = 'inline-block';
+  if (reportContainer) reportContainer.style.display = 'block';
+
+  if (reportBtn) {
+    reportBtn.classList.add('active');
+  }
+  if (notifBtn) {
+    notifBtn.classList.remove('active');
+  }
+
+  if (titleEl) {
+    titleEl.textContent = role === 'shop' ? 'Shop Business & Sales Report' : 'Restaurant Business & Sales Report';
+  }
+
+  refreshPartnerReportData();
+  loadNotifications();
+}
+window.showOverviewPartnerReportView = showOverviewPartnerReportView;
+
 function showOverviewNotificationsView() {
   overviewCustomerSubView = 'notifications';
+  overviewPartnerSubView = 'notifications';
+  overviewAdminSubView = 'notifications';
+  const reportContainer = document.getElementById('overview-partner-report-container');
+  const adminReportContainer = document.getElementById('overview-admin-report-container');
   const drawer = document.getElementById('overview-cart-drawer');
   const feed = document.getElementById('activity-feed');
   const paginationBar = document.getElementById('notif-pagination-container');
@@ -4353,10 +4603,16 @@ function showOverviewNotificationsView() {
   const refreshBtn = document.getElementById('overview-refresh-btn');
   const cartBtn = document.getElementById('overview-cart-toggle-btn');
   const notifBtn = document.getElementById('overview-notif-btn');
+  const partnerReportBtn = document.getElementById('partner-overview-report-btn');
+  const partnerNotifBtn = document.getElementById('partner-overview-notif-btn');
+  const adminReportBtn = document.getElementById('admin-overview-report-btn');
+  const adminNotifBtn = document.getElementById('admin-overview-notif-btn');
   const notifIcon = document.getElementById('overview-notif-icon');
   const notifLabel = document.getElementById('overview-notif-label');
   const btn = document.getElementById('topbar-cart-btn');
 
+  if (reportContainer) reportContainer.style.display = 'none';
+  if (adminReportContainer) adminReportContainer.style.display = 'none';
   if (drawer) drawer.style.display = 'none';
   if (feed) feed.style.display = 'block';
   if (countBadge) {
@@ -4378,6 +4634,20 @@ function showOverviewNotificationsView() {
     notifBtn.title = 'View Live Activity & Notifications';
   }
 
+  if (partnerReportBtn) {
+    partnerReportBtn.classList.remove('active');
+  }
+  if (partnerNotifBtn) {
+    partnerNotifBtn.classList.add('active');
+  }
+
+  if (adminReportBtn) {
+    adminReportBtn.classList.remove('active');
+  }
+  if (adminNotifBtn) {
+    adminNotifBtn.classList.add('active');
+  }
+
   if (btn) {
     btn.classList.remove('active');
   }
@@ -4394,6 +4664,48 @@ function showOverviewNotificationsView() {
   loadNotifications(1);
 }
 window.showOverviewNotificationsView = showOverviewNotificationsView;
+
+function handleAdminOverviewNotifClick() {
+  showOverviewNotificationsView();
+}
+window.handleAdminOverviewNotifClick = handleAdminOverviewNotifClick;
+
+function handleAdminOverviewReportClick() {
+  showOverviewAdminReportView();
+}
+window.handleAdminOverviewReportClick = handleAdminOverviewReportClick;
+
+function showOverviewAdminReportView() {
+  overviewAdminSubView = 'report';
+  const adminReportContainer = document.getElementById('overview-admin-report-container');
+  const partnerReportContainer = document.getElementById('overview-partner-report-container');
+  const drawer = document.getElementById('overview-cart-drawer');
+  const feed = document.getElementById('activity-feed');
+  const paginationBar = document.getElementById('notif-pagination-container');
+  const titleEl = document.getElementById('overview-activity-title');
+  const countBadge = document.getElementById('notif-count-badge');
+  const refreshBtn = document.getElementById('overview-refresh-btn');
+  const adminReportBtn = document.getElementById('admin-overview-report-btn');
+  const adminNotifBtn = document.getElementById('admin-overview-notif-btn');
+
+  if (drawer) drawer.style.display = 'none';
+  if (feed) feed.style.display = 'none';
+  if (partnerReportContainer) partnerReportContainer.style.display = 'none';
+  if (paginationBar) paginationBar.style.display = 'none';
+  if (countBadge) countBadge.style.display = 'none';
+  if (refreshBtn) refreshBtn.style.display = 'inline-block';
+  if (adminReportContainer) adminReportContainer.style.display = 'block';
+
+  if (adminReportBtn) adminReportBtn.classList.add('active');
+  if (adminNotifBtn) adminNotifBtn.classList.remove('active');
+
+  if (titleEl) {
+    titleEl.textContent = 'Platform Business & Performance Report';
+  }
+
+  refreshAdminReportData();
+}
+window.showOverviewAdminReportView = showOverviewAdminReportView;
 
 function handleOverviewNotifBtnClick() {
   if (overviewCustomerSubView === 'cart') {
@@ -4424,10 +4736,18 @@ window.toggleOverviewCart = toggleOverviewCart;
 function handleOverviewRefreshClick() {
   if (overviewCustomerSubView === 'cart' && role === 'customer') {
     updateCartUI();
+  } else if (overviewPartnerSubView === 'report' && (role === 'restaurant' || role === 'shop')) {
+    refreshPartnerReportData();
+  } else if (overviewAdminSubView === 'report' && (role === 'admin' || role === 'subadmin')) {
+    refreshAdminReportData();
   } else {
     loadNotifications(1);
+    if (role === 'admin' || role === 'subadmin') {
+      loadRoleOverview();
+    }
   }
 }
+window.handleOverviewRefreshClick = handleOverviewRefreshClick;
 window.handleOverviewRefreshClick = handleOverviewRefreshClick;
 
 function handleHeaderCartClick() {
@@ -4539,9 +4859,9 @@ function updateCheckoutAddressPreview() {
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.2rem; flex-wrap:wrap; gap:0.35rem;">
       <strong>📍 ${escapeHtml(addr.label || 'Home')}</strong>
       <div style="display:flex; gap:0.35rem; align-items:center;">
-        ${isPinServiceable
-          ? `<span class="badge badge-approved" style="padding:2px 7px; font-size:0.7rem;">✓ Serviceable (${escapeHtml(custPin || 'OK')})</span>`
-          : `<span class="badge badge-blocked" style="padding:2px 7px; font-size:0.7rem;">✕ Out of Serviceable Range (${escapeHtml(custPin || 'No Pincode')})</span>`}
+        ${!isPinServiceable
+          ? `<span class="badge badge-blocked" style="padding:2px 7px; font-size:0.7rem;">✕ Out of Serviceable Range (${escapeHtml(custPin || 'No Pincode')})</span>`
+          : ''}
         ${addr.isDefault ? '<span class="badge badge-delivered" style="padding:2px 7px; font-size:0.72rem;">✓ Default Address</span>' : '<span style="font-size:0.72rem; color:var(--muted);">Alternate Address</span>'}
       </div>
     </div>
@@ -4611,7 +4931,7 @@ async function placeOrderAfterPayment(txnId, method, chosenAddr) {
       price: i.price,
       category: i.category || '',
     })),
-    couponCodes: Array.isArray(appliedCouponCodes) ? appliedCouponCodes.slice(0, 2) : [],
+    couponCodes: Array.isArray(appliedCouponCodes) ? appliedCouponCodes.slice(0, 1) : [],
     paymentMethod: method,
     paymentTransactionId: txnId,
     addressId: chosenAddr._id,
@@ -4915,7 +5235,9 @@ function renderCustomerOrdersList(orders) {
           </div>
           <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
             <span class="badge badge-${escapeHtml(o.status || '')}">${escapeHtml(String(o.status || '').replace(/_/g, ' '))}</span>
-            <button class="btn btn-outline btn-sm" style="background:#f0fdf4; border-color:#86efac; color:#15803d; font-weight:600;" onclick="openOrderLiveTrackingModal('${o._id}', 'customer')">📍 Live Tracking</button>
+            ${!['delivered', 'cancelled'].includes(String(o.status || '').toLowerCase()) ? `
+              <button class="btn btn-outline btn-sm" style="background:#f0fdf4; border-color:#86efac; color:#15803d; font-weight:600;" onclick="openOrderLiveTrackingModal('${o._id}', 'customer')">📍 Live Tracking</button>
+            ` : ''}
             <button class="btn btn-outline btn-sm" onclick="viewOrderBill('${o._id}')">🧾 View Bill</button>
           </div>
         </div>
@@ -5848,6 +6170,45 @@ async function deleteAddress(id) {
 // =========================================================================
 let currentRestaurantOrderFilter = 'all'; // 'all' | 'cooking' | 'incoming'
 let cachedRestaurantOrders = [];
+let restaurantOrdersStartDate = '';
+let restaurantOrdersEndDate = '';
+
+function applyRestaurantOrdersDateFilter() {
+  const startInput = document.getElementById('rest-orders-start-date');
+  const endInput = document.getElementById('rest-orders-end-date');
+  const startVal = String(startInput?.value || '').trim();
+  const endVal = String(endInput?.value || '').trim();
+
+  if (startVal && endVal && startVal > endVal) {
+    alert('From date cannot be later than To date.');
+    return;
+  }
+
+  restaurantOrdersStartDate = startVal;
+  restaurantOrdersEndDate = endVal;
+
+  if (cachedRestaurantOrders && cachedRestaurantOrders.length) {
+    renderRestaurantOrdersTable(cachedRestaurantOrders);
+  } else {
+    fetchRestaurantOrders();
+  }
+}
+window.applyRestaurantOrdersDateFilter = applyRestaurantOrdersDateFilter;
+
+function clearRestaurantOrdersDateFilter() {
+  restaurantOrdersStartDate = '';
+  restaurantOrdersEndDate = '';
+  const startInput = document.getElementById('rest-orders-start-date');
+  const endInput = document.getElementById('rest-orders-end-date');
+  if (startInput) startInput.value = '';
+  if (endInput) endInput.value = '';
+  if (cachedRestaurantOrders && cachedRestaurantOrders.length) {
+    renderRestaurantOrdersTable(cachedRestaurantOrders);
+  } else {
+    fetchRestaurantOrders();
+  }
+}
+window.clearRestaurantOrdersDateFilter = clearRestaurantOrdersDateFilter;
 
 function setRestaurantOrdersFilter(filter) {
   currentRestaurantOrderFilter = filter;
@@ -5865,10 +6226,28 @@ function updateRestaurantFilterButtons() {
   const cookingBtn = document.getElementById('rest-filter-cooking');
   const incomingBtn = document.getElementById('rest-filter-incoming');
   const indicator = document.getElementById('rest-filter-indicator');
+  const dateIndicator = document.getElementById('rest-date-filter-indicator');
 
   if (allBtn) allBtn.classList.toggle('active', currentRestaurantOrderFilter === 'all');
   if (cookingBtn) cookingBtn.classList.toggle('active', currentRestaurantOrderFilter === 'cooking');
   if (incomingBtn) incomingBtn.classList.toggle('active', currentRestaurantOrderFilter === 'incoming');
+
+  if (dateIndicator) {
+    if (restaurantOrdersStartDate || restaurantOrdersEndDate) {
+      const rangeText = restaurantOrdersStartDate && restaurantOrdersEndDate
+        ? `${restaurantOrdersStartDate} to ${restaurantOrdersEndDate}`
+        : restaurantOrdersStartDate
+        ? `From ${restaurantOrdersStartDate}`
+        : `Up to ${restaurantOrdersEndDate}`;
+      dateIndicator.style.display = 'inline-flex';
+      dateIndicator.style.alignItems = 'center';
+      dateIndicator.style.gap = '0.35rem';
+      dateIndicator.innerHTML = `📅 Date Range: <strong>${escapeHtml(rangeText)}</strong> <button type="button" onclick="clearRestaurantOrdersDateFilter()" style="border:none; background:transparent; color:#1e3a8a; font-weight:800; cursor:pointer; padding:0 0.15rem;">✕</button>`;
+    } else {
+      dateIndicator.style.display = 'none';
+      dateIndicator.innerHTML = '';
+    }
+  }
 
   if (indicator) {
     if (currentRestaurantOrderFilter === 'cooking') {
@@ -5897,29 +6276,51 @@ function renderRestaurantOrdersTable(orders) {
 
   let displayOrders = orders;
   if (currentRestaurantOrderFilter === 'cooking') {
-    displayOrders = orders.filter((o) => {
+    displayOrders = displayOrders.filter((o) => {
       const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
       return st === 'accepted' || st === 'preparing' || st === 'out for delivery';
     });
   } else if (currentRestaurantOrderFilter === 'incoming') {
-    displayOrders = orders.filter((o) => {
+    displayOrders = displayOrders.filter((o) => {
       const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
       return st === 'placed';
     });
   }
 
+  if (restaurantOrdersStartDate || restaurantOrdersEndDate) {
+    displayOrders = displayOrders.filter((o) => {
+      const orderDate = new Date(o.createdAt || o.date || 0);
+      if (Number.isNaN(orderDate.getTime())) return false;
+      if (restaurantOrdersStartDate) {
+        const start = new Date(`${restaurantOrdersStartDate}T00:00:00`);
+        if (!Number.isNaN(start.getTime()) && orderDate < start) return false;
+      }
+      if (restaurantOrdersEndDate) {
+        const end = new Date(`${restaurantOrdersEndDate}T23:59:59.999`);
+        if (!Number.isNaN(end.getTime()) && orderDate > end) return false;
+      }
+      return true;
+    });
+  }
+
   if (!displayOrders.length) {
-    const emptyMsg = currentRestaurantOrderFilter === 'incoming'
+    const hasDateFilter = Boolean(restaurantOrdersStartDate || restaurantOrdersEndDate);
+    const emptyMsg = hasDateFilter
+      ? 'No kitchen orders found within the selected date range.'
+      : currentRestaurantOrderFilter === 'incoming'
       ? 'No incoming orders with status "placed" found.'
       : currentRestaurantOrderFilter === 'cooking'
       ? 'No orders with status "accepted, preparing or out for delivery" found.'
       : 'No orders found for the selected filter.';
-    const emptyIcon = currentRestaurantOrderFilter === 'incoming' ? '🔔' : '🍳';
+    const emptyIcon = hasDateFilter ? '📅' : currentRestaurantOrderFilter === 'incoming' ? '🔔' : '🍳';
     container.innerHTML = `
       <div style="padding:2rem 1rem; text-align:center; color:var(--muted); background:#fcfcfc; border-radius:8px; border:1px dashed var(--line); margin-top:0.5rem;">
         <div style="font-size:2rem; margin-bottom:0.5rem;">${emptyIcon}</div>
         <p style="margin:0 0 0.75rem 0; font-weight:600; color:var(--ink);">${emptyMsg}</p>
-        <button class="btn btn-primary btn-sm" onclick="setRestaurantOrdersFilter('all')">View All Kitchen Orders (${orders.length})</button>
+        <div style="display:flex; justify-content:center; gap:0.5rem; flex-wrap:wrap;">
+          ${hasDateFilter ? `<button class="btn btn-outline btn-sm" onclick="clearRestaurantOrdersDateFilter()">Clear Date Range</button>` : ''}
+          <button class="btn btn-primary btn-sm" onclick="clearRestaurantOrdersDateFilter(); setRestaurantOrdersFilter('all');">View All Kitchen Orders (${orders.length})</button>
+        </div>
       </div>
     `;
     return;
@@ -5942,7 +6343,7 @@ function renderRestaurantOrdersTable(orders) {
         <tbody>
           ${displayOrders.map((o) => `
             <tr>
-              <td><strong>#${o.orderNumber}</strong><br><small style="color:var(--muted);">${new Date(o.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small></td>
+              <td><strong>#${o.orderNumber}</strong><br><small style="color:var(--muted);">${new Date(o.createdAt).toLocaleDateString([], { day: '2-digit', month: 'short', year: 'numeric' })} • ${new Date(o.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small></td>
               <td>
                 <strong>${escapeHtml(o.customerName || 'Customer')}</strong><br>
                 <small style="color:var(--muted);">${escapeHtml(o.deliveryAddress?.line1 || '')}, ${escapeHtml(o.deliveryAddress?.city || '')}</small>
@@ -5966,7 +6367,7 @@ function renderRestaurantOrdersTable(orders) {
                   ${o.status === 'preparing' ? `
                     <button class="btn btn-success btn-sm" onclick="updateOrderStatus('${o._id}', 'ready_for_pickup')">📦 Ready for Pickup</button>
                   ` : ''}
-                  ${o.riderName ? `
+                  ${o.riderName && !['delivered', 'cancelled'].includes(String(o.status || '').toLowerCase()) ? `
                     <button class="btn btn-outline btn-sm" style="background:#f0fdf4; border-color:#86efac; color:#15803d; font-weight:600;" onclick="openOrderLiveTrackingModal('${o._id}', 'restaurant')">📍 Track Rider</button>
                   ` : ''}
                   <button class="btn btn-outline btn-sm" onclick="viewOrderBill('${o._id}')">🧾 Generate Bill</button>
@@ -6023,6 +6424,45 @@ async function updateOrderStatus(orderId, nextStatus) {
 // =========================================================================
 let currentShopOrderFilter = 'all'; // 'all' | 'cooking' | 'incoming'
 let cachedShopOrders = [];
+let shopOrdersStartDate = '';
+let shopOrdersEndDate = '';
+
+function applyShopOrdersDateFilter() {
+  const startInput = document.getElementById('shop-orders-start-date');
+  const endInput = document.getElementById('shop-orders-end-date');
+  const startVal = String(startInput?.value || '').trim();
+  const endVal = String(endInput?.value || '').trim();
+
+  if (startVal && endVal && startVal > endVal) {
+    alert('From date cannot be later than To date.');
+    return;
+  }
+
+  shopOrdersStartDate = startVal;
+  shopOrdersEndDate = endVal;
+
+  if (cachedShopOrders && cachedShopOrders.length) {
+    renderShopOrdersTable(cachedShopOrders);
+  } else {
+    fetchShopOrders();
+  }
+}
+window.applyShopOrdersDateFilter = applyShopOrdersDateFilter;
+
+function clearShopOrdersDateFilter() {
+  shopOrdersStartDate = '';
+  shopOrdersEndDate = '';
+  const startInput = document.getElementById('shop-orders-start-date');
+  const endInput = document.getElementById('shop-orders-end-date');
+  if (startInput) startInput.value = '';
+  if (endInput) endInput.value = '';
+  if (cachedShopOrders && cachedShopOrders.length) {
+    renderShopOrdersTable(cachedShopOrders);
+  } else {
+    fetchShopOrders();
+  }
+}
+window.clearShopOrdersDateFilter = clearShopOrdersDateFilter;
 
 function setShopOrdersFilter(filter) {
   currentShopOrderFilter = filter;
@@ -6040,10 +6480,28 @@ function updateShopFilterButtons() {
   const cookingBtn = document.getElementById('shop-filter-cooking');
   const incomingBtn = document.getElementById('shop-filter-incoming');
   const indicator = document.getElementById('shop-filter-indicator');
+  const dateIndicator = document.getElementById('shop-date-filter-indicator');
 
   if (allBtn) allBtn.classList.toggle('active', currentShopOrderFilter === 'all');
   if (cookingBtn) cookingBtn.classList.toggle('active', currentShopOrderFilter === 'cooking');
   if (incomingBtn) incomingBtn.classList.toggle('active', currentShopOrderFilter === 'incoming');
+
+  if (dateIndicator) {
+    if (shopOrdersStartDate || shopOrdersEndDate) {
+      const rangeText = shopOrdersStartDate && shopOrdersEndDate
+        ? `${shopOrdersStartDate} to ${shopOrdersEndDate}`
+        : shopOrdersStartDate
+        ? `From ${shopOrdersStartDate}`
+        : `Up to ${shopOrdersEndDate}`;
+      dateIndicator.style.display = 'inline-flex';
+      dateIndicator.style.alignItems = 'center';
+      dateIndicator.style.gap = '0.35rem';
+      dateIndicator.innerHTML = `📅 Date Range: <strong>${escapeHtml(rangeText)}</strong> <button type="button" onclick="clearShopOrdersDateFilter()" style="border:none; background:transparent; color:#1e3a8a; font-weight:800; cursor:pointer; padding:0 0.15rem;">✕</button>`;
+    } else {
+      dateIndicator.style.display = 'none';
+      dateIndicator.innerHTML = '';
+    }
+  }
 
   if (indicator) {
     if (currentShopOrderFilter === 'cooking') {
@@ -6072,29 +6530,51 @@ function renderShopOrdersTable(orders) {
 
   let displayOrders = orders;
   if (currentShopOrderFilter === 'cooking') {
-    displayOrders = orders.filter((o) => {
+    displayOrders = displayOrders.filter((o) => {
       const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
       return st === 'accepted' || st === 'preparing' || st === 'out for delivery';
     });
   } else if (currentShopOrderFilter === 'incoming') {
-    displayOrders = orders.filter((o) => {
+    displayOrders = displayOrders.filter((o) => {
       const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
       return st === 'placed';
     });
   }
 
+  if (shopOrdersStartDate || shopOrdersEndDate) {
+    displayOrders = displayOrders.filter((o) => {
+      const orderDate = new Date(o.createdAt || o.date || 0);
+      if (Number.isNaN(orderDate.getTime())) return false;
+      if (shopOrdersStartDate) {
+        const start = new Date(`${shopOrdersStartDate}T00:00:00`);
+        if (!Number.isNaN(start.getTime()) && orderDate < start) return false;
+      }
+      if (shopOrdersEndDate) {
+        const end = new Date(`${shopOrdersEndDate}T23:59:59.999`);
+        if (!Number.isNaN(end.getTime()) && orderDate > end) return false;
+      }
+      return true;
+    });
+  }
+
   if (!displayOrders.length) {
-    const emptyMsg = currentShopOrderFilter === 'incoming'
+    const hasDateFilter = Boolean(shopOrdersStartDate || shopOrdersEndDate);
+    const emptyMsg = hasDateFilter
+      ? 'No shop orders found within the selected date range.'
+      : currentShopOrderFilter === 'incoming'
       ? 'No incoming shop orders with status "placed" found.'
       : currentShopOrderFilter === 'cooking'
       ? 'No shop orders with status "accepted, preparing or out for delivery" found.'
       : 'No shop orders found for the selected filter.';
-    const emptyIcon = currentShopOrderFilter === 'incoming' ? '🔔' : '📦';
+    const emptyIcon = hasDateFilter ? '📅' : currentShopOrderFilter === 'incoming' ? '🔔' : '📦';
     container.innerHTML = `
       <div style="padding:2rem 1rem; text-align:center; color:var(--muted); background:#fcfcfc; border-radius:8px; border:1px dashed var(--line); margin-top:0.5rem;">
         <div style="font-size:2rem; margin-bottom:0.5rem;">${emptyIcon}</div>
         <p style="margin:0 0 0.75rem 0; font-weight:600; color:var(--ink);">${emptyMsg}</p>
-        <button class="btn btn-primary btn-sm" onclick="setShopOrdersFilter('all')">View All Shop Orders (${orders.length})</button>
+        <div style="display:flex; justify-content:center; gap:0.5rem; flex-wrap:wrap;">
+          ${hasDateFilter ? `<button class="btn btn-outline btn-sm" onclick="clearShopOrdersDateFilter()">Clear Date Range</button>` : ''}
+          <button class="btn btn-primary btn-sm" onclick="clearShopOrdersDateFilter(); setShopOrdersFilter('all');">View All Shop Orders (${orders.length})</button>
+        </div>
       </div>
     `;
     return;
@@ -6117,7 +6597,7 @@ function renderShopOrdersTable(orders) {
         <tbody>
           ${displayOrders.map((o) => `
             <tr>
-              <td><strong>#${o.orderNumber}</strong><br><small style="color:var(--muted);">${new Date(o.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small></td>
+              <td><strong>#${o.orderNumber}</strong><br><small style="color:var(--muted);">${new Date(o.createdAt).toLocaleDateString([], { day: '2-digit', month: 'short', year: 'numeric' })} • ${new Date(o.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small></td>
               <td>
                 <strong>${escapeHtml(o.customerName || 'Customer')}</strong><br>
                 <small style="color:var(--muted);">${escapeHtml(o.deliveryAddress?.line1 || '')}, ${escapeHtml(o.deliveryAddress?.city || '')}</small>
@@ -6141,7 +6621,7 @@ function renderShopOrdersTable(orders) {
                   ${o.status === 'preparing' ? `
                     <button class="btn btn-success btn-sm" onclick="updateShopOrderStatus('${o._id}', 'ready_for_pickup')">✅ Ready for Pickup</button>
                   ` : ''}
-                  ${o.riderName ? `
+                  ${o.riderName && !['delivered', 'cancelled'].includes(String(o.status || '').toLowerCase()) ? `
                     <button class="btn btn-outline btn-sm" style="background:#f0fdf4; border-color:#86efac; color:#15803d; font-weight:600;" onclick="openOrderLiveTrackingModal('${o._id}', 'shop')">📍 Track Rider</button>
                   ` : ''}
                   <button class="btn btn-outline btn-sm" onclick="viewShopOrderBill('${o._id}')">🧾 Generate Bill</button>
@@ -6200,75 +6680,7 @@ async function viewShopOrderBill(orderId) {
   try {
     const data = await apiFetch(`/api/shop/orders/${orderId}/bill`);
     const bill = data.bill;
-
-    const printArea = document.getElementById('bill-print-area');
-    printArea.innerHTML = `
-      <div class="bill-container">
-        <div class="bill-head">
-          <h2>${escapeHtml(bill.shop?.name || bill.restaurant?.name || 'Shop Partner')}</h2>
-          <div style="font-size:0.8rem;">${escapeHtml(bill.shop?.address || bill.restaurant?.address || '')}</div>
-          <div style="font-size:0.75rem;">Phone: ${escapeHtml(bill.shop?.phone || bill.restaurant?.phone || '')} | GSTIN: ${escapeHtml(bill.shop?.gstin || bill.restaurant?.gstin || '29AAAAA0000A1Z5')}</div>
-          <div style="margin-top:0.6rem; font-weight:700; font-size:1.1rem; letter-spacing:0.1em;">RETAIL SHOP TAX INVOICE</div>
-        </div>
-
-        <div class="bill-details">
-          <div>
-            <div><strong>Invoice #:</strong> ${bill.invoiceNumber}</div>
-            <div><strong>Order #:</strong> #${bill.orderNumber}</div>
-            <div><strong>Date:</strong> ${new Date(bill.date).toLocaleString()}</div>
-          </div>
-          <div style="text-align:right;">
-            <div><strong>Billed To:</strong> ${escapeHtml(bill.customer.name)}</div>
-            <div><strong>Contact:</strong> ${escapeHtml(bill.customer.phone || 'N/A')}</div>
-            <div><strong>Address:</strong> ${escapeHtml(bill.customer.address?.line1 || '')}, ${escapeHtml(bill.customer.address?.city || '')}</div>
-          </div>
-        </div>
-
-        <table class="bill-table">
-          <thead>
-            <tr>
-              <th>Item Description</th>
-              <th style="text-align:center;">Qty</th>
-              <th style="text-align:right;">Rate</th>
-              <th style="text-align:right;">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${(bill.items || []).map((i) => `
-              <tr>
-                <td>${escapeHtml(i.name)}</td>
-                <td style="text-align:center;">${i.quantity}</td>
-                <td style="text-align:right;">₹${Number(i.price).toFixed(2)}</td>
-                <td style="text-align:right;">₹${Number(i.totalPrice || i.price * i.quantity).toFixed(2)}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-
-        <div class="bill-totals">
-          <div><span>Subtotal:</span> <strong>₹${Number(bill.subtotal).toFixed(2)}</strong></div>
-          <div><span>CGST (2.5%):</span> <strong>₹${Number(bill.cgst).toFixed(2)}</strong></div>
-          <div><span>SGST (2.5%):</span> <strong>₹${Number(bill.sgst).toFixed(2)}</strong></div>
-          <div><span>Delivery & Packaging:</span> <strong>₹${Number(bill.deliveryFee).toFixed(2)}</strong></div>
-          <div style="border-top:1px solid #111; margin-top:0.4rem; padding-top:0.4rem; font-size:1.15rem;">
-            <span>Grand Total:</span> <strong style="color:var(--green);">₹${Number(bill.totalAmount).toFixed(2)}</strong>
-          </div>
-        </div>
-
-        <div style="margin-top:1rem; padding:0.6rem; background:#f4f4f4; border-radius:6px; font-size:0.8rem; display:flex; justify-content:space-between; align-items:center;">
-          <div>
-            Payment Method: <strong>${(bill.paymentMethod || 'cod').toUpperCase()}</strong> (${bill.paymentStatus})
-          </div>
-          <div>Status: <span class="badge badge-${bill.orderStatus}">${(bill.orderStatus || '').replace(/_/g, ' ')}</span></div>
-        </div>
-
-        <div class="bill-footer">
-          Thank you for shopping with ${escapeHtml(bill.shop?.name || bill.restaurant?.name || 'Shop Partner')} via Tomato!<br />
-          This is a computer-generated tax invoice.
-        </div>
-      </div>
-    `;
-
+    renderBillModalWithCoupons(bill, orderId, true);
     openModal('bill-modal');
   } catch (e) {
     alert(`Shop Bill Generation Failed: ${e.message}`);
@@ -6453,97 +6865,234 @@ async function deleteShopItem(id) {
 }
 window.deleteShopItem = deleteShopItem;
 
-// Generate & View Bill (Usable by Restaurant, Customer, and Admin)
+// Generate & View Bill (Usable by Restaurant, Shop, Customer, and Admin)
+let currentBillModalOrderId = null;
+let currentBillModalData = null;
+
+function renderBillModalWithCoupons(bill, orderId, isShopBill = false) {
+  currentBillModalOrderId = orderId || bill.orderId || currentBillModalOrderId;
+  currentBillModalData = bill;
+
+  const subtotal = Number(bill.subtotal || 0);
+  const cgst = Number(bill.cgst || 0);
+  const sgst = Number(bill.sgst || 0);
+  const deliveryFee = Number(bill.deliveryFee ?? 40);
+  const grossAmount = Number(bill.grossAmount ?? (subtotal + cgst + sgst + deliveryFee));
+  const discountAmount = Number(bill.discountAmount || 0);
+  const appliedCoupons = Array.isArray(bill.appliedCoupons) ? bill.appliedCoupons : [];
+  const couponCodes = Array.isArray(bill.couponCodes)
+    ? bill.couponCodes
+    : appliedCoupons.map((c) => c.code).filter(Boolean);
+  const netPayable = discountAmount > 0
+    ? Math.max(0, Number((grossAmount - discountAmount).toFixed(2)))
+    : Number(bill.totalAmount ?? grossAmount);
+
+  const individualCouponRowsHtml = appliedCoupons.length > 0
+    ? appliedCoupons.map((ac) => `
+      <div style="display:flex; justify-content:space-between; color:#15803d; font-size:0.82rem;">
+        <span>🎟️ Coupon Applied: <strong>${escapeHtml(ac.code)}</strong>${ac.title ? ` (${escapeHtml(ac.title)})` : ''}:</span>
+        <strong>-₹${Number(ac.discountAmount || 0).toFixed(2)}</strong>
+      </div>
+    `).join('')
+    : couponCodes.length > 0 && discountAmount > 0
+    ? `
+      <div style="display:flex; justify-content:space-between; color:#15803d; font-size:0.82rem;">
+        <span>🎟️ Coupon Applied (${couponCodes.map((c) => escapeHtml(c)).join(' + ')}):</span>
+        <strong>-₹${discountAmount.toFixed(2)}</strong>
+      </div>
+    `
+    : '';
+
+  const storeTitle = isShopBill
+    ? (bill.shop?.name || bill.restaurant?.name || 'Shop Partner')
+    : (bill.restaurant?.name || bill.shop?.name || 'Restaurant Partner');
+  const storeAddress = isShopBill
+    ? (bill.shop?.address || bill.restaurant?.address || '')
+    : (bill.restaurant?.address || bill.shop?.address || '');
+  const storePhone = isShopBill
+    ? (bill.shop?.phone || bill.restaurant?.phone || '')
+    : (bill.restaurant?.phone || bill.shop?.phone || '');
+  const storeGsn = bill.gsnNumber || bill.shop?.gsnNumber || bill.restaurant?.gsnNumber || bill.restaurant?.gstin || 'NA';
+
+  const printArea = document.getElementById('bill-print-area');
+  if (!printArea) return;
+
+  printArea.innerHTML = `
+    <div class="bill-container">
+      <div class="bill-head">
+        <h2>${escapeHtml(storeTitle)}</h2>
+        <div style="font-size:0.8rem;">${escapeHtml(storeAddress)}</div>
+        <div style="font-size:0.75rem;">Phone: ${escapeHtml(storePhone)} | GSN / GSTIN: <strong>${escapeHtml(storeGsn)}</strong></div>
+        ${bill.platformGsnNumber && bill.platformGsnNumber !== storeGsn ? `<div style="font-size:0.72rem; color:#555;">Platform GSN: ${escapeHtml(bill.platformGsnNumber)}</div>` : ''}
+        <div style="margin-top:0.6rem; font-weight:700; font-size:1.1rem; letter-spacing:0.1em;">${isShopBill ? 'RETAIL SHOP TAX INVOICE' : 'RETAIL TAX INVOICE'}</div>
+      </div>
+
+      <div class="bill-details">
+        <div>
+          <div><strong>Invoice #:</strong> ${escapeHtml(bill.invoiceNumber)}</div>
+          <div><strong>Order #:</strong> #${escapeHtml(bill.orderNumber)}</div>
+          <div><strong>Date:</strong> ${new Date(bill.date).toLocaleString()}</div>
+          ${couponCodes.length ? `<div><strong>Coupon Code:</strong> <span style="font-family:monospace; color:#15803d; font-weight:700;">${couponCodes.map((c) => escapeHtml(c)).join(', ')}</span></div>` : ''}
+        </div>
+        <div style="text-align:right;">
+          <div><strong>Billed To:</strong> ${escapeHtml(bill.customer?.name || 'Customer')}</div>
+          <div><strong>Contact:</strong> ${escapeHtml(bill.customer?.phone || 'N/A')}</div>
+          <div><strong>Address:</strong> ${escapeHtml(bill.customer?.address?.line1 || '')}, ${escapeHtml(bill.customer?.address?.city || '')}</div>
+        </div>
+      </div>
+
+      <table class="bill-table">
+        <thead>
+          <tr>
+            <th>Item Description</th>
+            <th style="text-align:center;">Qty</th>
+            <th style="text-align:right;">Rate</th>
+            <th style="text-align:right;">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${(bill.items || []).map((i) => `
+            <tr>
+              <td>${escapeHtml(i.name)}</td>
+              <td style="text-align:center;">${i.quantity}</td>
+              <td style="text-align:right;">₹${Number(i.price).toFixed(2)}</td>
+              <td style="text-align:right;">₹${Number(i.totalPrice || i.price * i.quantity).toFixed(2)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+
+      <div class="bill-summary">
+        <div style="display:flex; justify-content:space-between;">
+          <span>Subtotal:</span>
+          <span>₹${subtotal.toFixed(2)}</span>
+        </div>
+        <div style="display:flex; justify-content:space-between;">
+          <span>CGST (2.5%):</span>
+          <span>₹${cgst.toFixed(2)}</span>
+        </div>
+        <div style="display:flex; justify-content:space-between;">
+          <span>SGST (2.5%):</span>
+          <span>₹${sgst.toFixed(2)}</span>
+        </div>
+        <div style="display:flex; justify-content:space-between;">
+          <span>Packing &amp; Delivery Fee:</span>
+          <span>₹${deliveryFee.toFixed(2)}</span>
+        </div>
+        ${discountAmount > 0 ? `
+        <div style="display:flex; justify-content:space-between; border-top:1px dashed #ccc; padding-top:0.25rem; margin-top:0.2rem; color:#555;">
+          <span>Gross Bill Total (Before Coupon):</span>
+          <span style="text-decoration:line-through;">₹${grossAmount.toFixed(2)}</span>
+        </div>
+        ${individualCouponRowsHtml}
+        <div style="display:flex; justify-content:space-between; color:#15803d; font-weight:700; background:#f0fdf4; padding:0.25rem 0.4rem; border-radius:4px; margin:0.2rem 0;">
+          <span>Total Coupon Reduction (${couponCodes.map((c) => escapeHtml(c)).join(' + ') || 'Applied'}):</span>
+          <span>-₹${discountAmount.toFixed(2)}</span>
+        </div>` : ''}
+        <div class="bill-total-row">
+          <span>NET PAYABLE${discountAmount > 0 ? ' (After Coupon)' : ''}:</span>
+          <span style="color:var(--green);">₹${netPayable.toFixed(2)}</span>
+        </div>
+      </div>
+
+      <div style="margin-top:0.8rem; font-size:0.75rem; border-top:1px dashed #777; padding-top:0.6rem;">
+        <div>Payment Mode: <strong style="text-transform:uppercase;">${escapeHtml(bill.paymentMethod || 'cod')} (${escapeHtml(bill.paymentStatus || 'pending')})</strong></div>
+        <div>Transaction ID: ${escapeHtml(bill.paymentTransactionId || 'N/A')}</div>
+        ${bill.rider ? `<div>Assigned Rider: ${escapeHtml(typeof bill.rider === 'string' ? bill.rider : (bill.rider.name || ''))}</div>` : ''}
+        <div style="text-align:center; margin-top:0.8rem;">Thank you for your order with Tomato! Visit Again.</div>
+      </div>
+    </div>
+  `;
+}
+
+function setBillModalCouponFeedback(message, isError = false) {
+  const el = document.getElementById('bill-modal-coupon-feedback');
+  if (!el) return;
+  if (!message) {
+    el.style.display = 'none';
+    el.textContent = '';
+    return;
+  }
+  el.style.display = 'block';
+  el.style.color = isError ? '#dc2626' : '#15803d';
+  el.style.fontWeight = '600';
+  el.textContent = message;
+}
+
+async function applyCouponCodeInsideBillModal() {
+  if (!currentBillModalOrderId) return;
+  const input = document.getElementById('bill-modal-coupon-input');
+  const rawCode = String(input?.value || '').trim().toUpperCase();
+  if (!rawCode) {
+    setBillModalCouponFeedback('Please enter a coupon code to apply to this bill.', true);
+    return;
+  }
+
+  const existingCodes = Array.isArray(currentBillModalData?.couponCodes)
+    ? [...currentBillModalData.couponCodes]
+    : [];
+  if (existingCodes.includes(rawCode)) {
+    setBillModalCouponFeedback(`Coupon "${rawCode}" is already applied to this bill.`, true);
+    return;
+  }
+  if (existingCodes.length >= 1) {
+    setBillModalCouponFeedback('Only 1 coupon code can be used on a bill. Remove the applied coupon to use another.', true);
+    return;
+  }
+
+  const nextCodes = [...existingCodes, rawCode];
+  try {
+    const res = await apiFetch(`/api/customer/orders/${currentBillModalOrderId}/apply-coupon`, {
+      method: 'POST',
+      body: JSON.stringify({ couponCodes: nextCodes }),
+    });
+    if (input) input.value = '';
+    setBillModalCouponFeedback(res.message || `Applied coupon ${rawCode}!`, false);
+    if (res.bill) {
+      renderBillModalWithCoupons(res.bill, currentBillModalOrderId, String(res.bill.orderNumber || '').startsWith('SHOP-'));
+    }
+    if (typeof fetchCustomerOrders === 'function') fetchCustomerOrders();
+  } catch (err) {
+    setBillModalCouponFeedback(err.message || 'Unable to apply coupon to bill.', true);
+  }
+}
+window.applyCouponCodeInsideBillModal = applyCouponCodeInsideBillModal;
+
+async function removeCouponFromBillModal(codeToRemove) {
+  if (!currentBillModalOrderId) return;
+  const cleanRemove = String(codeToRemove || '').trim().toUpperCase();
+  const existingCodes = Array.isArray(currentBillModalData?.couponCodes)
+    ? currentBillModalData.couponCodes.filter((c) => c !== cleanRemove)
+    : [];
+  try {
+    const res = await apiFetch(`/api/customer/orders/${currentBillModalOrderId}/apply-coupon`, {
+      method: 'POST',
+      body: JSON.stringify({ couponCodes: existingCodes }),
+    });
+    setBillModalCouponFeedback(res.message || `Removed coupon ${cleanRemove}.`, false);
+    if (res.bill) {
+      renderBillModalWithCoupons(res.bill, currentBillModalOrderId, String(res.bill.orderNumber || '').startsWith('SHOP-'));
+    }
+    if (typeof fetchCustomerOrders === 'function') fetchCustomerOrders();
+  } catch (err) {
+    setBillModalCouponFeedback(err.message || 'Unable to remove coupon.', true);
+  }
+}
+window.removeCouponFromBillModal = removeCouponFromBillModal;
+
 async function viewOrderBill(orderId) {
   try {
-    const endpoint = role === 'restaurant'
-      ? `/api/restaurant/orders/${orderId}/bill`
-      : `/api/customer/orders/${orderId}/bill`;
+    setBillModalCouponFeedback('');
+    let endpoint = `/api/customer/orders/${orderId}/bill`;
+    if (role === 'restaurant') endpoint = `/api/restaurant/orders/${orderId}/bill`;
+    else if (role === 'shop') endpoint = `/api/shop/orders/${orderId}/bill`;
+    else if (role === 'admin' || role === 'subadmin') endpoint = `/api/admin/orders/${orderId}/bill`;
 
     const data = await apiFetch(endpoint);
     const bill = data.bill;
+    const isShopBill = role === 'shop' || String(bill?.orderNumber || '').startsWith('SHOP-');
 
-    const printArea = document.getElementById('bill-print-area');
-    printArea.innerHTML = `
-      <div class="bill-container">
-        <div class="bill-head">
-          <h2>${escapeHtml(bill.restaurant.name)}</h2>
-          <div style="font-size:0.8rem;">${escapeHtml(bill.restaurant.address)}</div>
-          <div style="font-size:0.75rem;">Phone: ${escapeHtml(bill.restaurant.phone)} | GSTIN: ${escapeHtml(bill.restaurant.gstin)}</div>
-          <div style="margin-top:0.6rem; font-weight:700; font-size:1.1rem; letter-spacing:0.1em;">RETAIL TAX INVOICE</div>
-        </div>
-
-        <div class="bill-details">
-          <div>
-            <div><strong>Invoice #:</strong> ${bill.invoiceNumber}</div>
-            <div><strong>Order #:</strong> #${bill.orderNumber}</div>
-            <div><strong>Date:</strong> ${new Date(bill.date).toLocaleString()}</div>
-          </div>
-          <div style="text-align:right;">
-            <div><strong>Billed To:</strong> ${escapeHtml(bill.customer.name)}</div>
-            <div><strong>Contact:</strong> ${escapeHtml(bill.customer.phone || 'N/A')}</div>
-            <div><strong>Address:</strong> ${escapeHtml(bill.customer.address?.line1 || '')}, ${escapeHtml(bill.customer.address?.city || '')}</div>
-          </div>
-        </div>
-
-        <table class="bill-table">
-          <thead>
-            <tr>
-              <th>Item Description</th>
-              <th style="text-align:center;">Qty</th>
-              <th style="text-align:right;">Rate</th>
-              <th style="text-align:right;">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${(bill.items || []).map((i) => `
-              <tr>
-                <td>${escapeHtml(i.name)}</td>
-                <td style="text-align:center;">${i.quantity}</td>
-                <td style="text-align:right;">₹${Number(i.price).toFixed(2)}</td>
-                <td style="text-align:right;">₹${Number(i.totalPrice).toFixed(2)}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-
-        <div class="bill-summary">
-          <div style="display:flex; justify-content:space-between;">
-            <span>Subtotal:</span>
-            <span>₹${Number(bill.subtotal).toFixed(2)}</span>
-          </div>
-          <div style="display:flex; justify-content:space-between;">
-            <span>CGST (2.5%):</span>
-            <span>₹${Number(bill.cgst).toFixed(2)}</span>
-          </div>
-          <div style="display:flex; justify-content:space-between;">
-            <span>SGST (2.5%):</span>
-            <span>₹${Number(bill.sgst).toFixed(2)}</span>
-          </div>
-          <div style="display:flex; justify-content:space-between;">
-            <span>Packing & Delivery Fee:</span>
-            <span>₹${Number(bill.deliveryFee).toFixed(2)}</span>
-          </div>
-          ${Number(bill.discountAmount || 0) > 0 ? `
-          <div style="display:flex; justify-content:space-between; color:#15803d; font-weight:700;">
-            <span>Coupon Discount ${Array.isArray(bill.couponCodes) && bill.couponCodes.length ? '(' + bill.couponCodes.map((c) => escapeHtml(c)).join(' + ') + ')' : ''}:</span>
-            <span>-₹${Number(bill.discountAmount).toFixed(2)}</span>
-          </div>` : ''}
-          <div class="bill-total-row">
-            <span>NET PAYABLE:</span>
-            <span>₹${Number(bill.totalAmount).toFixed(2)}</span>
-          </div>
-        </div>
-
-        <div style="margin-top:0.8rem; font-size:0.75rem; border-top:1px dashed #777; padding-top:0.6rem;">
-          <div>Payment Mode: <strong style="text-transform:uppercase;">${bill.paymentMethod} (${bill.paymentStatus})</strong></div>
-          <div>Transaction ID: ${bill.paymentTransactionId}</div>
-          ${bill.rider ? `<div>Assigned Rider: ${escapeHtml(bill.rider.name)} (${escapeHtml(bill.rider.phone)})</div>` : ''}
-          <div style="text-align:center; margin-top:0.8rem;">Thank you for your order with Tomato! Visit Again.</div>
-        </div>
-      </div>
-    `;
-
+    renderBillModalWithCoupons(bill, orderId, isShopBill);
     openModal('bill-modal');
   } catch (e) {
     alert(`Unable to generate bill: ${e.message}`);
@@ -6898,6 +7447,14 @@ async function markOrderDelivered(orderId) {
   if (!confirm('Confirm delivery: Has the order been delivered to the customer?')) return;
   try {
     await apiFetch(`/api/rider/orders/${orderId}/deliver`, { method: 'POST' });
+    if (
+      typeof activeTrackingOrderId !== 'undefined' &&
+      activeTrackingOrderId &&
+      String(activeTrackingOrderId) === String(orderId) &&
+      typeof closeOrderLiveTrackingModal === 'function'
+    ) {
+      closeOrderLiveTrackingModal();
+    }
     alert('Delivery completed successfully! ₹40 delivery fee has been credited to your earnings.');
     switchView('rider-history');
   } catch (e) {
@@ -7172,7 +7729,9 @@ async function fetchAdminOrders(page, date, force = false) {
                   <td><span class="badge ${o.paymentStatus === 'paid' ? 'badge-delivered' : 'badge-placed'}">${(o.paymentMethod || 'cod').toUpperCase()} (${o.paymentStatus || 'pending'})</span></td>
                   <td><span class="badge badge-${o.status || 'placed'}">${String(o.status || 'placed').replace(/_/g, ' ')}</span></td>
                   <td style="text-align:right; white-space:nowrap;">
-                    <button class="btn btn-outline btn-sm" style="background:#f0fdf4; border-color:#86efac; color:#15803d; font-weight:600;" onclick="openOrderLiveTrackingModal('${o._id}', 'admin')" title="Live GPS Rider Telemetry">📍 Track</button>
+                    ${!['delivered', 'cancelled'].includes(String(o.status || '').toLowerCase()) ? `
+                      <button class="btn btn-outline btn-sm" style="background:#f0fdf4; border-color:#86efac; color:#15803d; font-weight:600;" onclick="openOrderLiveTrackingModal('${o._id}', 'admin')" title="Live GPS Rider Telemetry">📍 Track</button>
+                    ` : ''}
                     <button class="btn btn-outline btn-sm" onclick="viewOrderBill('${o._id}')" title="View bill & tax invoice">🧾 Bill</button>
                     ${isArchived ? `
                       <button class="btn btn-outline btn-sm" onclick="archiveAdminOrder('${o._id}', false)" title="Unarchive this order">📂 Unarchive</button>
@@ -9799,6 +10358,22 @@ function loadProfileSettings() {
     dobEl.value = user.dob ? String(user.dob).split('T')[0] : '';
   }
 
+  const gsnGroup = document.getElementById('set-gsn-group');
+  const gsnEl = document.getElementById('set-gsn');
+  const gsnLabel = document.getElementById('set-gsn-label');
+  if (gsnGroup && gsnEl) {
+    if (role === 'restaurant' || role === 'shop' || role === 'admin') {
+      gsnGroup.style.display = 'block';
+      if (gsnLabel) {
+        gsnLabel.textContent = 'GST Number';
+      }
+      gsnEl.value = (user.gsnNumber && user.gsnNumber.trim()) ? user.gsnNumber.trim() : 'NA';
+    } else {
+      gsnGroup.style.display = 'none';
+      gsnEl.value = '';
+    }
+  }
+
   const restGroup = document.getElementById('restaurant-settings-group');
   const riderGroup = document.getElementById('rider-settings-group');
 
@@ -9852,6 +10427,11 @@ async function saveProfileSettings(e) {
   }
   const dobVal = (document.getElementById('set-dob')?.value || '').trim();
   formData.append('dob', dobVal);
+  if (role === 'restaurant' || role === 'shop' || role === 'admin') {
+    const rawGsn = (document.getElementById('set-gsn')?.value || '').trim().toUpperCase();
+    const gsnVal = (role === 'restaurant' || role === 'shop') ? (rawGsn || 'NA') : rawGsn;
+    formData.append('gsnNumber', gsnVal);
+  }
   if (role === 'restaurant') {
     formData.append('restaurantAddress', document.getElementById('set-restaurant-address').value.trim());
     formData.append('pincode', (document.getElementById('set-restaurant-pincode')?.value || '').trim());
@@ -9911,12 +10491,18 @@ async function openOrderLiveTrackingModal(orderId, viewerRole = null) {
     body.innerHTML = `
     <div style="text-align:center; padding:2rem 0; color:var(--muted);">
     <div style="font-size:2rem; margin-bottom:0.5rem; animation:pulse 1.5s infinite;">📡</div>
-    Establishing satellite connection &amp; live GPS telemetry...
+    Establishing WebSocket &amp; satellite GPS telemetry...
     </div>
     `;
   }
 
   openModal('order-live-tracking-modal');
+
+  // Subscribe to real-time WebSocket stream for this order
+  if (window.TomatoWS && typeof window.TomatoWS.subscribeOrderLiveTracking === 'function') {
+    window.TomatoWS.subscribeOrderLiveTracking(orderId);
+  }
+
   await refreshOrderLiveTracking();
 
   if (orderLiveTrackingPollInterval) clearInterval(orderLiveTrackingPollInterval);
@@ -9924,6 +10510,9 @@ async function openOrderLiveTrackingModal(orderId, viewerRole = null) {
 }
 
 function closeOrderLiveTrackingModal() {
+  if (window.TomatoWS && typeof window.TomatoWS.unsubscribeOrderLiveTracking === 'function') {
+    window.TomatoWS.unsubscribeOrderLiveTracking(activeTrackingOrderId);
+  }
   if (orderLiveTrackingPollInterval) {
     clearInterval(orderLiveTrackingPollInterval);
     orderLiveTrackingPollInterval = null;
@@ -9961,12 +10550,33 @@ async function refreshOrderLiveTracking() {
   }
 }
 
-function renderOrderLiveTracking(data) {
+function renderOrderLiveTracking(rawData) {
+  const data = rawData?.tracking || rawData || {};
+  const statusLower = String(data.status || '').toLowerCase();
+  if (data.trackingClosed || statusLower === 'delivered' || statusLower === 'cancelled') {
+    closeOrderLiveTrackingModal();
+    if (typeof showToastNotification === 'function') {
+      showToastNotification({
+        title: statusLower === 'delivered'
+          ? `Order #${data.orderNumber || ''} Delivered`
+          : `Order #${data.orderNumber || ''} Tracking Closed`,
+        message: statusLower === 'delivered'
+          ? 'Your order has been delivered! Live rider location tracking is now closed.'
+          : 'This order is no longer active. Live rider location tracking is closed.',
+        type: statusLower === 'delivered' ? 'success' : 'info',
+      });
+    }
+    if (typeof refreshActiveViewData === 'function') {
+      refreshActiveViewData();
+    }
+    return;
+  }
+
   const body = document.getElementById('olt-modal-body');
   if (!body) return;
 
   const titleEl = document.getElementById('olt-modal-title');
-  if (titleEl) titleEl.textContent = `Order #${data.orderNumber} Live Telemetry`;
+  if (titleEl) titleEl.textContent = `Order #${data.orderNumber || ''} Live Telemetry`;
 
   const badgeEl = document.getElementById('olt-status-badge');
   if (badgeEl) {
@@ -9980,11 +10590,16 @@ function renderOrderLiveTracking(data) {
   const cust = data.customer || {};
 
   const isOnline = Boolean(telem.isLiveOnline ?? rider.isOnline);
-  const distRest = telem.riderToRestaurantDistanceKm !== undefined ? telem.riderToRestaurantDistanceKm.toFixed(2) : '0.85';
-  const distCust = telem.riderToCustomerDistanceKm !== undefined ? telem.riderToCustomerDistanceKm.toFixed(2) : '1.45';
-  const eta = telem.etaMinutes !== undefined ? telem.etaMinutes : Math.round(Number(distCust) * 4 + 4);
+  const distRestNum = telem.riderToRestaurantDistanceKm !== undefined ? Number(telem.riderToRestaurantDistanceKm) : 0.85;
+  const distCustNum = telem.riderToCustomerDistanceKm !== undefined ? Number(telem.riderToCustomerDistanceKm) : 1.45;
+  const distRest = distRestNum.toFixed(2);
+  const distCust = distCustNum.toFixed(2);
+  const eta = telem.etaMinutes !== undefined ? telem.etaMinutes : Math.round(distCustNum * 4 + 4);
+  const wsConnected = Boolean(window.TomatoWS && window.TomatoWS.isConnected);
 
-  const mapsUrl = rider.location?.lat && rest.location?.lat
+  const mapsUrl = rider.location?.lat && cust.location?.lat
+  ? `https://www.google.com/maps/dir/?api=1&origin=${rider.location.lat},${rider.location.lng}&destination=${cust.location.lat},${cust.location.lng}&waypoints=${rest.location?.lat || 12.9716},${rest.location?.lng || 77.5946}`
+  : rider.location?.lat && rest.location?.lat
   ? `https://www.google.com/maps/dir/?api=1&origin=${rider.location.lat},${rider.location.lng}&destination=${rest.location.lat},${rest.location.lng}`
   : 'https://maps.google.com';
 
@@ -10006,14 +10621,16 @@ function renderOrderLiveTracking(data) {
   <div style="background:${isOnline ? '#f0fdf4' : '#fef2f2'}; border:1px solid ${isOnline ? '#bbf7d0' : '#fecaca'}; border-radius:10px; padding:0.85rem; text-align:center;">
   <span style="font-size:0.75rem; color:${isOnline ? '#15803d' : '#991b1b'}; text-transform:uppercase; font-weight:600; display:block;">GPS Transmitter</span>
   <strong style="font-size:1rem; color:${isOnline ? '#16a34a' : '#dc2626'};">${isOnline ? '🟢 Live Online' : '⚪ Offline'}</strong>
-  <div style="font-size:0.72rem; color:var(--muted);">${telem.lastPingSecondsAgo !== null ? `${telem.lastPingSecondsAgo}s ago` : 'Active'}</div>
+  <div style="font-size:0.72rem; color:var(--muted);">${telem.lastPingSecondsAgo !== null && telem.lastPingSecondsAgo !== undefined ? `${telem.lastPingSecondsAgo}s ago` : 'Active'}</div>
   </div>
   </div>
   <!-- Radar Canvas -->
   <div style="background:#0f172a; border-radius:12px; padding:0.9rem; margin-bottom:1.2rem; position:relative; overflow:hidden;">
-  <div style="display:flex; justify-content:space-between; align-items:center; color:#94a3b8; font-size:0.76rem; margin-bottom:0.4rem; padding:0 0.2rem;">
-  <span>📡 LIVE SATELLITE DISPATCH RADAR</span>
-  <span style="color:#22c55e;">● GPS Signal Fixed</span>
+  <div style="display:flex; justify-content:space-between; align-items:center; color:#94a3b8; font-size:0.76rem; margin-bottom:0.4rem; padding:0 0.2rem; flex-wrap:wrap; gap:0.4rem;">
+  <span>📡 LIVE SATELLITE DISPATCH RADAR (RESTAURANT ➔ RIDER ➔ CUSTOMER)</span>
+  <span id="ws-live-connection-indicator" style="color:${wsConnected ? '#22c55e' : '#eab308'}; font-weight:600;">
+    ${wsConnected ? '🟢 WebSocket Live Stream Connected' : '🟡 Polling Fallback (Connecting WS...)'}
+  </span>
   </div>
   <canvas id="live-order-canvas" width="680" height="250" style="width:100%; height:auto; background:#1e293b; border-radius:8px; border:1px solid #334155; display:block;"></canvas>
   </div>
@@ -10027,7 +10644,7 @@ function renderOrderLiveTracking(data) {
   <span class="badge" style="background:#e0f2fe; color:#0369a1; font-weight:700; font-size:0.75rem;">📍 DIGIPIN: ${escapeHtml(rest.digipin || 'DGP-BLR')}</span>
   </div>
   <div style="font-size:0.78rem; color:var(--muted); margin-top:0.35rem;">
-  GPS: ${rest.location?.lat ? `${rest.location.lat.toFixed(4)}, ${rest.location.lng.toFixed(4)}` : 'Bengaluru'}
+  GPS: ${rest.location?.lat ? `${Number(rest.location.lat).toFixed(4)}, ${Number(rest.location.lng).toFixed(4)}` : 'Bengaluru'}
   </div>
   </div>
   <!-- Rider -->
@@ -10040,7 +10657,7 @@ function renderOrderLiveTracking(data) {
   </span>
   </div>
   <div style="font-size:0.78rem; color:var(--muted); margin-top:0.35rem;">
-  GPS: ${rider.location?.lat ? `${rider.location.lat.toFixed(4)}, ${rider.location.lng.toFixed(4)}` : 'Indiranagar'}
+  GPS: ${rider.location?.lat ? `${Number(rider.location.lat).toFixed(4)}, ${Number(rider.location.lng).toFixed(4)}` : 'Indiranagar'}
   </div>
   </div>
   <!-- Customer -->
@@ -10059,7 +10676,7 @@ function renderOrderLiveTracking(data) {
   <a href="${mapsUrl}" target="_blank" class="btn btn-outline btn-sm" style="color:var(--blue);">🗺️ Open in Google Maps</a>
   </div>
   ${role === 'deliveryPartner' ? `
-  <button class="btn btn-primary btn-sm" onclick="simulateRiderMovement(); setTimeout(refreshOrderLiveTracking, 600);">🚴 Simulate Step Ahead (~100m)</button>
+  <button class="btn btn-primary btn-sm" onclick="simulateRiderMovement(); setTimeout(refreshOrderLiveTracking, 400);">🚴 Simulate Step Ahead (~100m)</button>
   ` : ''}
   </div>
   `;
@@ -10071,7 +10688,8 @@ function renderOrderLiveTracking(data) {
   }, 30);
 }
 
-function drawLiveOrderRadar(canvas, data) {
+function drawLiveOrderRadar(canvas, rawData) {
+  const data = rawData?.tracking || rawData || {};
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   const w = canvas.width;
@@ -10106,19 +10724,42 @@ function drawLiveOrderRadar(canvas, data) {
     ctx.stroke();
   });
 
-  // 3 Nodes: Restaurant (Left), Rider (Center-Transit), Customer (Right)
-  const restPt = { x: w * 0.16, y: h * 0.52 };
+  // 3 Nodes: Restaurant (Left), Rider (Dynamic Live Transit), Customer (Right)
+  const restPt = { x: w * 0.16, y: h * 0.54 };
   const custPt = { x: w * 0.84, y: h * 0.48 };
-  // Rider position interpolated between rest and cust
-  const riderPt = { x: w * 0.50, y: h * 0.38 };
 
-  // Route line from restaurant to customer via rider
+  // Dynamically interpolate Rider position between Restaurant pickup and Customer destination
+  const dRest = Number(data.telemetry?.riderToRestaurantDistanceKm ?? 0.85);
+  const dCust = Number(data.telemetry?.riderToCustomerDistanceKm ?? 1.45);
+  const totalLeg = Math.max(0.05, dRest + dCust);
+  let progressRatio = dRest / totalLeg;
+  if (data.status === 'delivered') progressRatio = 1;
+  else if (data.status === 'placed' || data.status === 'accepted' || data.status === 'preparing') {
+    progressRatio = Math.min(0.28, progressRatio);
+  }
+  progressRatio = Math.max(0.08, Math.min(0.94, progressRatio));
+
+  // Slight arc curve between restaurant and customer
+  const arcLift = Math.sin(progressRatio * Math.PI) * (h * 0.14);
+  const riderPt = {
+    x: restPt.x + (custPt.x - restPt.x) * progressRatio,
+    y: restPt.y + (custPt.y - restPt.y) * progressRatio - arcLift,
+  };
+
+  // Completed route leg (Restaurant -> Rider)
+  ctx.strokeStyle = '#22c55e';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(restPt.x, restPt.y);
+  ctx.lineTo(riderPt.x, riderPt.y);
+  ctx.stroke();
+
+  // Remaining route leg (Rider -> Customer)
   ctx.strokeStyle = '#38bdf8';
   ctx.lineWidth = 2.5;
   ctx.setLineDash([6, 4]);
   ctx.beginPath();
-  ctx.moveTo(restPt.x, restPt.y);
-  ctx.lineTo(riderPt.x, riderPt.y);
+  ctx.moveTo(riderPt.x, riderPt.y);
   ctx.lineTo(custPt.x, custPt.y);
   ctx.stroke();
   ctx.setLineDash([]);
@@ -10192,6 +10833,9 @@ let adminFleetPollInterval = null;
 
 async function openAdminFleetTrackerModal() {
   openModal('admin-fleet-tracker-modal');
+  if (window.TomatoWS && typeof window.TomatoWS.subscribeFleetLiveTracking === 'function') {
+    window.TomatoWS.subscribeFleetLiveTracking();
+  }
   await refreshAdminFleet();
 
   if (adminFleetPollInterval) clearInterval(adminFleetPollInterval);
@@ -10199,6 +10843,9 @@ async function openAdminFleetTrackerModal() {
 }
 
 function closeAdminFleetTrackerModal() {
+  if (window.TomatoWS && typeof window.TomatoWS.unsubscribeFleetLiveTracking === 'function') {
+    window.TomatoWS.unsubscribeFleetLiveTracking();
+  }
   if (adminFleetPollInterval) {
     clearInterval(adminFleetPollInterval);
     adminFleetPollInterval = null;
@@ -10393,39 +11040,21 @@ let cachedAdminBankSettlements = [];
 let currentEditingSettlementObj = null;
 
 function loadAdminBankPanel() {
-  switchAdminBankTab(currentAdminBankTab || 'partners');
+  fetchAdminBankPartners();
 }
 
 function switchAdminBankTab(tabName) {
-  currentAdminBankTab = tabName;
-  const partnersTab = document.getElementById('admin-bank-tab-partners');
-  const settlementsTab = document.getElementById('admin-bank-tab-settlements');
-  const partnersBtn = document.getElementById('admin-bank-tab-partners-btn');
-  const settlementsBtn = document.getElementById('admin-bank-tab-settlements-btn');
-
-  if (partnersTab) partnersTab.style.display = tabName === 'partners' ? 'block' : 'none';
-  if (settlementsTab) settlementsTab.style.display = tabName === 'settlements' ? 'block' : 'none';
-
-  if (partnersBtn) {
-    partnersBtn.className = tabName === 'partners' ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm';
+  // Maintained for backward compatibility: if called with settlements, redirect to partner billing tab
+  if (tabName === 'settlements') {
+    switchView('admin-partner-billing');
+    switchAdminPartnerBillingTab('settlements');
+    return;
   }
-  if (settlementsBtn) {
-    settlementsBtn.className = tabName === 'settlements' ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm';
-  }
-
-  if (tabName === 'partners') {
-    fetchAdminBankPartners();
-  } else {
-    fetchAdminBankSettlements();
-  }
+  fetchAdminBankPartners();
 }
 
 function refreshAdminBankCurrentTab() {
-  if (currentAdminBankTab === 'settlements') {
-    fetchAdminBankSettlements();
-  } else {
-    fetchAdminBankPartners();
-  }
+  fetchAdminBankPartners();
 }
 
 async function fetchAdminBankPartners() {
@@ -10691,7 +11320,7 @@ async function openAdminBankEditModal(userId) {
     if (commGroup) commGroup.style.display = 'block';
     if (riderGroup) riderGroup.style.display = 'none';
     if (noteLabel) {
-    noteLabel.textContent = 'Admin Verification / Agreement Note (FSSAI Registration Number & Expiry)';
+      noteLabel.textContent = 'Agreement Note (FSSAI Registration Number & Expiry)';
     }
     if (noteInput) {
     noteInput.placeholder = 'Shop and Restaurant has to share FSSAI registration number and expiry (e.g. FSSAI: 11223344556677 | Expiry: 31/12/2028)';
@@ -10877,7 +11506,8 @@ function quickFilterSettlementsById(idVal) {
 window.quickFilterSettlementsById = quickFilterSettlementsById;
 
 function viewPartnerSettlementsById(idVal) {
-  switchAdminBankTab('settlements');
+  switchView('admin-partner-billing');
+  switchAdminPartnerBillingTab('settlements');
   quickFilterSettlementsById(idVal);
 }
 window.viewPartnerSettlementsById = viewPartnerSettlementsById;
@@ -11286,6 +11916,438 @@ body: JSON.stringify({ target }),
   }
 }
 
+// =========================================================================
+// VIEW 17.5: ADMIN PARTNERS BILLING (WEEKLY SETTLEMENTS & PAYOUT ENGINE)
+// =========================================================================
+let currentAdminPartnerBillingTab = 'weekly';
+let adminPartnerBillingData = [];
+let adminPartnerBillingSummary = {};
+let adminPartnerBillingWeekStart = '';
+let adminPartnerBillingWeekEnd = '';
+let adminPartnerBillingLoading = false;
+
+function switchAdminPartnerBillingTab(tabName) {
+  currentAdminPartnerBillingTab = tabName || 'weekly';
+  const weeklyTab = document.getElementById('admin-billing-tab-weekly');
+  const settlementsTab = document.getElementById('admin-billing-tab-settlements');
+  const weeklyBtn = document.getElementById('admin-billing-tab-weekly-btn');
+  const settlementsBtn = document.getElementById('admin-billing-tab-settlements-btn');
+
+  if (weeklyTab) weeklyTab.style.display = currentAdminPartnerBillingTab === 'weekly' ? 'block' : 'none';
+  if (settlementsTab) settlementsTab.style.display = currentAdminPartnerBillingTab === 'settlements' ? 'block' : 'none';
+
+  if (weeklyBtn) {
+    weeklyBtn.className = currentAdminPartnerBillingTab === 'weekly' ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm';
+  }
+  if (settlementsBtn) {
+    settlementsBtn.className = currentAdminPartnerBillingTab === 'settlements' ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm';
+  }
+
+  if (currentAdminPartnerBillingTab === 'weekly') {
+    fetchAdminPartnerBilling();
+  } else {
+    fetchAdminBankSettlements();
+  }
+}
+
+function refreshAdminPartnerBillingCurrentTab() {
+  if (currentAdminPartnerBillingTab === 'settlements') {
+    fetchAdminBankSettlements();
+  } else {
+    fetchAdminPartnerBilling();
+  }
+}
+
+function getAdminCurrentWeekString(d = new Date()) {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil(((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  return `${date.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+}
+
+function setAdminBillingCurrentWeek() {
+  const weekInput = document.getElementById('admin-billing-week-input');
+  if (weekInput) {
+    weekInput.value = getAdminCurrentWeekString();
+  }
+  fetchAdminPartnerBilling();
+}
+
+function setAdminBillingPrevWeek() {
+  const weekInput = document.getElementById('admin-billing-week-input');
+  const d = new Date();
+  d.setDate(d.getDate() - 7);
+  if (weekInput) {
+    weekInput.value = getAdminCurrentWeekString(d);
+  }
+  fetchAdminPartnerBilling();
+}
+
+function setAdminBillingAllTime() {
+  const weekInput = document.getElementById('admin-billing-week-input');
+  if (weekInput) {
+    weekInput.value = '';
+  }
+  fetchAdminPartnerBilling('all');
+}
+
+function resetAdminBillingFilters() {
+  const roleFilter = document.getElementById('admin-billing-role-filter');
+  const statusFilter = document.getElementById('admin-billing-status-filter');
+  const searchInput = document.getElementById('admin-billing-search-input');
+  if (roleFilter) roleFilter.value = 'all';
+  if (statusFilter) statusFilter.value = 'all';
+  if (searchInput) searchInput.value = '';
+  setAdminBillingCurrentWeek();
+}
+
+async function fetchAdminPartnerBilling(overrideWeek) {
+  const tableContainer = document.getElementById('admin-partner-billing-table-container');
+  const weekInput = document.getElementById('admin-billing-week-input');
+  let weekVal = '';
+
+  if (overrideWeek !== undefined) {
+    weekVal = overrideWeek;
+    if (weekInput) {
+      weekInput.value = overrideWeek === 'all' ? '' : overrideWeek;
+    }
+  } else if (weekInput) {
+    if (!weekInput.value) {
+      weekInput.value = getAdminCurrentWeekString();
+    }
+    weekVal = weekInput.value;
+  } else {
+    weekVal = getAdminCurrentWeekString();
+  }
+
+  const roleVal = document.getElementById('admin-billing-role-filter')?.value || 'all';
+  const statusVal = document.getElementById('admin-billing-status-filter')?.value || 'all';
+  const searchVal = document.getElementById('admin-billing-search-input')?.value || '';
+
+  if (tableContainer) {
+    tableContainer.innerHTML = `
+      <div style="text-align:center; padding:2.5rem 1rem; color:var(--muted);">
+        <div style="font-size:1.8rem; margin-bottom:0.4rem; animation:spin 1s linear infinite;">⏳</div>
+        <p style="font-size:0.9rem; font-weight:600;">Calculating weekly billing &amp; settlements...</p>
+      </div>
+    `;
+  }
+
+  adminPartnerBillingLoading = true;
+  try {
+    const params = new URLSearchParams();
+    if (weekVal) params.set('week', weekVal);
+    if (roleVal && roleVal !== 'all') params.set('role', roleVal);
+    if (statusVal && statusVal !== 'all') params.set('status', statusVal);
+    if (searchVal) params.set('search', searchVal);
+
+    const res = await apiFetch(`/api/admin/billing/partners?${params.toString()}`);
+    adminPartnerBillingData = Array.isArray(res.billingList) ? res.billingList : [];
+    adminPartnerBillingSummary = res.summary || {};
+    adminPartnerBillingWeekStart = res.weekStart || '';
+    adminPartnerBillingWeekEnd = res.weekEnd || '';
+
+    renderAdminPartnerBillingKPIs();
+    renderAdminPartnerBillingTable();
+  } catch (err) {
+    console.error('Failed to load partner billing:', err);
+    if (tableContainer) {
+      tableContainer.innerHTML = `
+        <div style="padding:1.5rem; text-align:center; color:#dc2626; background:#fef2f2; border-radius:8px;">
+          Failed to load partner billing: ${escapeHtml(err.message || 'Server error')}
+        </div>
+      `;
+    }
+  } finally {
+    adminPartnerBillingLoading = false;
+  }
+}
+
+function renderAdminPartnerBillingKPIs() {
+  const kpiEl = document.getElementById('admin-partner-billing-kpis');
+  if (!kpiEl) return;
+
+  const s = adminPartnerBillingSummary || {};
+  const totalPayable = Number(s.totalPlatformPayable || 0);
+  const totalPaid = Number(s.totalPlatformPaid || 0);
+  const totalPending = Number(s.totalPlatformPending || 0);
+  const pendingPartners = Number(s.totalPartnersWithPending || 0);
+  const restPending = Number(s.pendingRestaurantsCount || 0);
+  const shopPending = Number(s.pendingShopsCount || 0);
+  const riderPending = Number(s.pendingRidersCount || 0);
+  const rangeStr = adminPartnerBillingWeekStart && adminPartnerBillingWeekEnd
+    ? `${adminPartnerBillingWeekStart} → ${adminPartnerBillingWeekEnd}`
+    : 'Current Week';
+
+  kpiEl.innerHTML = `
+    <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:0.8rem 1rem;">
+      <div style="font-size:0.72rem; color:#1d4ed8; font-weight:700; text-transform:uppercase;">📅 Week Period</div>
+      <div style="font-size:1.15rem; font-weight:800; color:#1e3a8a; margin-top:0.2rem;">${escapeHtml(rangeStr)}</div>
+      <div style="font-size:0.72rem; color:#1e40af; margin-top:0.15rem;">${s.trackedPartnersCount || 0} Registered Partners Tracked</div>
+    </div>
+    <div style="background:#fff7ed; border:1px solid #fed7aa; border-radius:10px; padding:0.8rem 1rem;">
+      <div style="font-size:0.72rem; color:#c2410c; font-weight:700; text-transform:uppercase;">⏳ Total Amount Pending to Pay</div>
+      <div style="font-size:1.45rem; font-weight:800; color:#9a3412; margin-top:0.15rem;">₹${totalPending.toLocaleString('en-IN')}</div>
+      <div style="font-size:0.72rem; color:#c2410c; margin-top:0.15rem;">${pendingPartners} Partners Waiting (${restPending} Rest • ${shopPending} Shops • ${riderPending} Riders)</div>
+    </div>
+    <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:0.8rem 1rem;">
+      <div style="font-size:0.72rem; color:#15803d; font-weight:700; text-transform:uppercase;">✅ Total Amount Already Sent</div>
+      <div style="font-size:1.45rem; font-weight:800; color:#14532d; margin-top:0.15rem;">₹${totalPaid.toLocaleString('en-IN')}</div>
+      <div style="font-size:0.72rem; color:#166534; margin-top:0.15rem;">Successfully Disbursed This Week</div>
+    </div>
+    <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:10px; padding:0.8rem 1rem;">
+      <div style="font-size:0.72rem; color:#475569; font-weight:700; text-transform:uppercase;">💵 Gross Net Payouts Payable</div>
+      <div style="font-size:1.45rem; font-weight:800; color:#0f172a; margin-top:0.15rem;">₹${totalPayable.toLocaleString('en-IN')}</div>
+      <div style="font-size:0.72rem; color:#475569; margin-top:0.15rem;">After Tomato Comm &amp; Coupon Deductions</div>
+    </div>
+  `;
+}
+
+function renderAdminPartnerBillingTable() {
+  const container = document.getElementById('admin-partner-billing-table-container');
+  if (!container) return;
+
+  const q = (document.getElementById('admin-billing-search-input')?.value || '').trim().toLowerCase();
+  let list = adminPartnerBillingData;
+
+  if (q) {
+    list = list.filter((p) => {
+      const hay = `${p.name} ${p.partnerCode} ${p.phone} ${p.email} ${p.partnerType}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }
+
+  if (!list.length) {
+    container.innerHTML = `
+      <div style="padding:2.5rem 1rem; text-align:center; color:var(--muted); background:#fcfaf5; border:1px dashed var(--line); border-radius:8px;">
+        <div style="font-size:2rem; margin-bottom:0.4rem;">📑</div>
+        <p style="font-size:0.95rem; font-weight:700; color:var(--charcoal);">No partner billing records found</p>
+        <p style="font-size:0.8rem; margin:0;">${q ? `No partners matched "${escapeHtml(q)}".` : 'No orders or activity recorded for this period.'}</p>
+      </div>
+    `;
+    return;
+  }
+
+  const rows = list.map((p) => {
+    const isShop = p.partnerType === 'shop';
+    const isRider = p.partnerType === 'deliveryPartner';
+    const typeIcon = isShop ? '🏬' : isRider ? '🚴' : '🏪';
+    const typeLabel = isShop ? 'Shop' : isRider ? 'Rider' : 'Restaurant';
+    const typeBadge = isShop
+      ? '<span class="badge" style="background:#eff6ff; color:#1d4ed8; border:1px solid #dbeafe; font-size:0.7rem; font-weight:700;">🏬 Shop</span>'
+      : isRider
+      ? '<span class="badge" style="background:#f0fdf4; color:#15803d; border:1px solid #dcfce7; font-size:0.7rem; font-weight:700;">🚴 Rider</span>'
+      : '<span class="badge" style="background:#fff7ed; color:#c2410c; border:1px solid #ffedd5; font-size:0.7rem; font-weight:700;">🏪 Restaurant</span>';
+
+    const hasBank = !!(p.bankDetails && p.bankDetails.accountNumber);
+    const bankApproved = Boolean(p.isBankApproved);
+
+    // Status badge
+    let statusBadge = '';
+    if (p.totalOrders === 0) {
+      statusBadge = '<span class="badge badge-preparing" style="font-size:0.7rem;">⚪ No Orders This Week</span>';
+    } else if (p.totalPending > 0) {
+      statusBadge = `<span class="badge badge-pending" style="font-size:0.72rem; font-weight:700;">⏳ Pending: ₹${p.totalPending.toLocaleString('en-IN')}</span>`;
+    } else {
+      statusBadge = '<span class="badge badge-delivered" style="font-size:0.72rem; font-weight:700;">✅ Fully Settled</span>';
+    }
+
+    // Action button
+    let actionBtnHtml = '';
+    if (p.totalPending > 0) {
+      if (!bankApproved) {
+        actionBtnHtml = `
+          <button type="button" class="btn btn-outline btn-sm" style="font-size:0.74rem; color:#dc2626; border-color:#fca5a5;" onclick="switchView('admin-bank'); quickFilterSettlementsById('${escapeHtml(p.partnerCode)}');">
+            ⚠️ Approve Bank KYC First
+          </button>
+        `;
+      } else {
+        actionBtnHtml = `
+          <button
+            type="button"
+            class="btn btn-success btn-sm"
+            style="font-size:0.76rem; font-weight:700; white-space:nowrap; padding:0.3rem 0.65rem;"
+            onclick="disbursePartnerWeeklyBillingPayout('${escapeHtml(p.partnerType)}', '${escapeHtml(p.partnerId)}', '${escapeHtml(p.name)}', ${p.totalPending})"
+          >
+            💸 Pay Pending (₹${p.totalPending.toLocaleString('en-IN')})
+          </button>
+        `;
+      }
+    } else if (p.totalOrders > 0) {
+      actionBtnHtml = `<span style="font-size:0.74rem; color:#15803d; font-weight:700;">✓ Settled</span>`;
+    } else {
+      actionBtnHtml = `<span style="font-size:0.74rem; color:var(--muted);">—</span>`;
+    }
+
+    return `
+      <tr>
+        <td>
+          <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
+            <strong>${typeIcon} ${escapeHtml(p.name)}</strong>
+            ${typeBadge}
+          </div>
+          <div style="font-size:0.76rem; color:var(--muted); margin-top:2px; display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
+            <span style="font-family:monospace; font-weight:700; color:#1e40af; background:#dbeafe; padding:1px 5px; border-radius:4px; font-size:0.7rem;">🆔 ${escapeHtml(p.partnerCode)}</span>
+            ${p.phone ? `<span>📞 ${escapeHtml(p.phone)}</span>` : ''}
+          </div>
+        </td>
+        <td>
+          ${hasBank ? `
+            <div style="font-size:0.78rem; font-weight:700; color:var(--charcoal);">${escapeHtml(p.bankDetails.bankName || 'Bank Account')}</div>
+            <div style="font-family:monospace; font-size:0.73rem; color:var(--muted);">A/C: ${escapeHtml(p.bankDetails.accountNumber)} • ${escapeHtml(p.bankDetails.ifscCode || '')}</div>
+            <div style="margin-top:2px;">
+              ${bankApproved ? '<span class="badge badge-delivered" style="font-size:0.65rem; padding:1px 5px;">KYC Approved</span>' : '<span class="badge badge-pending" style="font-size:0.65rem; padding:1px 5px;">KYC Pending</span>'}
+            </div>
+          ` : '<span style="color:#dc2626; font-size:0.74rem; font-weight:600;">⚠️ No Bank Details</span>'}
+        </td>
+        <td style="text-align:center;">
+          <div style="font-weight:800; font-size:0.92rem; color:var(--ink);">${p.totalOrders}</div>
+          <div style="font-size:0.7rem; color:var(--muted);">orders</div>
+        </td>
+        <td style="text-align:right;">
+          <div style="font-weight:700; color:var(--ink); font-size:0.86rem;">₹${Number(p.grossVolume || 0).toLocaleString('en-IN')}</div>
+          ${!isRider ? `<div style="font-size:0.7rem; color:var(--muted);">Comm: -₹${Number(p.tomatoCommission || 0).toLocaleString('en-IN')}</div>` : ''}
+          ${p.discountsFunded > 0 ? `<div style="font-size:0.7rem; color:#dc2626;">Disc: -₹${Number(p.discountsFunded).toLocaleString('en-IN')}</div>` : ''}
+        </td>
+        <td style="text-align:right;">
+          <div style="font-weight:800; color:#15803d; font-size:0.9rem;">₹${p.totalPaid.toLocaleString('en-IN')}</div>
+          <div style="font-size:0.68rem; color:#15803d; font-weight:600;">disbursed to bank</div>
+        </td>
+        <td style="text-align:right;">
+          <div style="font-weight:800; color:${p.totalPending > 0 ? '#b91c1c' : '#15803d'}; font-size:0.92rem;">
+            ₹${p.totalPending.toLocaleString('en-IN')}
+          </div>
+          <div style="font-size:0.68rem; color:${p.totalPending > 0 ? '#b91c1c' : '#15803d'}; font-weight:600;">
+            ${p.totalPending > 0 ? 'owed by Tomato' : 'all settled'}
+          </div>
+        </td>
+        <td style="text-align:center;">
+          ${statusBadge}
+        </td>
+        <td style="text-align:right;">
+          <div style="display:flex; flex-direction:column; gap:0.25rem; align-items:flex-end;">
+            ${actionBtnHtml}
+            <button
+              type="button"
+              class="btn btn-outline btn-sm"
+              style="font-size:0.7rem; padding:0.15rem 0.45rem;"
+              onclick="switchAdminPartnerBillingTab('settlements'); quickFilterSettlementsById('${escapeHtml(p.partnerCode)}');"
+              title="View individual order settlements"
+            >
+              Order Ledger ↗
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  container.innerHTML = `
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Partner / Rider</th>
+            <th>Bank &amp; KYC Status</th>
+            <th style="text-align:center;">Orders</th>
+            <th style="text-align:right;">Total Volume &amp; Comm</th>
+            <th style="text-align:right;">Total Paid (₹)</th>
+            <th style="text-align:right;">Still Pending (₹)</th>
+            <th style="text-align:center;">Payout Status</th>
+            <th style="text-align:right;">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function disbursePartnerWeeklyBillingPayout(partnerType, partnerId, partnerName, pendingAmount) {
+  if (!confirm(`Are you sure you want to disburse the weekly pending payout of ₹${Number(pendingAmount).toLocaleString('en-IN')} from Tomato central account to ${partnerName}?`)) {
+    return;
+  }
+
+  try {
+    const res = await apiFetch(`/api/admin/billing/partners/${encodeURIComponent(partnerType)}/${encodeURIComponent(partnerId)}/settle`, {
+      method: 'POST',
+    });
+    alert(res.message || 'Weekly payout disbursed successfully!');
+    fetchAdminPartnerBilling();
+  } catch (err) {
+    alert(err.message || 'Unable to disburse weekly payout.');
+  }
+}
+
+function exportAdminPartnerBillingCsv() {
+  if (!adminPartnerBillingData.length) {
+    alert('No partner billing records to export.');
+    return;
+  }
+
+  const weekStr = document.getElementById('admin-billing-week-input')?.value || 'current';
+  const headers = [
+    'Partner ID',
+    'Partner Name',
+    'Type',
+    'Phone',
+    'Bank Name',
+    'Account Number',
+    'IFSC',
+    'KYC Approved',
+    'Orders Count',
+    'Gross Volume (INR)',
+    'Commission Deducted (INR)',
+    'Discount Funded (INR)',
+    'Total Paid (INR)',
+    'Still Pending (INR)',
+    'Status',
+  ];
+
+  const rows = adminPartnerBillingData.map((p) => [
+    p.partnerCode || p.partnerId,
+    p.name || '',
+    p.partnerType === 'shop' ? 'Shop' : p.partnerType === 'deliveryPartner' ? 'Rider' : 'Restaurant',
+    p.phone || '',
+    p.bankDetails?.bankName || '',
+    p.bankDetails?.accountNumber ? `'${p.bankDetails.accountNumber}` : '',
+    p.bankDetails?.ifscCode || '',
+    p.isBankApproved ? 'Yes' : 'No',
+    p.totalOrders || 0,
+    Number(p.grossVolume || 0).toFixed(2),
+    Number(p.tomatoCommission || 0).toFixed(2),
+    Number(p.discountsFunded || 0).toFixed(2),
+    Number(p.totalPaid || 0).toFixed(2),
+    Number(p.totalPending || 0).toFixed(2),
+    p.payoutStatus || 'settled',
+  ]);
+
+  const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))].join('\n');
+  const encodedUri = encodeURI(csvContent);
+  const link = document.createElement('a');
+  link.setAttribute('href', encodedUri);
+  link.setAttribute('download', `Tomato_Partners_Weekly_Billing_${weekStr}_${Date.now()}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+window.switchAdminPartnerBillingTab = switchAdminPartnerBillingTab;
+window.refreshAdminPartnerBillingCurrentTab = refreshAdminPartnerBillingCurrentTab;
+window.fetchAdminPartnerBilling = fetchAdminPartnerBilling;
+window.renderAdminPartnerBillingKPIs = renderAdminPartnerBillingKPIs;
+window.renderAdminPartnerBillingTable = renderAdminPartnerBillingTable;
+window.setAdminBillingCurrentWeek = setAdminBillingCurrentWeek;
+window.setAdminBillingPrevWeek = setAdminBillingPrevWeek;
+window.setAdminBillingAllTime = setAdminBillingAllTime;
+window.resetAdminBillingFilters = resetAdminBillingFilters;
+window.disbursePartnerWeeklyBillingPayout = disbursePartnerWeeklyBillingPayout;
+window.exportAdminPartnerBillingCsv = exportAdminPartnerBillingCsv;
+
 function getPartnerBankApiEndpoint() {
   if (role === "shop") return "/api/shop/bank-details";
   if (role === "deliveryPartner") return "/api/rider/bank-details";
@@ -11332,32 +12394,33 @@ if (role === "deliveryPartner") {
 }
     }
     if (adminNoteEl) {
-adminNoteEl.textContent = bd.adminNote ? `Admin Note: ${bd.adminNote}` : "";
+      const noteLabelPrefix = role === "deliveryPartner" ? "Admin Note :" : "FSSAI No. :";
+      adminNoteEl.textContent = bd.adminNote ? `${noteLabelPrefix} ${bd.adminNote}` : "";
     }
 
     const noteLabel = document.getElementById("partner-bank-note-label");
     const noteInput = document.getElementById("partner-bank-note");
     const noteHint = document.getElementById("partner-bank-note-hint");
     if (role === "deliveryPartner") {
-if (noteLabel) {
-  noteLabel.textContent = "Admin Verification / Agreement Note (Driving Licence Number & Expiry) *";
-}
-if (noteInput) {
-  noteInput.placeholder = "Rider has to share Licence number & expiry (e.g. DL-0420110149646, Exp: 12/2032)";
-}
-if (noteHint) {
-  noteHint.textContent = "📌 Mandatory for Rider: Please enter your Driving Licence Number and Expiry Date.";
-}
+      if (noteLabel) {
+        noteLabel.textContent = "Agreement Note (Driving Licence Number & Expiry) *";
+      }
+      if (noteInput) {
+        noteInput.placeholder = "Rider has to share Licence number & expiry (e.g. DL-0420110149646, Exp: 12/2032)";
+      }
+      if (noteHint) {
+        noteHint.textContent = "📌 Mandatory for Rider: Please enter your Driving Licence Number and Expiry Date.";
+      }
     } else {
-if (noteLabel) {
-  noteLabel.textContent = "Admin Verification / Agreement Note (FSSAI Registration Number & Expiry) *";
-}
-if (noteInput) {
-  noteInput.placeholder = "Shop and restaurant has to share FSSAI registration number and expiry (e.g. FSSAI: 11223344556677, Exp: 08/2028)";
-}
-if (noteHint) {
-  noteHint.textContent = "📌 Mandatory for Shop & Restaurant: Please enter your FSSAI Registration Number and Expiry Date.";
-}
+      if (noteLabel) {
+        noteLabel.textContent = "Agreement Note (FSSAI Registration Number & Expiry) *";
+      }
+      if (noteInput) {
+        noteInput.placeholder = "Shop and restaurant has to share FSSAI registration number and expiry (e.g. FSSAI: 11223344556677, Exp: 08/2028)";
+      }
+      if (noteHint) {
+        noteHint.textContent = "📌 Mandatory for Shop & Restaurant: Please enter your FSSAI Registration Number and Expiry Date.";
+      }
     }
 
     const fields = [
@@ -11457,9 +12520,9 @@ window.savePartnerBankDetails = savePartnerBankDetails;
 
 
 // =========================================================================
-// ADMIN: COUPON & DISCOUNT MANAGEMENT + CUSTOMER BILLING COUPONS (MAX 2)
+// ADMIN: COUPON & DISCOUNT MANAGEMENT + CUSTOMER BILLING COUPON (MAX 1)
 // =========================================================================
-const MAX_COUPONS_PER_ORDER_LIMIT = 2;
+const MAX_COUPONS_PER_ORDER_LIMIT = 1;
 const COUPON_TYPE_META = {
   restaurant_item_category: { icon: '🍽️', label: 'Restaurant Item Category', badgeBg: '#ffedd5', badgeColor: '#c2410c' },
   category_occasion: { icon: '🥂', label: 'Category Occasion', badgeBg: '#fae8ff', badgeColor: '#a21caf' },
@@ -11480,10 +12543,44 @@ let appliedCouponCodes = [];
 let appliedCouponsBreakdown = [];
 let appliedTotalDiscount = 0;
 
+function saveCartCouponsToStorage() {
+  try {
+    localStorage.setItem(
+      getCustomerCartCouponsStorageKey(),
+      JSON.stringify({
+        appliedCouponCodes,
+        appliedCouponsBreakdown,
+        appliedTotalDiscount,
+      })
+    );
+  } catch (_) {}
+}
+
+function loadSavedCartCouponsFromStorage() {
+  try {
+    const raw = localStorage.getItem(getCustomerCartCouponsStorageKey());
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.appliedCouponCodes)) {
+      appliedCouponCodes = parsed.appliedCouponCodes.slice(0, MAX_COUPONS_PER_ORDER_LIMIT);
+      appliedCouponsBreakdown = Array.isArray(parsed.appliedCouponsBreakdown)
+        ? parsed.appliedCouponsBreakdown.slice(0, MAX_COUPONS_PER_ORDER_LIMIT)
+        : [];
+      appliedTotalDiscount = appliedCouponsBreakdown.length
+        ? Number(appliedCouponsBreakdown.reduce((s, c) => s + Number(c.discountAmount || 0), 0).toFixed(2))
+        : Number(parsed.appliedTotalDiscount || 0);
+    }
+  } catch (_) {}
+}
+if (cart.length) {
+  loadSavedCartCouponsFromStorage();
+}
+
 function resetAppliedCouponsState() {
   appliedCouponCodes = [];
   appliedCouponsBreakdown = [];
   appliedTotalDiscount = 0;
+  saveCartCouponsToStorage();
 }
 
 function getActiveCartDiscountAmount(subtotalOverride) {
@@ -11556,9 +12653,9 @@ function renderAdminCouponsKPIs() {
       <div style="font-size:0.74rem; color:var(--muted); margin-top:0.15rem;">Tracked per user &amp; order</div>
     </div>
     <div style="background:#fff; border:1px solid var(--line); border-radius:10px; padding:0.85rem 1rem;">
-      <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:700;">Stacking Policy</div>
-      <div style="font-size:1.35rem; font-weight:800; color:#1d4ed8; margin-top:0.2rem;">Max 2 / Billing</div>
-      <div style="font-size:0.74rem; color:var(--muted); margin-top:0.15rem;">Customers can combine up to 2 coupons</div>
+      <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:700;">Coupon Policy</div>
+      <div style="font-size:1.35rem; font-weight:800; color:#1d4ed8; margin-top:0.2rem;">Max 1 / Billing</div>
+      <div style="font-size:0.74rem; color:var(--muted); margin-top:0.15rem;">Customers can use only 1 coupon per order</div>
     </div>
   `;
 }
@@ -11568,17 +12665,19 @@ function renderAdminCouponsTable() {
   if (!container) return;
 
   const typeFilter = document.getElementById('admin-coupon-type-filter')?.value || 'all';
+  const sponsorFilter = document.getElementById('admin-coupon-sponsor-filter')?.value || 'all';
   const storeFilter = document.getElementById('admin-coupon-store-filter')?.value || 'all';
   const statusFilter = document.getElementById('admin-coupon-status-filter')?.value || 'all';
   const searchVal = (document.getElementById('admin-coupon-search')?.value || '').trim().toLowerCase();
 
   const filtered = adminCouponsCache.filter((c) => {
     if (typeFilter !== 'all' && c.couponType !== typeFilter) return false;
+    if (sponsorFilter !== 'all' && (c.sponsorType || 'tomato') !== sponsorFilter) return false;
     if (storeFilter !== 'all' && c.applicableStoreType !== storeFilter && c.applicableStoreType !== 'all') return false;
     if (statusFilter === 'active' && !c.isActive) return false;
     if (statusFilter === 'inactive' && c.isActive) return false;
     if (searchVal) {
-      const hay = `${c.code || ''} ${c.title || ''} ${c.description || ''} ${c.couponType || ''} ${c.targetItemCategory || ''} ${c.occasionName || ''} ${c.targetUserIdentifier || ''}`.toLowerCase();
+      const hay = `${c.code || ''} ${c.title || ''} ${c.description || ''} ${c.couponType || ''} ${c.sponsorType || ''} ${c.partnerName || ''} ${c.targetItemCategory || ''} ${c.occasionName || ''} ${c.targetUserIdentifier || ''}`.toLowerCase();
       if (!hay.includes(searchVal)) return false;
     }
     return true;
@@ -11595,6 +12694,7 @@ function renderAdminCouponsTable() {
         <thead>
           <tr>
             <th>Code &amp; Title</th>
+            <th>Sponsor &amp; Funding</th>
             <th>Coupon Category</th>
             <th>Discount &amp; Billing Rules</th>
             <th>Target / Eligibility</th>
@@ -11610,6 +12710,19 @@ function renderAdminCouponsTable() {
             const discountBadge = c.discountType === 'percentage'
               ? `${c.discountValue}% OFF${c.maxDiscountAmount > 0 ? ` (Up to ₹${c.maxDiscountAmount})` : ''}`
               : `Flat ₹${c.discountValue} OFF`;
+
+            let sponsorBadge = '';
+            const sType = c.sponsorType || 'tomato';
+            if (sType === 'tomato') {
+              sponsorBadge = `<span style="display:inline-flex; flex-direction:column; background:#fee2e2; color:#991b1b; font-weight:800; font-size:0.72rem; padding:0.2rem 0.55rem; border-radius:999px; border:1px solid #fca5a5; line-height:1.25;"><span>🍅 Tomato Specific</span><span style="font-weight:600; font-size:0.67rem; opacity:0.9;">100% Tomato Paid</span></span>`;
+            } else if (sType === 'common') {
+              sponsorBadge = `<span style="display:inline-flex; flex-direction:column; background:#ede9fe; color:#5b21b6; font-weight:800; font-size:0.72rem; padding:0.2rem 0.55rem; border-radius:999px; border:1px solid #c4b5fd; line-height:1.25;"><span>🤝 Common Coupon</span><span style="font-weight:600; font-size:0.67rem; opacity:0.9;">Shared by Agreement %</span></span>`;
+            } else if (sType === 'restaurant') {
+              sponsorBadge = `<span style="display:inline-flex; flex-direction:column; background:#ffedd5; color:#9a3412; font-weight:800; font-size:0.72rem; padding:0.2rem 0.55rem; border-radius:999px; border:1px solid #fdba74; line-height:1.25;"><span>🍽️ Restaurant Specific</span><span style="font-weight:600; font-size:0.67rem; opacity:0.9;">${escapeHtml(c.partnerName || 'Store')} (100% Store)</span></span>`;
+            } else if (sType === 'shop') {
+              sponsorBadge = `<span style="display:inline-flex; flex-direction:column; background:#fef3c7; color:#92400e; font-weight:800; font-size:0.72rem; padding:0.2rem 0.55rem; border-radius:999px; border:1px solid #fcd34d; line-height:1.25;"><span>🛍️ Shop Specific</span><span style="font-weight:600; font-size:0.67rem; opacity:0.9;">${escapeHtml(c.partnerName || 'Store')} (100% Store)</span></span>`;
+            }
+
             const targetParts = [];
             if (c.targetItemCategory) targetParts.push(`<span style="color:#1e3a8a; font-weight:700;">Category: ${escapeHtml(c.targetItemCategory)}</span>`);
             if (c.occasionName) targetParts.push(`<span>Occasion: <strong>${escapeHtml(c.occasionName)}</strong></span>`);
@@ -11634,6 +12747,9 @@ function renderAdminCouponsTable() {
                   </div>
                   <div style="font-weight:700; color:var(--ink); margin-top:0.25rem; font-size:0.84rem;">${escapeHtml(c.title)}</div>
                   ${c.description ? `<div style="font-size:0.74rem; color:var(--muted); max-width:250px;">${escapeHtml(c.description)}</div>` : ''}
+                </td>
+                <td>
+                  ${sponsorBadge}
                 </td>
                 <td>
                   <span style="display:inline-flex; align-items:center; gap:0.3rem; background:${meta.badgeBg}; color:${meta.badgeColor}; font-weight:700; font-size:0.75rem; padding:0.24rem 0.6rem; border-radius:999px;">
@@ -11775,6 +12891,8 @@ function openAdminCouponForm(presetType) {
     const typeSelect = document.getElementById('adm-coupon-type');
     if (typeSelect) typeSelect.value = presetType;
   }
+  const sponsorSelect = document.getElementById('adm-coupon-sponsor-type');
+  if (sponsorSelect) sponsorSelect.value = 'tomato';
   onAdminCouponTypeChange();
   onAdminCouponDiscountTypeChange();
   generateAdminCouponCode();
@@ -11797,6 +12915,8 @@ function editAdminCoupon(couponId) {
 
   document.getElementById('adm-coupon-id').value = c._id;
   document.getElementById('admin-coupon-form-title').textContent = `✏️ Edit Coupon: ${c.code}`;
+  const sponsorSelect = document.getElementById('adm-coupon-sponsor-type');
+  if (sponsorSelect) sponsorSelect.value = c.sponsorType || 'tomato';
   document.getElementById('adm-coupon-type').value = c.couponType || 'restaurant_item_category';
   document.getElementById('adm-coupon-code').value = c.code || '';
   document.getElementById('adm-coupon-title').value = c.title || '';
@@ -11834,6 +12954,7 @@ async function saveAdminCoupon(event) {
   const couponId = document.getElementById('adm-coupon-id')?.value.trim();
   const payload = {
     code: (document.getElementById('adm-coupon-code')?.value || '').trim().toUpperCase(),
+    sponsorType: document.getElementById('adm-coupon-sponsor-type')?.value || 'tomato',
     title: (document.getElementById('adm-coupon-title')?.value || '').trim(),
     description: (document.getElementById('adm-coupon-description')?.value || '').trim(),
     couponType: document.getElementById('adm-coupon-type')?.value || 'restaurant_item_category',
@@ -11901,13 +13022,430 @@ async function deleteAdminCoupon(couponId) {
 }
 
 // =========================================================================
+// PARTNER (RESTAURANT & SHOP) COUPON MANAGEMENT
+// =========================================================================
+let partnerCouponsCache = [];
+let partnerCouponsSummary = {};
+
+async function fetchPartnerCoupons() {
+  const container = document.getElementById('partner-coupons-table-container');
+  const roleBadge = document.getElementById('partner-coupons-role-badge');
+  const endpoint = role === 'shop' ? '/api/shop/coupons' : '/api/restaurant/coupons';
+
+  if (roleBadge) {
+    roleBadge.textContent = role === 'shop' ? '🛍️ Shop Specific' : '🍽️ Restaurant Specific';
+  }
+
+  try {
+    const res = await apiFetch(endpoint);
+    partnerCouponsCache = Array.isArray(res.coupons) ? res.coupons : [];
+    partnerCouponsSummary = res.summary || {};
+    renderPartnerCouponsKPIs();
+    renderPartnerCouponsTable();
+  } catch (err) {
+    console.error('Failed to load partner coupons:', err);
+    if (container) {
+      container.innerHTML = `<p style="color:var(--tomato); padding:1rem;">Failed to load store coupons: ${escapeHtml(err.message)}</p>`;
+    }
+  }
+}
+
+function renderPartnerCouponsKPIs() {
+  const kpiEl = document.getElementById('partner-coupons-kpis');
+  if (!kpiEl) return;
+  const total = partnerCouponsCache.length;
+  const activeCount = partnerCouponsCache.filter((c) => c.isActive).length;
+  const redemptions = partnerCouponsCache.reduce((sum, c) => sum + Number(c.usedCount || 0), 0);
+  const totalDiscounts = Number(partnerCouponsSummary.totalDiscountGiven || 0);
+
+  kpiEl.innerHTML = `
+    <div style="background:#fff; border:1px solid var(--line); border-radius:10px; padding:0.85rem 1rem;">
+      <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:700;">Store Coupons</div>
+      <div style="font-size:1.5rem; font-weight:800; color:var(--ink); margin-top:0.2rem;">${total}</div>
+      <div style="font-size:0.74rem; color:var(--muted); margin-top:0.15rem;">Custom offers for your store</div>
+    </div>
+    <div style="background:#fff; border:1px solid var(--line); border-radius:10px; padding:0.85rem 1rem;">
+      <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:700;">Active Coupons</div>
+      <div style="font-size:1.5rem; font-weight:800; color:var(--green); margin-top:0.2rem;">${activeCount}</div>
+      <div style="font-size:0.74rem; color:var(--muted); margin-top:0.15rem;">Paused / Inactive: ${total - activeCount}</div>
+    </div>
+    <div style="background:#fff; border:1px solid var(--line); border-radius:10px; padding:0.85rem 1rem;">
+      <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:700;">Customer Redemptions</div>
+      <div style="font-size:1.5rem; font-weight:800; color:#c2410c; margin-top:0.2rem;">${redemptions}</div>
+      <div style="font-size:0.74rem; color:var(--muted); margin-top:0.15rem;">Times availed by your customers</div>
+    </div>
+    <div style="background:#fff; border:1px solid var(--line); border-radius:10px; padding:0.85rem 1rem;">
+      <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:700;">Discount Funded (₹)</div>
+      <div style="font-size:1.5rem; font-weight:800; color:#4338ca; margin-top:0.2rem;">₹${totalDiscounts.toFixed(2)}</div>
+      <div style="font-size:0.74rem; color:var(--muted); margin-top:0.15rem;">100% store funded settlement</div>
+    </div>
+  `;
+}
+
+function renderPartnerCouponsTable() {
+  const container = document.getElementById('partner-coupons-table-container');
+  if (!container) return;
+
+  const statusFilter = document.getElementById('partner-coupon-status-filter')?.value || 'all';
+  const searchVal = (document.getElementById('partner-coupon-search')?.value || '').trim().toLowerCase();
+
+  const filtered = partnerCouponsCache.filter((c) => {
+    if (statusFilter === 'active' && !c.isActive) return false;
+    if (statusFilter === 'inactive' && c.isActive) return false;
+    if (searchVal) {
+      const hay = `${c.code || ''} ${c.title || ''} ${c.description || ''} ${c.targetItemCategory || ''} ${c.occasionName || ''}`.toLowerCase();
+      if (!hay.includes(searchVal)) return false;
+    }
+    return true;
+  });
+
+  if (!filtered.length) {
+    container.innerHTML = `
+      <div style="text-align:center; padding:2rem 1rem; background:#fff; border:1px dashed var(--line); border-radius:10px; margin-top:0.5rem;">
+        <div style="font-size:2rem; margin-bottom:0.4rem;">🎟️</div>
+        <div style="font-weight:700; color:var(--ink); font-size:0.95rem; margin-bottom:0.25rem;">No store coupons found</div>
+        <p style="color:var(--muted); margin:0 0 1rem 0; font-size:0.82rem;">Create promotional discount coupons for your store to attract more customer orders.</p>
+        <button type="button" class="btn btn-primary btn-sm" onclick="openPartnerCouponForm()">➕ Create Store Coupon</button>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Coupon Code &amp; Title</th>
+            <th>Discount Mode &amp; Rules</th>
+            <th>Target Category / Tag</th>
+            <th>Usage &amp; Expiry</th>
+            <th>Funding Sponsor</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${filtered.map((c) => {
+            const discountBadge = c.discountType === 'percentage'
+              ? `${c.discountValue}% OFF${c.maxDiscountAmount > 0 ? ` (Up to ₹${c.maxDiscountAmount})` : ''}`
+              : `Flat ₹${c.discountValue} OFF`;
+            const expiryStr = c.validUntil ? new Date(c.validUntil).toLocaleDateString() : 'No Expiry';
+            const isExpired = c.validUntil && new Date(c.validUntil).getTime() < Date.now();
+            const sponsorLabel = role === 'shop' ? '🛍️ Shop Funded (100%)' : '🍽️ Restaurant Funded (100%)';
+
+            return `
+              <tr>
+                <td>
+                  <div style="font-family:monospace; font-weight:800; font-size:0.92rem; color:#c2410c; background:#fff7ed; border:1px dashed #fdba74; display:inline-block; padding:0.15rem 0.5rem; border-radius:5px;">
+                    ${escapeHtml(c.code)}
+                  </div>
+                  <div style="font-weight:700; color:var(--ink); margin-top:0.25rem; font-size:0.84rem;">${escapeHtml(c.title)}</div>
+                  ${c.description ? `<div style="font-size:0.74rem; color:var(--muted); max-width:250px;">${escapeHtml(c.description)}</div>` : ''}
+                </td>
+                <td>
+                  <div style="font-weight:800; color:var(--green); font-size:0.86rem;">${escapeHtml(discountBadge)}</div>
+                  <div style="font-size:0.75rem; color:var(--muted);">Min Order: <strong>₹${Number(c.minOrderAmount || 0)}</strong></div>
+                </td>
+                <td style="font-size:0.78rem;">
+                  <div>${c.targetItemCategory ? `<span style="color:#1e3a8a; font-weight:700;">Category: ${escapeHtml(c.targetItemCategory)}</span>` : '<span style="color:var(--muted);">All Items</span>'}</div>
+                  ${c.occasionName ? `<div style="color:var(--muted); margin-top:0.1rem;">Tag: ${escapeHtml(c.occasionName)}</div>` : ''}
+                </td>
+                <td style="font-size:0.76rem;">
+                  <div>Redemptions: <strong>${Number(c.usedCount || 0)}</strong>${c.totalUsageLimit > 0 ? ` / ${c.totalUsageLimit}` : ' (Unlimited)'}</div>
+                  <div style="color:var(--muted);">Per Customer: ${c.usageLimitPerUser > 0 ? c.usageLimitPerUser : '∞'}</div>
+                  <div style="color:${isExpired ? '#dc2626' : 'var(--muted)'};">Valid till: ${expiryStr}</div>
+                </td>
+                <td>
+                  <span style="display:inline-flex; align-items:center; gap:0.25rem; background:#fef3c7; color:#92400e; font-weight:700; font-size:0.73rem; padding:0.18rem 0.55rem; border-radius:999px; border:1px solid #fcd34d;">
+                    ${sponsorLabel}
+                  </span>
+                </td>
+                <td>
+                  <span class="badge ${c.isActive && !isExpired ? 'badge-approved' : 'badge-blocked'}">
+                    ${!c.isActive ? 'Paused' : isExpired ? 'Expired' : 'Active'}
+                  </span>
+                </td>
+                <td>
+                  <div style="display:flex; gap:0.35rem; flex-wrap:wrap;">
+                    <button type="button" class="btn btn-outline btn-sm" style="padding:0.22rem 0.55rem; font-size:0.74rem;" onclick="editPartnerCoupon('${c._id || c.id}')">✏️ Edit</button>
+                    <button type="button" class="btn btn-outline btn-sm" style="padding:0.22rem 0.55rem; font-size:0.74rem;" onclick="togglePartnerCouponStatus('${c._id || c.id}')">${c.isActive ? '⏸ Pause' : '▶ Enable'}</button>
+                    <button type="button" class="btn btn-danger btn-sm" style="padding:0.22rem 0.55rem; font-size:0.74rem;" onclick="deletePartnerCoupon('${c._id || c.id}')">🗑️</button>
+                  </div>
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function onPartnerCouponDiscountTypeChange() {
+  const mode = document.getElementById('partner-coupon-discount-type')?.value || 'percentage';
+  const label = document.getElementById('partner-coupon-discount-val-label');
+  const maxCapInput = document.getElementById('partner-coupon-max-discount');
+  if (label) {
+    label.innerHTML = mode === 'percentage'
+      ? 'Discount Value (%) <span style="color:var(--tomato);">*</span>'
+      : 'Flat Discount Amount (₹) <span style="color:var(--tomato);">*</span>';
+  }
+  if (maxCapInput && mode === 'flat') {
+    maxCapInput.value = '0';
+  }
+}
+
+function generatePartnerCouponCode() {
+  const prefix = role === 'shop' ? 'SHOP' : 'REST';
+  const rand = Math.floor(1000 + Math.random() * 9000);
+  const codeInput = document.getElementById('partner-coupon-code');
+  if (codeInput) codeInput.value = `${prefix}${rand}`;
+}
+
+function openPartnerCouponForm() {
+  const card = document.getElementById('partner-coupon-form-card');
+  const form = document.getElementById('partner-coupon-form');
+  if (!card || !form) return;
+
+  form.reset();
+  const idEl = document.getElementById('partner-coupon-id');
+  if (idEl) idEl.value = '';
+
+  const titleHeaderEl = document.getElementById('partner-coupon-form-title');
+  if (titleHeaderEl) titleHeaderEl.textContent = '➕ Create Store Coupon';
+
+  const activeEl = document.getElementById('partner-coupon-active');
+  if (activeEl) activeEl.checked = true;
+
+  const future = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
+  const yyyy = future.getFullYear();
+  const mm = String(future.getMonth() + 1).padStart(2, '0');
+  const dd = String(future.getDate()).padStart(2, '0');
+  const expiryEl = document.getElementById('partner-coupon-valid-until');
+  if (expiryEl) expiryEl.value = `${yyyy}-${mm}-${dd}`;
+
+  // Prepopulate standard defaults
+  const titleEl = document.getElementById('partner-coupon-title');
+  if (titleEl) {
+    titleEl.value = role === 'shop' ? 'Special Store Discount' : 'Special Dining Discount';
+  }
+  const discountValEl = document.getElementById('partner-coupon-discount-value');
+  if (discountValEl) {
+    discountValEl.value = '15';
+  }
+  const maxDiscountEl = document.getElementById('partner-coupon-max-discount');
+  if (maxDiscountEl) {
+    maxDiscountEl.value = '100';
+  }
+  const minOrderEl = document.getElementById('partner-coupon-min-order');
+  if (minOrderEl) {
+    minOrderEl.value = '199';
+  }
+  const perUserEl = document.getElementById('partner-coupon-per-user-limit');
+  if (perUserEl) {
+    perUserEl.value = '2';
+  }
+  const totalLimitEl = document.getElementById('partner-coupon-total-limit');
+  if (totalLimitEl) {
+    totalLimitEl.value = '200';
+  }
+
+  onPartnerCouponDiscountTypeChange();
+  generatePartnerCouponCode();
+
+  card.style.display = 'block';
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  const codeInput = document.getElementById('partner-coupon-code');
+  if (codeInput) {
+    setTimeout(() => codeInput.focus(), 150);
+  }
+}
+
+function closePartnerCouponForm() {
+  const card = document.getElementById('partner-coupon-form-card');
+  if (card) card.style.display = 'none';
+}
+
+function editPartnerCoupon(couponId) {
+  const c = partnerCouponsCache.find((x) => String(x._id || x.id) === String(couponId));
+  if (!c) return;
+
+  const card = document.getElementById('partner-coupon-form-card');
+  if (!card) return;
+
+  document.getElementById('partner-coupon-id').value = c._id;
+  document.getElementById('partner-coupon-form-title').textContent = `✏️ Edit Store Coupon: ${c.code}`;
+  document.getElementById('partner-coupon-code').value = c.code || '';
+  document.getElementById('partner-coupon-title').value = c.title || '';
+  document.getElementById('partner-coupon-discount-type').value = c.discountType || 'percentage';
+  document.getElementById('partner-coupon-discount-value').value = c.discountValue ?? 15;
+  document.getElementById('partner-coupon-max-discount').value = c.maxDiscountAmount ?? 0;
+  document.getElementById('partner-coupon-min-order').value = c.minOrderAmount ?? 0;
+  document.getElementById('partner-coupon-item-category').value = c.targetItemCategory || '';
+  document.getElementById('partner-coupon-occasion').value = c.occasionName || '';
+  document.getElementById('partner-coupon-per-user-limit').value = c.usageLimitPerUser ?? 2;
+  document.getElementById('partner-coupon-total-limit').value = c.totalUsageLimit ?? 200;
+  document.getElementById('partner-coupon-description').value = c.description || '';
+  document.getElementById('partner-coupon-active').checked = Boolean(c.isActive);
+
+  if (c.validUntil) {
+    const d = new Date(c.validUntil);
+    if (!Number.isNaN(d.getTime())) {
+      document.getElementById('partner-coupon-valid-until').value = d.toISOString().split('T')[0];
+    }
+  } else {
+    document.getElementById('partner-coupon-valid-until').value = '';
+  }
+
+  onPartnerCouponDiscountTypeChange();
+  card.style.display = 'block';
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function savePartnerCoupon(event) {
+  if (event && typeof event.preventDefault === 'function') {
+    event.preventDefault();
+  }
+  const saveBtn = document.getElementById('partner-coupon-save-btn');
+  const originalBtnText = saveBtn ? saveBtn.textContent : '💾 Save Coupon';
+
+  const couponId = (document.getElementById('partner-coupon-id')?.value || '').trim();
+  const endpointBase = role === 'shop' ? '/api/shop/coupons' : '/api/restaurant/coupons';
+
+  const code = (document.getElementById('partner-coupon-code')?.value || '').trim().toUpperCase().replace(/\s+/g, '');
+  const title = (document.getElementById('partner-coupon-title')?.value || '').trim();
+  const description = (document.getElementById('partner-coupon-description')?.value || '').trim();
+  const discountType = document.getElementById('partner-coupon-discount-type')?.value || 'percentage';
+  const discountValue = Number(document.getElementById('partner-coupon-discount-value')?.value || 0);
+  const maxDiscountAmount = Math.max(0, Number(document.getElementById('partner-coupon-max-discount')?.value || 0));
+  const minOrderAmount = Math.max(0, Number(document.getElementById('partner-coupon-min-order')?.value || 0));
+  const targetItemCategory = (document.getElementById('partner-coupon-item-category')?.value || '').trim();
+  const occasionName = (document.getElementById('partner-coupon-occasion')?.value || '').trim();
+  const usageLimitPerUser = Math.max(1, Number(document.getElementById('partner-coupon-per-user-limit')?.value || 1));
+  const totalUsageLimit = Math.max(0, Number(document.getElementById('partner-coupon-total-limit')?.value || 0));
+  const validUntil = document.getElementById('partner-coupon-valid-until')?.value || null;
+  const isActive = Boolean(document.getElementById('partner-coupon-active')?.checked);
+
+  if (!code || code.length < 3) {
+    alert('Please enter a valid coupon code (at least 3 characters).');
+    document.getElementById('partner-coupon-code')?.focus();
+    return;
+  }
+  if (!title) {
+    alert('Please enter a coupon title/headline.');
+    document.getElementById('partner-coupon-title')?.focus();
+    return;
+  }
+  if (!discountValue || discountValue <= 0) {
+    alert('Please enter a discount value greater than 0.');
+    document.getElementById('partner-coupon-discount-value')?.focus();
+    return;
+  }
+  if (discountType === 'percentage' && discountValue > 100) {
+    alert('Percentage discount cannot exceed 100%.');
+    document.getElementById('partner-coupon-discount-value')?.focus();
+    return;
+  }
+
+  const payload = {
+    code,
+    title,
+    description,
+    discountType,
+    discountValue,
+    maxDiscountAmount,
+    minOrderAmount,
+    targetItemCategory,
+    occasionName,
+    usageLimitPerUser,
+    totalUsageLimit,
+    validUntil,
+    isActive,
+  };
+
+  try {
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = '⏳ Saving Coupon...';
+    }
+
+    const endpoint = couponId ? `${endpointBase}/${couponId}` : endpointBase;
+    const method = couponId ? 'PUT' : 'POST';
+    const res = await apiFetch(endpoint, {
+      method,
+      body: JSON.stringify(payload),
+    });
+    closePartnerCouponForm();
+    await fetchPartnerCoupons();
+    const tableContainer = document.getElementById('partner-coupons-table-container');
+    if (tableContainer) {
+      tableContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    if (typeof showAutoDismissNotice === 'function') {
+      showAutoDismissNotice({
+        title: couponId ? 'Store Coupon Updated' : 'Store Coupon Created',
+        message: res.message || `Coupon ${payload.code} saved successfully!`,
+        icon: '🎟️',
+        duration: 3500,
+      });
+    } else {
+      alert(res.message || 'Coupon saved successfully!');
+    }
+  } catch (err) {
+    console.error('Failed to save partner coupon:', err);
+    alert(err.message || 'Failed to save store coupon. Please try again.');
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = originalBtnText;
+    }
+  }
+}
+
+async function togglePartnerCouponStatus(couponId) {
+  const endpointBase = role === 'shop' ? '/api/shop/coupons' : '/api/restaurant/coupons';
+  try {
+    const res = await apiFetch(`${endpointBase}/${couponId}/toggle`, { method: 'PATCH' });
+    await fetchPartnerCoupons();
+    if (typeof showAutoDismissNotice === 'function') {
+      showAutoDismissNotice({
+        title: 'Coupon Status Updated',
+        message: res.message || 'Status updated',
+        icon: '🎟️',
+      });
+    }
+  } catch (err) {
+    alert(err.message || 'Unable to toggle coupon status.');
+  }
+}
+
+async function deletePartnerCoupon(couponId) {
+  const c = partnerCouponsCache.find((x) => String(x._id || x.id) === String(couponId));
+  if (!c) return;
+  if (!window.confirm(`Delete store coupon "${c.code}" permanently?`)) return;
+  const endpointBase = role === 'shop' ? '/api/shop/coupons' : '/api/restaurant/coupons';
+  try {
+    await apiFetch(`${endpointBase}/${couponId}`, { method: 'DELETE' });
+    await fetchPartnerCoupons();
+  } catch (err) {
+    alert(err.message || 'Unable to delete store coupon.');
+  }
+}
+
+// =========================================================================
 // CUSTOMER BILLING: APPLY UP TO 2 COUPONS AT A TIME
 // =========================================================================
 async function fetchCustomerAvailableCoupons() {
   try {
     const isShopOrder = cart[0]?.storeType === 'shop' || customerBrowseMode === 'shop';
     const storeType = isShopOrder ? 'shop' : 'restaurant';
-    const res = await apiFetch(`/api/customer/coupons?storeType=${encodeURIComponent(storeType)}`);
+    const storeId = cart[0]?.restaurantId || cart[0]?.shopId || currentStoreId || '';
+    let url = `/api/customer/coupons?storeType=${encodeURIComponent(storeType)}`;
+    if (storeId) {
+      url += `&storeId=${encodeURIComponent(storeId)}`;
+    }
+    const res = await apiFetch(url);
     customerAvailableCoupons = Array.isArray(res.coupons) ? res.coupons : [];
     customerIsNewUserFlag = Boolean(res.isNewUser);
     renderCheckoutCouponsSection();
@@ -11917,23 +13455,42 @@ async function fetchCustomerAvailableCoupons() {
 }
 
 function setCheckoutCouponFeedback(message, isError = false) {
-  const msgEl = document.getElementById('checkout-coupon-message');
-  if (!msgEl) return;
-  if (!message) {
-    msgEl.style.display = 'none';
-    msgEl.textContent = '';
+  const feedbackIds = [
+    'checkout-coupon-message',
+    'overview-cart-coupon-feedback',
+    'order-cart-coupon-feedback',
+  ];
+  feedbackIds.forEach((id) => {
+    const msgEl = document.getElementById(id);
+    if (!msgEl) return;
+    if (!message) {
+      msgEl.style.display = 'none';
+      msgEl.textContent = '';
+      return;
+    }
+    msgEl.style.display = 'block';
+    msgEl.style.color = isError ? '#dc2626' : '#15803d';
+    msgEl.style.fontWeight = '600';
+    msgEl.textContent = message;
+  });
+}
+
+async function applyCartInlineCouponCode(inputId) {
+  const input = document.getElementById(inputId);
+  const raw = (input?.value || '').trim().toUpperCase();
+  if (!raw) {
+    setCheckoutCouponFeedback('Please enter a coupon code to apply to the bill.', true);
     return;
   }
-  msgEl.style.display = 'block';
-  msgEl.style.color = isError ? '#dc2626' : '#15803d';
-  msgEl.style.fontWeight = '600';
-  msgEl.textContent = message;
+  await toggleCheckoutCouponCode(raw, true);
+  if (input) input.value = '';
 }
 
 async function validateAndSyncCartCoupons({ silent = false } = {}) {
   if (!cart.length || !appliedCouponCodes.length) {
     appliedCouponsBreakdown = [];
     appliedTotalDiscount = 0;
+    saveCartCouponsToStorage();
     updateCartUI();
     updateGatewayBillingSummaryUI();
     renderCheckoutCouponsSection();
@@ -11945,9 +13502,11 @@ async function validateAndSyncCartCoupons({ silent = false } = {}) {
   }
 
   const isShopOrder = cart[0]?.storeType === 'shop' || customerBrowseMode === 'shop';
+  const storeId = cart[0]?.restaurantId || cart[0]?.shopId || currentStoreId || '';
   const payload = {
     couponCodes: appliedCouponCodes,
     storeType: isShopOrder ? 'shop' : 'restaurant',
+    storeId,
     restaurantId: cart[0]?.restaurantId,
     shopId: cart[0]?.restaurantId,
     items: cart.map((i) => ({
@@ -11967,8 +13526,9 @@ async function validateAndSyncCartCoupons({ silent = false } = {}) {
     appliedCouponsBreakdown = Array.isArray(res.appliedCoupons) ? res.appliedCoupons : [];
     appliedCouponCodes = appliedCouponsBreakdown.map((c) => c.code);
     appliedTotalDiscount = Number(res.totalDiscount || 0);
+    saveCartCouponsToStorage();
     if (!silent) {
-      setCheckoutCouponFeedback(res.message || `Applied ${appliedCouponCodes.length} coupon(s)! Saved ₹${appliedTotalDiscount.toFixed(2)}`, false);
+      setCheckoutCouponFeedback(res.message || `Applied ${appliedCouponCodes.length} coupon(s)! Bill reduced by ₹${appliedTotalDiscount.toFixed(2)}`, false);
     }
     updateCartUI();
     updateGatewayBillingSummaryUI();
@@ -12011,7 +13571,7 @@ async function toggleCheckoutCouponCode(code, forceAdd = false) {
   }
 
   if (appliedCouponCodes.length >= MAX_COUPONS_PER_ORDER_LIMIT) {
-    setCheckoutCouponFeedback(`Maximum ${MAX_COUPONS_PER_ORDER_LIMIT} coupons can be availed at a time per order. Remove one coupon to apply another.`, true);
+    setCheckoutCouponFeedback('Only 1 coupon code can be used per order. Remove the applied coupon to use another.', true);
     return;
   }
 
@@ -12036,8 +13596,9 @@ function updateGatewayBillingSummaryUI() {
   const subtotal = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
   const tax = Number((subtotal * 0.05).toFixed(2));
   const deliveryFee = cart.length ? 40 : 0;
+  const grossTotal = Number((subtotal + tax + deliveryFee).toFixed(2));
   const discountAmt = getActiveCartDiscountAmount(subtotal);
-  const finalPayable = Number(Math.max(0, subtotal + tax + deliveryFee - discountAmt).toFixed(2));
+  const finalPayable = Number(Math.max(0, grossTotal - discountAmt).toFixed(2));
 
   const gwAmount = document.getElementById('gateway-amount');
   if (gwAmount) gwAmount.textContent = `₹${finalPayable.toFixed(2)}`;
@@ -12045,13 +13606,35 @@ function updateGatewayBillingSummaryUI() {
   const savingsBadge = document.getElementById('gateway-savings-badge');
   if (savingsBadge) {
     savingsBadge.textContent = discountAmt > 0
-      ? `🎉 You save ₹${discountAmt.toFixed(2)} with ${appliedCouponCodes.length} coupon(s)!`
+      ? `🎉 Bill Reduced by ₹${discountAmt.toFixed(2)} with coupon ${appliedCouponCodes[0] || ''}!`
       : 'No extra gateway fees';
   }
 
   const breakdownEl = document.getElementById('gateway-bill-breakdown');
   if (breakdownEl) {
+    const storeId = String(cart[0]?.restaurantId || '');
+    const matchedRest = (allRestaurants || []).find((r) => String(r._id || r.id) === storeId);
+    const matchedShop = (allShops || []).find((s) => String(s._id || s.id) === storeId);
+    const storeGsn = matchedRest?.gsnNumber || matchedShop?.gsnNumber;
+    const activeGsn = storeGsn && String(storeGsn).trim()
+      ? String(storeGsn).trim()
+      : (window.cachedPlatformGsnNumber || 'NA');
+
+    const individualCouponLines = Array.isArray(appliedCouponsBreakdown) && appliedCouponsBreakdown.length
+      ? appliedCouponsBreakdown.map((c) => `
+          <div style="display:flex; justify-content:space-between; color:#15803d; font-size:0.78rem; font-weight:600;">
+            <span>🎟️ Coupon (${escapeHtml(c.code)}):</span>
+            <span>-₹${Number(c.discountAmount || 0).toFixed(2)}</span>
+          </div>
+        `).join('')
+      : '';
+
     breakdownEl.innerHTML = `
+      ${activeGsn ? `
+      <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:#1e3a8a; padding-bottom:0.2rem; border-bottom:1px dashed var(--line); margin-bottom:0.2rem;">
+        <span>🧾 Billing GSN Number:</span>
+        <strong style="font-family:monospace;">${escapeHtml(activeGsn)}</strong>
+      </div>` : ''}
       <div style="display:flex; justify-content:space-between;">
         <span>Item Subtotal:</span>
         <strong>₹${subtotal.toFixed(2)}</strong>
@@ -12065,33 +13648,56 @@ function updateGatewayBillingSummaryUI() {
         <span>₹${deliveryFee.toFixed(2)}</span>
       </div>
       ${discountAmt > 0 ? `
-      <div style="display:flex; justify-content:space-between; color:var(--green); font-weight:700;">
-        <span>🎟️ Coupons Applied (${appliedCouponCodes.map((c) => escapeHtml(c)).join(' + ')}):</span>
+      <div style="display:flex; justify-content:space-between; color:var(--muted); font-size:0.77rem; border-top:1px dashed var(--line); padding-top:0.2rem;">
+        <span>Gross Bill Total:</span>
+        <span style="text-decoration:line-through;">₹${grossTotal.toFixed(2)}</span>
+      </div>
+      ${individualCouponLines}
+      <div style="display:flex; justify-content:space-between; color:var(--green); font-weight:800;">
+        <span>Total Coupon Bill Reduction (${appliedCouponCodes.map((c) => escapeHtml(c)).join(' + ')}):</span>
         <span>-₹${discountAmt.toFixed(2)}</span>
       </div>` : ''}
+      <div style="display:flex; justify-content:space-between; font-weight:800; color:var(--ink); border-top:1px solid var(--line); padding-top:0.25rem; margin-top:0.15rem;">
+        <span>Net Payable Bill:</span>
+        <span style="color:var(--tomato);">₹${finalPayable.toFixed(2)}</span>
+      </div>
     `;
   }
 }
 
 function renderCheckoutCouponsSection() {
-  const countBadge = document.getElementById('checkout-coupon-count-badge');
-  if (countBadge) {
-    countBadge.textContent = `${appliedCouponCodes.length} / ${MAX_COUPONS_PER_ORDER_LIMIT} Applied`;
-  }
+  const badgeText = `${appliedCouponCodes.length} / ${MAX_COUPONS_PER_ORDER_LIMIT} Applied`;
+  [
+    'checkout-coupon-count-badge',
+    'overview-cart-coupon-count-badge',
+    'order-cart-coupon-count-badge',
+  ].forEach((badgeId) => {
+    const el = document.getElementById(badgeId);
+    if (el) el.textContent = badgeText;
+  });
+
+  const chipsHtml = appliedCouponsBreakdown.map((c) => `
+    <div style="display:inline-flex; align-items:center; gap:0.4rem; background:#dcfce7; border:1px solid #86efac; color:#166534; padding:0.22rem 0.55rem; border-radius:999px; font-size:0.74rem; font-weight:700;">
+      <span>✓ ${escapeHtml(c.code)} (-₹${Number(c.discountAmount || 0).toFixed(2)})</span>
+      <button type="button" onclick="removeCheckoutCouponCode('${escapeHtml(c.code)}')" style="border:none; background:transparent; color:#166534; font-weight:900; cursor:pointer; padding:0 0.15rem; font-size:0.8rem;" title="Remove coupon">✕</button>
+    </div>
+  `).join('');
 
   const appliedListEl = document.getElementById('checkout-applied-coupons-list');
   if (appliedListEl) {
     if (!appliedCouponsBreakdown.length) {
-      appliedListEl.innerHTML = '<span style="font-size:0.75rem; color:var(--muted);">No coupons applied yet. Select up to 2 coupons below or enter a code above.</span>';
+      appliedListEl.innerHTML = '<span style="font-size:0.75rem; color:var(--muted);">No coupon applied yet. Select 1 coupon below or enter a code above.</span>';
     } else {
-      appliedListEl.innerHTML = appliedCouponsBreakdown.map((c) => `
-        <div style="display:inline-flex; align-items:center; gap:0.4rem; background:#dcfce7; border:1px solid #86efac; color:#166534; padding:0.24rem 0.6rem; border-radius:999px; font-size:0.76rem; font-weight:700;">
-          <span>✓ ${escapeHtml(c.code)} (-₹${Number(c.discountAmount || 0).toFixed(2)})</span>
-          <button type="button" onclick="removeCheckoutCouponCode('${escapeHtml(c.code)}')" style="border:none; background:transparent; color:#166534; font-weight:900; cursor:pointer; padding:0 0.15rem; font-size:0.82rem;" title="Remove coupon">✕</button>
-        </div>
-      `).join('');
+      appliedListEl.innerHTML = chipsHtml;
     }
   }
+
+  ['overview-cart-applied-coupons-list', 'order-cart-applied-coupons-list'].forEach((listId) => {
+    const el = document.getElementById(listId);
+    if (el) {
+      el.innerHTML = appliedCouponsBreakdown.length ? chipsHtml : '';
+    }
+  });
 
   const availListEl = document.getElementById('checkout-available-coupons-list');
   if (!availListEl) return;
@@ -12121,6 +13727,18 @@ function renderCheckoutCouponsSection() {
     const belowMin = c.minOrderAmount > 0 && subtotal < c.minOrderAmount;
     const maxReached = !isApplied && appliedCouponCodes.length >= MAX_COUPONS_PER_ORDER_LIMIT;
 
+    let sponsorTag = '';
+    const sType = c.sponsorType || 'tomato';
+    if (sType === 'tomato') {
+      sponsorTag = '<span style="font-size:0.68rem; background:#fee2e2; color:#991b1b; padding:0.08rem 0.4rem; border-radius:999px; font-weight:700;">🍅 Tomato Sponsored</span>';
+    } else if (sType === 'restaurant') {
+      sponsorTag = '<span style="font-size:0.68rem; background:#ffedd5; color:#9a3412; padding:0.08rem 0.4rem; border-radius:999px; font-weight:700;">🍽️ Restaurant Deal</span>';
+    } else if (sType === 'shop') {
+      sponsorTag = '<span style="font-size:0.68rem; background:#fef3c7; color:#92400e; padding:0.08rem 0.4rem; border-radius:999px; font-weight:700;">🛍️ Shop Deal</span>';
+    } else if (sType === 'common') {
+      sponsorTag = '<span style="font-size:0.68rem; background:#ede9fe; color:#5b21b6; padding:0.08rem 0.4rem; border-radius:999px; font-weight:700;">🤝 Common Platform Deal</span>';
+    }
+
     return `
       <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; background:${isApplied ? '#f0fdf4' : '#fff'}; border:1px solid ${isApplied ? '#86efac' : '#e5e0d5'}; border-radius:6px; padding:0.45rem 0.6rem;">
         <div style="min-width:0; flex:1;">
@@ -12128,6 +13746,7 @@ function renderCheckoutCouponsSection() {
             <span style="font-family:monospace; font-weight:800; font-size:0.79rem; color:#c2410c; background:#fff7ed; border:1px dashed #fdba74; padding:0.08rem 0.4rem; border-radius:4px;">${escapeHtml(c.code)}</span>
             <span style="font-weight:700; font-size:0.77rem; color:var(--green);">${escapeHtml(offerText)}</span>
             <span style="font-size:0.68rem; background:${meta.badgeBg}; color:${meta.badgeColor}; padding:0.08rem 0.4rem; border-radius:999px; font-weight:700;">${meta.icon} ${escapeHtml(meta.label)}</span>
+            ${sponsorTag}
           </div>
           <div style="font-size:0.75rem; color:var(--ink); font-weight:600; margin-top:0.15rem;">${escapeHtml(c.title)}</div>
           <div style="font-size:0.7rem; color:${(catMismatch || belowMin) ? '#b45309' : 'var(--muted)'};">
@@ -12139,10 +13758,10 @@ function renderCheckoutCouponsSection() {
           type="button"
           class="btn ${isApplied ? 'btn-secondary' : 'btn-outline'} btn-sm"
           style="font-size:0.74rem; padding:0.25rem 0.6rem; white-space:nowrap;"
-          ${maxReached ? 'disabled title="Max 2 coupons already applied"' : ''}
+          ${maxReached ? 'disabled title="Only 1 coupon can be used per order"' : ''}
           onclick="toggleCheckoutCouponCode('${escapeHtml(c.code)}')"
         >
-          ${isApplied ? '✓ Applied' : maxReached ? 'Max 2 Reached' : 'Apply'}
+          ${isApplied ? '✓ Applied' : maxReached ? '1 Coupon Applied' : 'Apply'}
         </button>
       </div>
     `;
@@ -12166,6 +13785,829 @@ window.applyManualCouponCode = applyManualCouponCode;
 window.toggleCheckoutCouponCode = toggleCheckoutCouponCode;
 window.removeCheckoutCouponCode = removeCheckoutCouponCode;
 
+window.fetchPartnerCoupons = fetchPartnerCoupons;
+window.renderPartnerCouponsTable = renderPartnerCouponsTable;
+window.openPartnerCouponForm = openPartnerCouponForm;
+window.closePartnerCouponForm = closePartnerCouponForm;
+window.onPartnerCouponDiscountTypeChange = onPartnerCouponDiscountTypeChange;
+window.generatePartnerCouponCode = generatePartnerCouponCode;
+window.editPartnerCoupon = editPartnerCoupon;
+window.savePartnerCoupon = savePartnerCoupon;
+window.togglePartnerCouponStatus = togglePartnerCouponStatus;
+window.deletePartnerCoupon = deletePartnerCoupon;
+
+// =========================================================================
+// PARTNER (RESTAURANT & SHOP) OVERVIEW: NOTIFICATION & REPORT HANDLERS
+// =========================================================================
+async function handlePartnerOverviewNotifClick() {
+  if (role === 'restaurant' || role === 'shop') {
+    if (overviewPartnerSubView === 'report') {
+      showOverviewNotificationsView();
+    } else {
+      await loadNotifications(1);
+    }
+  } else {
+    await loadNotifications(1);
+  }
+  const feed = document.getElementById('activity-feed');
+  if (feed) {
+    feed.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+let partnerReportOrdersCache = [];
+
+async function openPartnerReportModal() {
+  if (activeView !== 'overview') {
+    switchView('overview');
+  }
+  showOverviewPartnerReportView();
+  const el = document.getElementById('overview-partner-report-container');
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+async function refreshPartnerReportData() {
+  try {
+    const endpoint = role === 'shop' ? '/api/shop/orders' : '/api/restaurant/orders';
+    const res = await apiFetch(endpoint);
+    partnerReportOrdersCache = Array.isArray(res.orders) ? res.orders : [];
+    renderPartnerReportData();
+  } catch (err) {
+    console.error('Failed to load partner report orders:', err);
+  }
+}
+
+function renderPartnerReportData() {
+  const period = document.getElementById('partner-report-period')?.value || 'all';
+  const dateLabel = document.getElementById('partner-report-date-label');
+  const now = new Date();
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  let filteredOrders = partnerReportOrdersCache;
+  let rangeLabel = 'All historic orders';
+
+  if (period === 'today') {
+    filteredOrders = partnerReportOrdersCache.filter((o) => new Date(o.createdAt || o.date) >= startOfDay);
+    rangeLabel = `Today (${now.toLocaleDateString()})`;
+  } else if (period === 'yesterday') {
+    const startOfYesterday = new Date(startOfDay.getTime() - 24 * 60 * 60 * 1000);
+    filteredOrders = partnerReportOrdersCache.filter((o) => {
+      const d = new Date(o.createdAt || o.date);
+      return d >= startOfYesterday && d < startOfDay;
+    });
+    rangeLabel = `Yesterday (${startOfYesterday.toLocaleDateString()})`;
+  } else if (period === 'last7') {
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    filteredOrders = partnerReportOrdersCache.filter((o) => new Date(o.createdAt || o.date) >= sevenDaysAgo);
+    rangeLabel = 'Past 7 days';
+  } else if (period === 'thisMonth') {
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    filteredOrders = partnerReportOrdersCache.filter((o) => new Date(o.createdAt || o.date) >= startOfMonth);
+    rangeLabel = `${now.toLocaleString('default', { month: 'long', year: 'numeric' })}`;
+  }
+
+  if (dateLabel) dateLabel.textContent = `• ${rangeLabel}`;
+
+  const totalOrders = filteredOrders.length;
+  let deliveredCount = 0;
+  let cancelledCount = 0;
+  let inProgressCount = 0;
+  let grossSales = 0;
+  let platformCommission = 0;
+  let storeDiscountsFunded = 0;
+
+  const itemMap = new Map();
+
+  filteredOrders.forEach((o) => {
+    const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+    if (st === 'delivered') deliveredCount++;
+    else if (st === 'cancelled' || st === 'rejected') cancelledCount++;
+    else inProgressCount++;
+
+    const orderTotal = Number(o.totalAmount || o.billDetails?.grandTotal || o.bill?.grandTotal || 0);
+    if (st !== 'cancelled' && st !== 'rejected') {
+      grossSales += orderTotal;
+      const commPct = 15;
+      const comm = orderTotal * (commPct / 100);
+      platformCommission += comm;
+
+      if (Array.isArray(o.appliedCoupons)) {
+        o.appliedCoupons.forEach((ac) => {
+          if (ac.sponsorType === 'restaurant' || ac.sponsorType === 'shop') {
+            storeDiscountsFunded += Number(ac.partnerShare || ac.discountAmount || 0);
+          } else if (ac.sponsorType === 'common') {
+            storeDiscountsFunded += Number(ac.partnerShare || 0);
+          }
+        });
+      }
+    }
+
+    const items = o.items || [];
+    items.forEach((it) => {
+      const name = String(it.name || 'Item').trim();
+      const qty = Number(it.quantity || 1);
+      const price = Number(it.price || 0);
+      const curr = itemMap.get(name) || { name, quantity: 0, revenue: 0 };
+      curr.quantity += qty;
+      curr.revenue += qty * price;
+      itemMap.set(name, curr);
+    });
+  });
+
+  const netPayout = Math.max(0, grossSales - platformCommission - storeDiscountsFunded);
+  const completionRate = totalOrders > 0 ? Math.round((deliveredCount / totalOrders) * 100) : 0;
+
+  const kpiEl = document.getElementById('partner-report-kpi-grid');
+  if (kpiEl) {
+    kpiEl.innerHTML = `
+      <div style="background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:0.9rem 1rem;">
+        <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:700;">Total Orders</div>
+        <div style="font-size:1.6rem; font-weight:800; color:var(--ink); margin-top:0.2rem;">${totalOrders}</div>
+        <div style="font-size:0.74rem; color:var(--muted); margin-top:0.15rem;">Placed in selected period</div>
+      </div>
+      <div style="background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:0.9rem 1rem;">
+        <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:700;">Delivered Orders</div>
+        <div style="font-size:1.6rem; font-weight:800; color:var(--green); margin-top:0.2rem;">${deliveredCount}</div>
+        <div style="font-size:0.74rem; color:var(--green); font-weight:600; margin-top:0.15rem;">${completionRate}% completion rate</div>
+      </div>
+      <div style="background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:0.9rem 1rem;">
+        <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:700;">Gross Sales (₹)</div>
+        <div style="font-size:1.6rem; font-weight:800; color:#c2410c; margin-top:0.2rem;">₹${grossSales.toFixed(2)}</div>
+        <div style="font-size:0.74rem; color:var(--muted); margin-top:0.15rem;">Before commissions &amp; discounts</div>
+      </div>
+      <div style="background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:0.9rem 1rem;">
+        <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:700;">Est. Net Payout (₹)</div>
+        <div style="font-size:1.6rem; font-weight:800; color:#1d4ed8; margin-top:0.2rem;">₹${netPayout.toFixed(2)}</div>
+        <div style="font-size:0.74rem; color:#1d4ed8; font-weight:600; margin-top:0.15rem;">Credited to bank account</div>
+      </div>
+    `;
+  }
+
+  const finEl = document.getElementById('partner-report-financial-breakdown');
+  if (finEl) {
+    finEl.innerHTML = `
+      <div style="background:#f8fafc; padding:0.75rem; border-radius:8px; border:1px solid #e2e8f0;">
+        <div style="font-size:0.72rem; color:var(--muted); font-weight:700; text-transform:uppercase;">Gross Revenue</div>
+        <div style="font-size:1.15rem; font-weight:800; color:var(--ink); margin-top:0.15rem;">₹${grossSales.toFixed(2)}</div>
+        <div style="font-size:0.7rem; color:var(--muted);">Total items billed</div>
+      </div>
+      <div style="background:#f8fafc; padding:0.75rem; border-radius:8px; border:1px solid #e2e8f0;">
+        <div style="font-size:0.72rem; color:var(--muted); font-weight:700; text-transform:uppercase;">Tomato Commission</div>
+        <div style="font-size:1.15rem; font-weight:800; color:#dc2626; margin-top:0.15rem;">-₹${platformCommission.toFixed(2)}</div>
+        <div style="font-size:0.7rem; color:var(--muted);">Platform commission</div>
+      </div>
+      <div style="background:#f8fafc; padding:0.75rem; border-radius:8px; border:1px solid #e2e8f0;">
+        <div style="font-size:0.72rem; color:var(--muted); font-weight:700; text-transform:uppercase;">Coupon Discount Funded</div>
+        <div style="font-size:1.15rem; font-weight:800; color:#b45309; margin-top:0.15rem;">-₹${storeDiscountsFunded.toFixed(2)}</div>
+        <div style="font-size:0.7rem; color:var(--muted);">Store-specific offers</div>
+      </div>
+      <div style="background:#ecfdf5; padding:0.75rem; border-radius:8px; border:1px solid #a7f3d0;">
+        <div style="font-size:0.72rem; color:#065f46; font-weight:700; text-transform:uppercase;">Net Payable to Store</div>
+        <div style="font-size:1.15rem; font-weight:800; color:#047857; margin-top:0.15rem;">₹${netPayout.toFixed(2)}</div>
+        <div style="font-size:0.7rem; color:#065f46; font-weight:600;">Direct bank transfer</div>
+      </div>
+    `;
+  }
+
+  const statusEl = document.getElementById('partner-report-status-breakdown');
+  if (statusEl) {
+    statusEl.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:0.5rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:0.4rem 0.6rem; background:#f0fdf4; border-radius:6px; font-size:0.82rem;">
+          <span style="font-weight:700; color:#15803d;">✓ Delivered Orders</span>
+          <span style="font-weight:800; color:#15803d;">${deliveredCount}</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:0.4rem 0.6rem; background:#eff6ff; border-radius:6px; font-size:0.82rem;">
+          <span style="font-weight:700; color:#1d4ed8;">⚡ In Progress / Active</span>
+          <span style="font-weight:800; color:#1d4ed8;">${inProgressCount}</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:0.4rem 0.6rem; background:#fef2f2; border-radius:6px; font-size:0.82rem;">
+          <span style="font-weight:700; color:#b91c1c;">✕ Cancelled / Rejected</span>
+          <span style="font-weight:800; color:#b91c1c;">${cancelledCount}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  const topItemsEl = document.getElementById('partner-report-top-items');
+  if (topItemsEl) {
+    const sortedItems = Array.from(itemMap.values()).sort((a, b) => b.quantity - a.quantity).slice(0, 5);
+    if (!sortedItems.length) {
+      topItemsEl.innerHTML = '<p style="color:var(--muted); font-size:0.8rem; margin:0.5rem 0;">No items sold in this period.</p>';
+    } else {
+      topItemsEl.innerHTML = `
+        <div style="display:flex; flex-direction:column; gap:0.45rem;">
+          ${sortedItems.map((it, idx) => `
+            <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.82rem; padding:0.35rem 0; border-bottom:1px dashed #e2e8f0;">
+              <div>
+                <span style="font-weight:800; color:#c2410c; margin-right:0.35rem;">#${idx + 1}</span>
+                <span style="font-weight:600; color:var(--ink);">${escapeHtml(it.name)}</span>
+              </div>
+              <div style="text-align:right;">
+                <span style="font-weight:700; color:var(--charcoal);">${it.quantity} sold</span>
+                <span style="font-size:0.75rem; color:var(--muted); margin-left:0.35rem;">(₹${it.revenue.toFixed(0)})</span>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+  }
+}
+
+function exportPartnerReportCsv() {
+  const period = document.getElementById('partner-report-period')?.value || 'all';
+  if (!partnerReportOrdersCache.length) {
+    alert('No order data to export.');
+    return;
+  }
+  const headers = ['Order Number', 'Date', 'Status', 'Customer', 'Items Count', 'Gross Total (INR)'];
+  const rows = partnerReportOrdersCache.map((o) => [
+    o.orderNumber || o.orderId || o._id,
+    new Date(o.createdAt || o.date).toLocaleDateString(),
+    o.status || 'N/A',
+    o.customerName || (o.customerId && o.customerId.name) || 'Customer',
+    (o.items || []).length,
+    Number(o.totalAmount || o.billDetails?.grandTotal || 0).toFixed(2),
+  ]);
+  const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))].join('\n');
+  const encodedUri = encodeURI(csvContent);
+  const link = document.createElement('a');
+  link.setAttribute('href', encodedUri);
+  link.setAttribute('download', `Store_Report_${role}_${period}_${Date.now()}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+function printPartnerReport() {
+  window.print();
+}
+
+window.handlePartnerOverviewNotifClick = handlePartnerOverviewNotifClick;
+window.openPartnerReportModal = openPartnerReportModal;
+window.showOverviewPartnerReportView = showOverviewPartnerReportView;
+window.refreshPartnerReportData = refreshPartnerReportData;
+window.renderPartnerReportData = renderPartnerReportData;
+window.exportPartnerReportCsv = exportPartnerReportCsv;
+window.printPartnerReport = printPartnerReport;
+
+// =========================================================================
+// ADMIN: PLATFORM OVERVIEW REPORT LOGIC (DASHBOARD & KPIS)
+// =========================================================================
+let adminReportOrdersCache = [];
+let adminReportKpisCache = null;
+let adminReportAnalyticsCache = null;
+
+async function refreshAdminReportData() {
+  try {
+    const promises = [
+      apiFetch('/api/admin/dashboard').catch(() => ({ kpis: {} })),
+      apiFetch('/api/admin/analytics?allTime=true').catch(() => ({ analytics: {} })),
+    ];
+    if (role === 'admin' || (userPerms && (userPerms.includes('orders_manage') || userPerms.includes('*')))) {
+      promises.push(
+        apiFetch('/api/admin/orders?byRange=true&startDate=2020-01-01&endDate=2099-12-31').catch(() =>
+          apiFetch('/api/admin/orders?limit=300').catch(() => ({ orders: [] }))
+        )
+      );
+    }
+    const [dashRes, anRes, ordersRes] = await Promise.all(promises);
+    adminReportKpisCache = dashRes?.kpis || {};
+    adminReportAnalyticsCache = anRes?.analytics || {};
+    adminReportOrdersCache = ordersRes && Array.isArray(ordersRes.orders) ? ordersRes.orders : [];
+    renderAdminReportData();
+  } catch (err) {
+    console.error('Failed to load admin report data:', err);
+  }
+}
+
+function renderAdminReportData() {
+  const period = document.getElementById('admin-report-period')?.value || 'all';
+  const channel = document.getElementById('admin-report-channel')?.value || 'all';
+  const dateLabel = document.getElementById('admin-report-date-label');
+  const now = new Date();
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  let filteredOrders = [...adminReportOrdersCache];
+  let rangeLabel = 'All historic platform orders';
+
+  if (period === 'today') {
+    filteredOrders = filteredOrders.filter((o) => new Date(o.createdAt || o.date) >= startOfDay);
+    rangeLabel = `Today (${now.toLocaleDateString()})`;
+  } else if (period === 'yesterday') {
+    const startOfYesterday = new Date(startOfDay.getTime() - 24 * 60 * 60 * 1000);
+    filteredOrders = filteredOrders.filter((o) => {
+      const d = new Date(o.createdAt || o.date);
+      return d >= startOfYesterday && d < startOfDay;
+    });
+    rangeLabel = `Yesterday (${startOfYesterday.toLocaleDateString()})`;
+  } else if (period === 'last7') {
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    filteredOrders = filteredOrders.filter((o) => new Date(o.createdAt || o.date) >= sevenDaysAgo);
+    rangeLabel = 'Past 7 days';
+  } else if (period === 'thisMonth') {
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    filteredOrders = filteredOrders.filter((o) => new Date(o.createdAt || o.date) >= startOfMonth);
+    rangeLabel = `${now.toLocaleString('default', { month: 'long', year: 'numeric' })}`;
+  }
+
+  // Filter by channel (Restaurant vs Shop)
+  if (channel === 'restaurant') {
+    filteredOrders = filteredOrders.filter((o) => o.restaurantId || (o.restaurantName && !o.shopName) || o.storeType === 'restaurant');
+  } else if (channel === 'shop') {
+    filteredOrders = filteredOrders.filter((o) => o.shopId || o.shopName || o.storeType === 'shop');
+  }
+
+  if (dateLabel) {
+    dateLabel.textContent = `• ${rangeLabel}${channel !== 'all' ? ` (${channel === 'restaurant' ? 'Restaurants' : 'Shops'})` : ''}`;
+  }
+
+  const kpis = adminReportKpisCache || {};
+  const an = adminReportAnalyticsCache || {};
+
+  let totalOrders = filteredOrders.length;
+  let deliveredCount = 0;
+  let cancelledCount = 0;
+  let inProgressCount = 0;
+  let grossSales = 0;
+  let platformCommission = 0;
+  let partnerPayouts = 0;
+  let totalDiscounts = 0;
+  const itemMap = new Map();
+
+  if (adminReportOrdersCache.length > 0) {
+    filteredOrders.forEach((o) => {
+      const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+      if (st === 'delivered') deliveredCount++;
+      else if (st === 'cancelled' || st === 'rejected') cancelledCount++;
+      else inProgressCount++;
+
+      const orderTotal = Number(o.totalAmount || o.billDetails?.grandTotal || o.bill?.grandTotal || 0);
+      if (st !== 'cancelled' && st !== 'rejected') {
+        grossSales += orderTotal;
+        const commPct = Number(o.commissionRate || 15);
+        const comm = orderTotal * (commPct / 100);
+        platformCommission += comm;
+
+        let storeDiscounts = 0;
+        if (Array.isArray(o.appliedCoupons)) {
+          o.appliedCoupons.forEach((ac) => {
+            totalDiscounts += Number(ac.discountAmount || 0);
+            if (ac.sponsorType === 'restaurant' || ac.sponsorType === 'shop') {
+              storeDiscounts += Number(ac.partnerShare || ac.discountAmount || 0);
+            } else if (ac.sponsorType === 'common') {
+              storeDiscounts += Number(ac.partnerShare || 0);
+            }
+          });
+        }
+        partnerPayouts += Math.max(0, orderTotal - comm - storeDiscounts);
+      }
+
+      const items = o.items || [];
+      items.forEach((it) => {
+        const name = String(it.name || 'Item').trim();
+        const qty = Number(it.quantity || 1);
+        const price = Number(it.price || 0);
+        const curr = itemMap.get(name) || { name, quantity: 0, revenue: 0 };
+        curr.quantity += qty;
+        curr.revenue += qty * price;
+        itemMap.set(name, curr);
+      });
+    });
+  } else {
+    totalOrders = kpis.totalOrders || an.totalOrders || 0;
+    deliveredCount = kpis.deliveredOrders || an.completedOrders || an.deliveredOrders || 0;
+    cancelledCount = kpis.cancelledOrders || an.cancelledOrders || 0;
+    inProgressCount = kpis.activeOrders || Math.max(0, totalOrders - deliveredCount - cancelledCount);
+    grossSales = period === 'today' ? Number(kpis.todayRevenue || 0) : Number(kpis.totalRevenue || an.totalGMV || 0);
+    platformCommission = Number(an.platformCommission || grossSales * 0.15);
+    partnerPayouts = Math.max(0, grossSales - platformCommission);
+  }
+
+  const completionRate = totalOrders > 0 ? Math.round((deliveredCount / totalOrders) * 100) : 0;
+  const totalRestaurants = kpis.totalRestaurants || (an.partnerBreakdown?.restaurants) || 0;
+  const totalShops = kpis.totalShops || (an.partnerBreakdown?.shops) || 0;
+  const totalRiders = kpis.totalRiders || (an.partnerBreakdown?.riders) || 0;
+
+  const kpiGridEl = document.getElementById('admin-report-kpi-grid');
+  if (kpiGridEl) {
+    kpiGridEl.innerHTML = `
+      <div style="background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:0.9rem 1rem;">
+        <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:700;">Platform GMV</div>
+        <div style="font-size:1.6rem; font-weight:800; color:var(--green); margin-top:0.2rem;">₹${grossSales.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+        <div style="font-size:0.74rem; color:var(--muted); margin-top:0.15rem;">Gross value of placed orders</div>
+      </div>
+      <div style="background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:0.9rem 1rem;">
+        <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:700;">Platform Commission</div>
+        <div style="font-size:1.6rem; font-weight:800; color:#1d4ed8; margin-top:0.2rem;">₹${platformCommission.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+        <div style="font-size:0.74rem; color:#1d4ed8; font-weight:600; margin-top:0.15rem;">Tomato Net Revenue (~15%)</div>
+      </div>
+      <div style="background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:0.9rem 1rem;">
+        <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:700;">Orders Volume</div>
+        <div style="font-size:1.6rem; font-weight:800; color:var(--ink); margin-top:0.2rem;">${totalOrders}</div>
+        <div style="font-size:0.74rem; color:var(--green); font-weight:600; margin-top:0.15rem;">${deliveredCount} delivered (${completionRate}%)</div>
+      </div>
+      <div class="stat-card clickable" onclick="openAdminPartnerFleetModal('all')" style="background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:0.9rem 1rem; cursor:pointer; transition:all 0.15s ease;" title="Click to view complete partner fleet list">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:700;">Active Partner Fleet</div>
+          <span style="font-size:0.75rem; color:var(--muted); font-weight:600;">View List ↗</span>
+        </div>
+        <div style="font-size:1.6rem; font-weight:800; color:#c2410c; margin-top:0.2rem;">${totalRestaurants + totalShops}</div>
+        <div style="font-size:0.75rem; margin-top:0.3rem; display:flex; align-items:center; gap:0.35rem; flex-wrap:wrap;">
+          <span onclick="event.stopPropagation(); openAdminPartnerFleetModal('restaurant');" title="View Restaurants" style="cursor:pointer; background:#fff7ed; color:#c2410c; border:1px solid #ffedd5; padding:0.12rem 0.45rem; border-radius:999px; font-weight:700; font-size:0.72rem;">🏪 ${totalRestaurants} Rest</span>
+          <span style="color:var(--muted);">•</span>
+          <span onclick="event.stopPropagation(); openAdminPartnerFleetModal('shop');" title="View Shops" style="cursor:pointer; background:#eff6ff; color:#1d4ed8; border:1px solid #dbeafe; padding:0.12rem 0.45rem; border-radius:999px; font-weight:700; font-size:0.72rem;">🏬 ${totalShops} Shops</span>
+          <span style="color:var(--muted);">•</span>
+          <span onclick="event.stopPropagation(); openAdminPartnerFleetModal('deliveryPartner');" title="View Riders" style="cursor:pointer; background:#f0fdf4; color:#15803d; border:1px solid #dcfce7; padding:0.12rem 0.45rem; border-radius:999px; font-weight:700; font-size:0.72rem;">🚴 ${totalRiders} Riders</span>
+        </div>
+      </div>
+    `;
+  }
+
+  const finEl = document.getElementById('admin-report-financial-breakdown');
+  if (finEl) {
+    finEl.innerHTML = `
+      <div style="background:#f8fafc; padding:0.75rem; border-radius:8px; border:1px solid #e2e8f0;">
+        <div style="font-size:0.72rem; color:var(--muted); font-weight:700; text-transform:uppercase;">Gross Merchandise Value</div>
+        <div style="font-size:1.15rem; font-weight:800; color:var(--ink); margin-top:0.15rem;">₹${grossSales.toFixed(2)}</div>
+        <div style="font-size:0.7rem; color:var(--muted);">Total billed items</div>
+      </div>
+      <div style="background:#eff6ff; padding:0.75rem; border-radius:8px; border:1px solid #bfdbfe;">
+        <div style="font-size:0.72rem; color:#1e40af; font-weight:700; text-transform:uppercase;">Platform Commission</div>
+        <div style="font-size:1.15rem; font-weight:800; color:#1d4ed8; margin-top:0.15rem;">+₹${platformCommission.toFixed(2)}</div>
+        <div style="font-size:0.7rem; color:#1e40af;">Tomato platform cut</div>
+      </div>
+      <div style="background:#f8fafc; padding:0.75rem; border-radius:8px; border:1px solid #e2e8f0;">
+        <div style="font-size:0.72rem; color:var(--muted); font-weight:700; text-transform:uppercase;">Net Partner Payouts</div>
+        <div style="font-size:1.15rem; font-weight:800; color:#047857; margin-top:0.15rem;">₹${partnerPayouts.toFixed(2)}</div>
+        <div style="font-size:0.7rem; color:var(--muted);">Payable to stores</div>
+      </div>
+      <div style="background:#fef2f2; padding:0.75rem; border-radius:8px; border:1px solid #fecaca;">
+        <div style="font-size:0.72rem; color:#991b1b; font-weight:700; text-transform:uppercase;">Coupon Discounts Given</div>
+        <div style="font-size:1.15rem; font-weight:800; color:#b91c1c; margin-top:0.15rem;">₹${totalDiscounts.toFixed(2)}</div>
+        <div style="font-size:0.7rem; color:#991b1b;">Discounts distributed</div>
+      </div>
+    `;
+  }
+
+  const statusEl = document.getElementById('admin-report-status-breakdown');
+  if (statusEl) {
+    statusEl.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:0.5rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:0.4rem 0.6rem; background:#f0fdf4; border-radius:6px; font-size:0.82rem;">
+          <span style="font-weight:700; color:#15803d;">✓ Delivered Orders</span>
+          <span style="font-weight:800; color:#15803d;">${deliveredCount}</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:0.4rem 0.6rem; background:#eff6ff; border-radius:6px; font-size:0.82rem;">
+          <span style="font-weight:700; color:#1d4ed8;">⚡ In Progress / Active</span>
+          <span style="font-weight:800; color:#1d4ed8;">${inProgressCount}</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:0.4rem 0.6rem; background:#fef2f2; border-radius:6px; font-size:0.82rem;">
+          <span style="font-weight:700; color:#b91c1c;">✕ Cancelled / Rejected</span>
+          <span style="font-weight:800; color:#b91c1c;">${cancelledCount}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  const topItemsEl = document.getElementById('admin-report-top-items');
+  if (topItemsEl) {
+    const sortedItems = Array.from(itemMap.values()).sort((a, b) => b.quantity - a.quantity).slice(0, 5);
+    if (!sortedItems.length) {
+      if (an.topDishes && an.topDishes.length > 0) {
+        topItemsEl.innerHTML = `
+          <div style="display:flex; flex-direction:column; gap:0.45rem;">
+            ${an.topDishes.slice(0, 5).map((it, idx) => `
+              <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.82rem; padding:0.35rem 0; border-bottom:1px dashed #e2e8f0;">
+                <div>
+                  <span style="font-weight:800; color:#c2410c; margin-right:0.35rem;">#${idx + 1}</span>
+                  <span style="font-weight:600; color:var(--ink);">${escapeHtml(it.name)}</span>
+                </div>
+                <div style="text-align:right;">
+                  <span style="font-weight:700; color:var(--charcoal);">${it.orderCount || it.quantity || 1} orders</span>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      } else {
+        topItemsEl.innerHTML = '<p style="color:var(--muted); font-size:0.8rem; margin:0.5rem 0;">No items sold in this period.</p>';
+      }
+    } else {
+      topItemsEl.innerHTML = `
+        <div style="display:flex; flex-direction:column; gap:0.45rem;">
+          ${sortedItems.map((it, idx) => `
+            <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.82rem; padding:0.35rem 0; border-bottom:1px dashed #e2e8f0;">
+              <div>
+                <span style="font-weight:800; color:#c2410c; margin-right:0.35rem;">#${idx + 1}</span>
+                <span style="font-weight:600; color:var(--ink);">${escapeHtml(it.name)}</span>
+              </div>
+              <div style="text-align:right;">
+                <span style="font-weight:700; color:var(--charcoal);">${it.quantity} sold</span>
+                <span style="font-size:0.75rem; color:var(--muted); margin-left:0.35rem;">(₹${it.revenue.toFixed(0)})</span>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+  }
+}
+
+function exportAdminReportCsv() {
+  const period = document.getElementById('admin-report-period')?.value || 'all';
+  if (!adminReportOrdersCache.length) {
+    alert('No order records to export for this view.');
+    return;
+  }
+  const headers = ['Order Number', 'Date', 'Channel', 'Store Name', 'Status', 'Customer', 'Items Count', 'Gross Total (INR)', 'Commission (INR)'];
+  const rows = adminReportOrdersCache.map((o) => {
+    const isShop = !!(o.shopId || o.shopName || o.storeType === 'shop');
+    const channel = isShop ? 'Shop' : 'Restaurant';
+    const store = o.shopName || o.restaurantName || 'Store';
+    const gross = Number(o.totalAmount || o.billDetails?.grandTotal || 0);
+    const comm = (gross * 0.15).toFixed(2);
+    return [
+      o.orderNumber || o.orderId || o._id,
+      new Date(o.createdAt || o.date).toLocaleDateString(),
+      channel,
+      store,
+      o.status || 'N/A',
+      o.customerName || (o.customerId && o.customerId.name) || 'Customer',
+      (o.items || []).length,
+      gross.toFixed(2),
+      comm,
+    ];
+  });
+  const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))].join('\n');
+  const encodedUri = encodeURI(csvContent);
+  const link = document.createElement('a');
+  link.setAttribute('href', encodedUri);
+  link.setAttribute('download', `Platform_Admin_Report_${period}_${Date.now()}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+function printAdminReport() {
+  window.print();
+}
+
+window.refreshAdminReportData = refreshAdminReportData;
+window.renderAdminReportData = renderAdminReportData;
+window.exportAdminReportCsv = exportAdminReportCsv;
+window.printAdminReport = printAdminReport;
+
+// =========================================================================
+// ADMIN: ACTIVE PARTNER FLEET LIST MODAL (RESTAURANTS / SHOPS / RIDERS)
+// =========================================================================
+let adminFleetModalCurrentRole = 'all'; // 'all' | 'restaurant' | 'shop' | 'deliveryPartner'
+let adminFleetModalSearchQuery = '';
+let adminFleetModalLoading = false;
+let adminFleetModalCache = {
+  restaurant: [],
+  shop: [],
+  deliveryPartner: [],
+  lastFetched: 0,
+};
+
+async function openAdminPartnerFleetModal(initialRole = 'all') {
+  adminFleetModalCurrentRole = initialRole || 'all';
+  adminFleetModalSearchQuery = '';
+  const searchInput = document.getElementById('admin-fleet-search-input');
+  if (searchInput) searchInput.value = '';
+
+  updateAdminFleetModalTabs();
+  openModal('admin-partner-fleet-modal');
+
+  // Load partners if not loaded or older than 30s
+  const now = Date.now();
+  if (!adminFleetModalCache.lastFetched || now - adminFleetModalCache.lastFetched > 30000) {
+    await fetchAllAdminFleetPartners();
+  } else {
+    renderAdminPartnerFleetModalContent();
+  }
+}
+
+async function fetchAllAdminFleetPartners() {
+  adminFleetModalLoading = true;
+  renderAdminPartnerFleetModalContent();
+  try {
+    const [restaurantsRes, shopsRes, ridersRes] = await Promise.all([
+      apiFetch('/api/admin/users?role=restaurant&all=true'),
+      apiFetch('/api/admin/users?role=shop&all=true'),
+      apiFetch('/api/admin/users?role=deliveryPartner&all=true'),
+    ]);
+    adminFleetModalCache.restaurant = restaurantsRes?.users || [];
+    adminFleetModalCache.shop = shopsRes?.users || [];
+    adminFleetModalCache.deliveryPartner = ridersRes?.users || [];
+    adminFleetModalCache.lastFetched = Date.now();
+  } catch (err) {
+    console.error('Failed to load partner fleet list:', err);
+  } finally {
+    adminFleetModalLoading = false;
+    renderAdminPartnerFleetModalContent();
+  }
+}
+
+function updateAdminFleetModalTabs() {
+  const tabs = ['all', 'restaurant', 'shop', 'deliveryPartner'];
+  tabs.forEach((t) => {
+    const btn = document.getElementById(`admin-fleet-tab-${t}`);
+    if (btn) {
+      if (t === adminFleetModalCurrentRole) {
+        btn.classList.add('btn-primary');
+        btn.classList.remove('btn-outline');
+      } else {
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-outline');
+      }
+    }
+  });
+
+  const titleSub = document.getElementById('admin-partner-fleet-modal-subtitle');
+  if (titleSub) {
+    const labels = {
+      all: '⚡ Active Partner Fleet (All Partners)',
+      restaurant: '🏪 Restaurant Fleet Directory',
+      shop: '🏬 Shop Fleet Directory',
+      deliveryPartner: '🚴 Delivery Fleet Directory (Riders)',
+    };
+    titleSub.textContent = labels[adminFleetModalCurrentRole] || '⚡ Active Partner Fleet';
+  }
+}
+
+function filterAdminFleetModal(role) {
+  adminFleetModalCurrentRole = role || 'all';
+  updateAdminFleetModalTabs();
+  renderAdminPartnerFleetModalContent();
+}
+
+function onAdminFleetSearchInput(query) {
+  adminFleetModalSearchQuery = (query || '').trim().toLowerCase();
+  renderAdminPartnerFleetModalContent();
+}
+
+function navigateToPartnerManagement(targetRole, userId = '') {
+  closeModal('admin-partner-fleet-modal');
+  const viewMap = {
+    restaurant: 'admin-restaurants',
+    shop: 'admin-shops',
+    deliveryPartner: 'admin-riders',
+  };
+  const targetView = viewMap[targetRole] || 'admin-restaurants';
+  switchView(targetView);
+  if (userId) {
+    setTimeout(() => {
+      const searchPrefix = targetRole === 'deliveryPartner' ? 'admin-riders' : targetRole === 'shop' ? 'admin-shops' : 'admin-restaurants';
+      const searchInput = document.getElementById(`${searchPrefix}-search`);
+      if (searchInput) {
+        searchInput.value = userId;
+        handleAdminSearchInput(targetRole);
+      }
+    }, 200);
+  }
+}
+
+function renderAdminPartnerFleetModalContent() {
+  const container = document.getElementById('admin-partner-fleet-modal-content');
+  const footerCount = document.getElementById('admin-fleet-modal-footer-count');
+  if (!container) return;
+
+  if (adminFleetModalLoading) {
+    container.innerHTML = `
+      <div style="text-align:center; padding:2.5rem 1rem; color:var(--muted);">
+        <div style="font-size:1.8rem; margin-bottom:0.5rem; animation:spin 1s linear infinite;">⏳</div>
+        <p style="font-size:0.9rem; font-weight:600;">Loading partner fleet members...</p>
+      </div>
+    `;
+    if (footerCount) footerCount.textContent = 'Loading...';
+    return;
+  }
+
+  let list = [];
+  if (adminFleetModalCurrentRole === 'all') {
+    list = [
+      ...adminFleetModalCache.restaurant.map((u) => ({ ...u, partnerCategory: 'restaurant' })),
+      ...adminFleetModalCache.shop.map((u) => ({ ...u, partnerCategory: 'shop' })),
+      ...adminFleetModalCache.deliveryPartner.map((u) => ({ ...u, partnerCategory: 'deliveryPartner' })),
+    ];
+  } else if (adminFleetModalCurrentRole === 'restaurant') {
+    list = adminFleetModalCache.restaurant.map((u) => ({ ...u, partnerCategory: 'restaurant' }));
+  } else if (adminFleetModalCurrentRole === 'shop') {
+    list = adminFleetModalCache.shop.map((u) => ({ ...u, partnerCategory: 'shop' }));
+  } else if (adminFleetModalCurrentRole === 'deliveryPartner') {
+    list = adminFleetModalCache.deliveryPartner.map((u) => ({ ...u, partnerCategory: 'deliveryPartner' }));
+  }
+
+  const q = adminFleetModalSearchQuery;
+  const filtered = list.filter((item) => {
+    if (!q) return true;
+    const name = (item.displayName || item.name || '').toLowerCase();
+    const email = (item.email || '').toLowerCase();
+    const phone = (item.phone || '').toLowerCase();
+    const uid = (item.customUserId || item.userCode || item.code || item.id || item._id || '').toLowerCase();
+    const city = (item.address?.city || item.city || '').toLowerCase();
+    const pincode = (item.address?.pincode || item.pincode || '').toLowerCase();
+    return name.includes(q) || email.includes(q) || phone.includes(q) || uid.includes(q) || city.includes(q) || pincode.includes(q);
+  });
+
+  if (footerCount) {
+    const restCount = adminFleetModalCache.restaurant.length;
+    const shopCount = adminFleetModalCache.shop.length;
+    const riderCount = adminFleetModalCache.deliveryPartner.length;
+    footerCount.innerHTML = `Showing <strong>${filtered.length}</strong> partners • (Total: ${restCount} Rest, ${shopCount} Shops, ${riderCount} Riders)`;
+  }
+
+  if (!filtered.length) {
+    container.innerHTML = `
+      <div style="text-align:center; padding:2.5rem 1rem; color:var(--muted); background:#fcfaf5; border:1px dashed var(--line); border-radius:10px;">
+        <div style="font-size:2rem; margin-bottom:0.4rem;">🔍</div>
+        <p style="font-size:0.92rem; font-weight:700; color:var(--charcoal); margin-bottom:0.25rem;">No partners found</p>
+        <p style="font-size:0.8rem; margin:0;">${q ? `No partners matched your search "${escapeHtml(q)}".` : 'No partners found in this category.'}</p>
+      </div>
+    `;
+    return;
+  }
+
+  const rowsHtml = filtered.map((p, idx) => {
+    const cat = p.partnerCategory || p.role || 'partner';
+    const catBadge = cat === 'restaurant'
+      ? '<span class="badge" style="background:#fff7ed; color:#c2410c; border:1px solid #ffedd5; font-size:0.7rem; font-weight:700;">🏪 Restaurant</span>'
+      : cat === 'shop'
+      ? '<span class="badge" style="background:#eff6ff; color:#1d4ed8; border:1px solid #dbeafe; font-size:0.7rem; font-weight:700;">🏬 Shop</span>'
+      : '<span class="badge" style="background:#f0fdf4; color:#15803d; border:1px solid #dcfce7; font-size:0.7rem; font-weight:700;">🚴 Rider</span>';
+
+    const displayName = formatCleanName(p.displayName || p.name || 'Partner');
+    const partnerId = p.customUserId || p.userCode || p.code || p._id || 'N/A';
+    const phone = p.phone || p.phoneNumber || '—';
+    const email = p.email || '—';
+    const city = p.address?.city || p.city || '';
+    const pin = p.address?.pincode || p.pincode || '';
+    const locationStr = [city, pin].filter(Boolean).join(', ');
+
+    const isDutyOn = p.isDutyOn ?? p.isOnline ?? true;
+    const dutyBadge = isDutyOn
+      ? '<span style="font-size:0.72rem; color:#15803d; font-weight:700; background:#dcfce7; padding:0.1rem 0.45rem; border-radius:4px;">● Online / Active</span>'
+      : '<span style="font-size:0.72rem; color:#64748b; font-weight:600; background:#f1f5f9; padding:0.1rem 0.45rem; border-radius:4px;">○ Offline</span>';
+
+    const isApproved = p.isApproved !== false;
+    const approvalBadge = isApproved
+      ? '<span class="badge badge-delivered" style="font-size:0.68rem; padding:0.1rem 0.4rem;">Approved</span>'
+      : '<span class="badge badge-pending" style="font-size:0.68rem; padding:0.1rem 0.4rem;">Pending Approval</span>';
+
+    return `
+      <div style="background:#fff; border:1px solid var(--line); border-radius:9px; padding:0.75rem 0.95rem; margin-bottom:0.55rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.65rem; transition:box-shadow 0.15s ease;">
+        <div style="display:flex; align-items:flex-start; gap:0.65rem; min-width:240px; flex:1;">
+          <div style="width:36px; height:36px; border-radius:8px; background:#f1f5f9; display:flex; align-items:center; justify-content:center; font-size:1.15rem; flex-shrink:0;">
+            ${cat === 'restaurant' ? '🏪' : cat === 'shop' ? '🏬' : '🚴'}
+          </div>
+          <div>
+            <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
+              <strong style="font-size:0.92rem; color:var(--ink);">${escapeHtml(displayName)}</strong>
+              ${catBadge}
+              ${approvalBadge}
+            </div>
+            <div style="font-size:0.77rem; color:var(--muted); margin-top:2px; display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+              <span style="font-family:monospace; font-weight:700; color:var(--charcoal); background:#f8fafc; padding:1px 5px; border-radius:4px; border:1px solid #e2e8f0;">🆔 ${escapeHtml(partnerId)}</span>
+              <span>📞 ${escapeHtml(phone)}</span>
+              <span>✉️ ${escapeHtml(email)}</span>
+            </div>
+            ${locationStr ? `<div style="font-size:0.73rem; color:var(--muted); margin-top:2px;">📍 ${escapeHtml(locationStr)}</div>` : ''}
+          </div>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:0.6rem; flex-shrink:0;">
+          ${dutyBadge}
+          <button
+            type="button"
+            class="btn btn-outline btn-sm"
+            style="font-size:0.75rem; padding:0.25rem 0.6rem; font-weight:600;"
+            onclick="navigateToPartnerManagement('${cat}', '${escapeHtml(partnerId)}')"
+            title="Open partner in management panel"
+          >
+            Manage ↗
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  container.innerHTML = `
+    <div style="display:flex; flex-direction:column;">
+      ${rowsHtml}
+    </div>
+  `;
+}
+
+window.openAdminPartnerFleetModal = openAdminPartnerFleetModal;
+window.filterAdminFleetModal = filterAdminFleetModal;
+window.onAdminFleetSearchInput = onAdminFleetSearchInput;
+window.navigateToPartnerManagement = navigateToPartnerManagement;
+window.renderAdminPartnerFleetModalContent = renderAdminPartnerFleetModalContent;
 
 // =========================================================================
 // ADMIN: RESET USER PASSWORD (DEFAULT: Tomato<DDMMYYYY> OR CUSTOM PASSWORD)

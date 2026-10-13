@@ -31,6 +31,7 @@ export interface IEmployee extends Document {
   walletBalance?: number;
   creditPoint?: number;
   dob?: string;
+  gsnNumber?: string;
   createdBy?: string;
   createdAt?: Date;
   updatedAt?: Date;
@@ -66,6 +67,7 @@ const schema: Schema<IEmployee> = new Schema(
     walletBalance: { type: Number, default: 0 },
     creditPoint: { type: Number, default: 0 },
     dob: { type: String, default: '', trim: true },
+    gsnNumber: { type: String, default: 'NA', uppercase: true, trim: true },
     createdBy: { type: String, default: '' },
   },
   { timestamps: true, collection: 'employees' },

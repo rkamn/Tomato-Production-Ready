@@ -156,10 +156,55 @@ export async function syncOrderToTomatoPayment(order: any, isShopOrder = false) 
       riderDoc?.bankDetails?.riderPayoutPerOrder ??
       deliveryFee;
 
-    // Tomato commission is calculated on subtotal (or total minus delivery fee)
-    const baseForPartner = Math.max(0, totalAmount - riderPayoutAmount);
-    const tomatoCommissionAmount = Number(((baseForPartner * commissionPct) / 100).toFixed(2));
-    const partnerPayoutAmount = Number(Math.max(0, baseForPartner - tomatoCommissionAmount).toFixed(2));
+    // Calculate coupon discount and funding split between Tomato and Partner
+    let totalCouponDiscount = Number(order.discountAmount || 0);
+    let partnerDiscountShare = 0;
+    let tomatoDiscountShare = 0;
+    let dominantSponsorType = 'tomato';
+
+    const appliedList = Array.isArray(order.appliedCoupons) ? order.appliedCoupons : [];
+    if (appliedList.length > 0) {
+      totalCouponDiscount = 0;
+      for (const ac of appliedList) {
+        const disc = Number(ac.discountAmount || 0);
+        if (disc <= 0) continue;
+        totalCouponDiscount += disc;
+
+        const sType = ac.sponsorType || 'tomato';
+        dominantSponsorType = sType;
+
+        if (sType === 'tomato') {
+          // 100% paid by Tomato
+          tomatoDiscountShare += disc;
+        } else if (sType === 'restaurant' || sType === 'shop') {
+          // 100% paid by partner (restaurant or shop)
+          partnerDiscountShare += disc;
+        } else if (sType === 'common') {
+          // Split based on current agreement commission %
+          const tomatoPart = Number(((disc * commissionPct) / 100).toFixed(2));
+          const partnerPart = Number((disc - tomatoPart).toFixed(2));
+          tomatoDiscountShare += tomatoPart;
+          partnerDiscountShare += partnerPart;
+        }
+      }
+    } else if (totalCouponDiscount > 0) {
+      // Default fallback if no appliedCoupons detail: paid by Tomato
+      tomatoDiscountShare = totalCouponDiscount;
+    }
+
+    // Tomato standard commission is calculated on the gross subtotal
+    const standardTomatoCommission = Number(((subtotal * commissionPct) / 100).toFixed(2));
+    const partnerGrossEarnings = Number((subtotal - standardTomatoCommission).toFixed(2));
+
+    // Partner payout: partner gets gross earnings minus partner's coupon discount share
+    const partnerPayoutAmount = Number(
+      Math.max(0, partnerGrossEarnings - partnerDiscountShare).toFixed(2),
+    );
+
+    // Tomato net commission: standard commission minus Tomato's coupon discount share
+    const tomatoCommissionAmount = Number(
+      (standardTomatoCommission - tomatoDiscountShare).toFixed(2),
+    );
 
     const isPaidToTomato =
       order.paymentStatus === 'paid' ||
@@ -216,6 +261,10 @@ export async function syncOrderToTomatoPayment(order: any, isShopOrder = false) 
       agreementCommissionPercent: commissionPct,
       tomatoCommissionAmount,
       partnerPayoutAmount,
+      couponDiscountAmount: totalCouponDiscount,
+      couponSponsorType: dominantSponsorType,
+      tomatoCouponShare: Number(tomatoDiscountShare.toFixed(2)),
+      partnerCouponShare: Number(partnerDiscountShare.toFixed(2)),
       partnerPayoutStatus: 'pending_approval',
       partnerBankSnapshot: {
         accountHolderName: partnerDoc?.bankDetails?.accountHolderName || '',

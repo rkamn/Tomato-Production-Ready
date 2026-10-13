@@ -2,13 +2,16 @@ import mongoose from 'mongoose';
 import Coupon, {
   ICoupon,
   COUPON_TYPE_LABELS,
+  SPONSOR_TYPES,
+  SponsorType,
+  SPONSOR_TYPE_LABELS,
   ensureDefaultCouponsSeeded,
 } from '../model/Coupon.js';
 import Order from '../model/Order.js';
 import Customer from '../model/Customer.js';
 import { FoodItem } from '../model/MenuItem.js';
 
-export const MAX_COUPONS_PER_ORDER = 2;
+export const MAX_COUPONS_PER_ORDER = 1;
 
 export interface CartItemInput {
   foodItemId?: string | mongoose.Types.ObjectId;
@@ -26,6 +29,10 @@ export interface AppliedCouponResult {
   title: string;
   couponType: string;
   couponTypeLabel: string;
+  sponsorType: SponsorType;
+  sponsorTypeLabel: string;
+  partnerId?: string | undefined;
+  partnerName?: string | undefined;
   discountType: 'percentage' | 'flat';
   discountValue: number;
   discountAmount: number;
@@ -86,6 +93,7 @@ export const evaluateSingleCoupon = (
     name?: string | undefined;
     previousOrdersCount: number;
     isShopOrder: boolean;
+    storeId?: string | undefined;
     subtotal: number;
     enrichedItems: Array<{
       name: string;
@@ -138,6 +146,47 @@ export const evaluateSingleCoupon = (
       return {
         eligible: false,
         reason: `You have already used coupon "${coupon.code}" the maximum allowed times (${coupon.usageLimitPerUser}).`,
+        discountAmount: 0,
+      };
+    }
+  }
+
+  // Store type and sponsor partner validation
+  if (coupon.sponsorType === 'restaurant') {
+    if (params.isShopOrder) {
+      return {
+        eligible: false,
+        reason: `Coupon "${coupon.code}" is a restaurant-specific coupon and cannot be used on shop orders.`,
+        discountAmount: 0,
+      };
+    }
+    if (
+      coupon.partnerId &&
+      params.storeId &&
+      String(coupon.partnerId) !== String(params.storeId)
+    ) {
+      return {
+        eligible: false,
+        reason: `Coupon "${coupon.code}" is valid only for orders placed at "${coupon.partnerName || 'its specific restaurant'}".`,
+        discountAmount: 0,
+      };
+    }
+  } else if (coupon.sponsorType === 'shop') {
+    if (!params.isShopOrder) {
+      return {
+        eligible: false,
+        reason: `Coupon "${coupon.code}" is a shop-specific coupon and cannot be used on restaurant orders.`,
+        discountAmount: 0,
+      };
+    }
+    if (
+      coupon.partnerId &&
+      params.storeId &&
+      String(coupon.partnerId) !== String(params.storeId)
+    ) {
+      return {
+        eligible: false,
+        reason: `Coupon "${coupon.code}" is valid only for orders placed at "${coupon.partnerName || 'its specific shop'}".`,
         discountAmount: 0,
       };
     }
@@ -316,9 +365,17 @@ export const evaluateCouponsForCart = async (params: {
   couponCodes: string[];
   userId: string;
   isShopOrder: boolean;
+  storeId?: string | undefined;
+  restaurantId?: string | undefined;
+  shopId?: string | undefined;
   items: CartItemInput[];
+  ignoreOrderCountForNewUser?: boolean | undefined;
 }): Promise<CouponEvaluationSummary> => {
   await ensureDefaultCouponsSeeded();
+
+  const resolvedStoreId = String(
+    params.storeId || params.restaurantId || params.shopId || '',
+  ).trim();
 
   const normalizedCodes = Array.from(
     new Set(
@@ -340,17 +397,17 @@ export const evaluateCouponsForCart = async (params: {
   if (normalizedCodes.length > MAX_COUPONS_PER_ORDER) {
     return {
       valid: false,
-      message: `Maximum ${MAX_COUPONS_PER_ORDER} coupons can be availed at a time per order.`,
+      message: `Only ${MAX_COUPONS_PER_ORDER} coupon code can be used per order.`,
       appliedCoupons: [],
       totalDiscount: 0,
       rejectedCoupons: normalizedCodes.slice(MAX_COUPONS_PER_ORDER).map((code) => ({
         code,
-        reason: `Exceeds limit of ${MAX_COUPONS_PER_ORDER} coupons per order.`,
+        reason: `Exceeds limit of ${MAX_COUPONS_PER_ORDER} coupon per order.`,
       })),
     };
   }
 
-  const [customer, previousOrdersCount, couponsInDb] = await Promise.all([
+  const [customer, rawPreviousOrdersCount, couponsInDb] = await Promise.all([
     mongoose.isValidObjectId(params.userId)
       ? Customer.findById(params.userId).lean()
       : null,
@@ -362,6 +419,9 @@ export const evaluateCouponsForCart = async (params: {
       : 0,
     Coupon.find({ code: { $in: normalizedCodes } }),
   ]);
+  const previousOrdersCount = params.ignoreOrderCountForNewUser
+    ? Math.max(0, rawPreviousOrdersCount - 1)
+    : rawPreviousOrdersCount;
 
   // Enrich cart items with category from FoodItem if missing
   const itemIds = (params.items || [])
@@ -424,6 +484,7 @@ export const evaluateCouponsForCart = async (params: {
       name: customer?.name || '',
       previousOrdersCount,
       isShopOrder: params.isShopOrder,
+      storeId: resolvedStoreId,
       subtotal,
       enrichedItems,
     });
@@ -449,12 +510,17 @@ export const evaluateCouponsForCart = async (params: {
     }
 
     runningDiscount = Number((runningDiscount + finalCouponDiscount).toFixed(2));
+    const sType = (coupon.sponsorType as SponsorType) || 'tomato';
     appliedCoupons.push({
       couponId: String(coupon._id),
       code: coupon.code,
       title: coupon.title,
       couponType: coupon.couponType,
       couponTypeLabel: COUPON_TYPE_LABELS[coupon.couponType] || coupon.couponType,
+      sponsorType: sType,
+      sponsorTypeLabel: SPONSOR_TYPE_LABELS[sType] || sType,
+      partnerId: coupon.partnerId ? String(coupon.partnerId) : undefined,
+      partnerName: coupon.partnerName || undefined,
       discountType: coupon.discountType,
       discountValue: coupon.discountValue,
       discountAmount: finalCouponDiscount,

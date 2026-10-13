@@ -11,12 +11,20 @@ import {
   AuthenticatedRequest,
   requireRole,
 } from '../../middleware/authenticate.js';
-import { formatBill } from '../../utils/orderHelpers.js';
+import { formatBill, resolveAdminGsnNumber } from '../../utils/orderHelpers.js';
 import Order, { OrderStatus } from '../../model/Order.js';
 import notificationService from '../notification/notificationService.js';
 import { productImageUpload } from '../../middleware/upload.js';
 import { validateBankAndPanDetails } from '../../utils/bankHelpers.js';
 import Payment from '../../model/Payment.js';
+import Coupon, {
+  COUPON_TYPES,
+  COUPON_TYPE_LABELS,
+  SPONSOR_TYPES,
+  SPONSOR_TYPE_LABELS,
+  CouponType,
+  SponsorType,
+} from '../../model/Coupon.js';
 
 const createShopRouter = () => {
   const router = express.Router();
@@ -113,7 +121,7 @@ const createShopRouter = () => {
         return res.status(401).json({ message: 'Authentication required' });
       const profile = await Shop.findById(user.userId)
         .select(
-          'name shopId digipin email phone shopAddress shopLocation category isApproved isBlocked isOpen isOnline walletBalance creditPoint bankDetails',
+          'name shopId digipin gsnNumber dob email phone shopAddress shopLocation category isApproved isBlocked isOpen isOnline walletBalance creditPoint bankDetails',
         )
         .lean();
       const cleanName = profile && typeof profile.name === 'string'
@@ -126,6 +134,7 @@ const createShopRouter = () => {
               ...profile,
               name: displayName,
               displayName,
+              gsnNumber: (profile.gsnNumber && profile.gsnNumber.trim()) ? profile.gsnNumber.trim() : 'NA',
               isOpen: profile.isOpen ?? profile.isOnline ?? true,
               isOnline: profile.isOnline ?? profile.isOpen ?? true,
             }
@@ -143,7 +152,7 @@ const createShopRouter = () => {
       const user = (req as AuthenticatedRequest).user;
       if (!user?.userId)
         return res.status(401).json({ message: 'Authentication required' });
-      const { name, phone, shopAddress, category, digipin, lat, lng } = req.body;
+      const { name, phone, shopAddress, category, digipin, gsnNumber, lat, lng } = req.body;
       const updates: Record<string, unknown> = {};
       if (typeof name === 'string' && name.trim()) updates.name = name.trim();
       if (typeof phone === 'string' && phone.trim()) updates.phone = phone.trim();
@@ -151,6 +160,8 @@ const createShopRouter = () => {
       if (typeof category === 'string') updates.category = category.trim();
       if (typeof digipin === 'string' && digipin.trim())
         updates.digipin = digipin.trim().toUpperCase();
+      if (typeof gsnNumber === 'string')
+        updates.gsnNumber = gsnNumber.trim().toUpperCase() || 'NA';
       if (
         lat !== undefined &&
         lng !== undefined &&
@@ -346,15 +357,38 @@ const createShopRouter = () => {
         return res.status(401).json({ message: 'Authentication required' });
 
       const shopObjId = new mongoose.Types.ObjectId(user.userId);
-      let orders = await ShopOrder.find({
+      const { startDate, endDate } = req.query;
+      const baseQuery: Record<string, unknown> = {
         $or: [
           { shopId: shopObjId },
           { shopId: { $exists: false } },
         ],
-      }).sort({ createdAt: -1 });
+      };
 
-      // If no shop orders exist yet for this shop, seed initial realistic packaged/retail orders
-      if (orders.length === 0) {
+      const hasDateFilter = Boolean(startDate || endDate);
+      if (hasDateFilter) {
+        const createdAtFilter: Record<string, Date> = {};
+        if (typeof startDate === 'string' && startDate.trim()) {
+          const parsedStart = new Date(`${startDate.trim()}T00:00:00.000`);
+          if (!Number.isNaN(parsedStart.getTime())) {
+            createdAtFilter.$gte = parsedStart;
+          }
+        }
+        if (typeof endDate === 'string' && endDate.trim()) {
+          const parsedEnd = new Date(`${endDate.trim()}T23:59:59.999`);
+          if (!Number.isNaN(parsedEnd.getTime())) {
+            createdAtFilter.$lte = parsedEnd;
+          }
+        }
+        if (Object.keys(createdAtFilter).length > 0) {
+          baseQuery.createdAt = createdAtFilter;
+        }
+      }
+
+      let orders = await ShopOrder.find(baseQuery).sort({ createdAt: -1 });
+
+      // If no shop orders exist yet for this shop (and no date filter was applied), seed initial realistic packaged/retail orders
+      if (orders.length === 0 && !hasDateFilter) {
         const shopUser = await Shop.findById(user.userId).lean();
         const cleanName = shopUser && typeof shopUser.name === 'string'
           ? (shopUser.name.split('/')[0] ?? '').trim()
@@ -587,11 +621,12 @@ const createShopRouter = () => {
       const order = await ShopOrder.findById(orderId);
       if (!order) return res.status(404).json({ message: 'Shop order not found' });
 
-      const [shopUser, customerUser] = await Promise.all([
+      const [shopUser, customerUser, adminGsn] = await Promise.all([
         Shop.findById(user.userId).lean(),
         order.customerId
           ? Customer.findById(order.customerId).lean()
           : null,
+        resolveAdminGsnNumber(),
       ]);
 
       const bill = formatBill(
@@ -602,6 +637,7 @@ const createShopRouter = () => {
         } as any,
         shopUser as any,
         customerUser as any,
+        adminGsn,
       );
       return res.json({ message: 'Shop bill generated successfully', bill });
     } catch (error) {
@@ -770,6 +806,349 @@ const createShopRouter = () => {
     } catch (error) {
       console.error('Shop bank details save failed:', error);
       return res.status(500).json({ message: 'Unable to save bank details' });
+    }
+  });
+
+  // ==========================================
+  // Shop Specific Coupon Routes
+  // ==========================================
+
+  // Helper to resolve shop partner and query filters robustly
+  const resolveShopPartner = async (user: AuthenticatedRequest['user']) => {
+    if (!user) return null;
+    let shop: any = null;
+    if (user.userId && mongoose.isValidObjectId(user.userId)) {
+      shop = await Shop.findById(user.userId).lean();
+    }
+    if (!shop && (user as any).shopId) {
+      shop = await Shop.findOne({ shopId: (user as any).shopId }).lean();
+    }
+    if (!shop && user.userId) {
+      shop = await Shop.findOne({
+        $or: [{ shopId: user.userId }, { email: user.email }, { phone: user.phone }],
+      } as any).lean();
+    }
+    return shop;
+  };
+
+  const getShopPartnerFilter = (shop: any, user: AuthenticatedRequest['user']) => {
+    const rawId = shop?._id || user?.userId;
+    const objId = rawId && mongoose.isValidObjectId(rawId) ? new mongoose.Types.ObjectId(rawId) : null;
+    const conditions: Record<string, any>[] = [];
+
+    if (objId) conditions.push({ partnerId: objId });
+    if (rawId) conditions.push({ partnerId: String(rawId) });
+    if (shop?.shopId) conditions.push({ partnerId: shop.shopId });
+    if ((user as any)?.shopId) conditions.push({ partnerId: (user as any).shopId });
+    if (shop?.name) conditions.push({ partnerName: shop.name });
+
+    return conditions.length ? { $or: conditions } : {};
+  };
+
+  // 1. Get coupons created by this shop
+  router.get(['/coupons', '/coupon'], async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user?.userId) return res.status(401).json({ message: 'Unauthorized' });
+
+      const shop = await resolveShopPartner(user);
+      const partnerFilter = getShopPartnerFilter(shop, user);
+
+      const coupons = await Coupon.find({
+        ...partnerFilter,
+        sponsorType: 'shop',
+      })
+        .sort({ createdAt: -1 })
+        .lean();
+
+      let activeCoupons = 0;
+      let totalRedemptions = 0;
+      let totalDiscountGiven = 0;
+
+      for (const c of coupons) {
+        if (c.isActive) activeCoupons++;
+        totalRedemptions += Number(c.usedCount || 0);
+        for (const u of c.usedBy || []) {
+          totalDiscountGiven += Number(u.discountAmount || 0);
+        }
+      }
+
+      return res.json({
+        shopName: shop?.name || 'Shop',
+        coupons: coupons.map((c) => ({
+          ...c,
+          id: String(c._id),
+          couponTypeLabel: COUPON_TYPE_LABELS[c.couponType] || c.couponType,
+          sponsorType: c.sponsorType || 'shop',
+          sponsorTypeLabel: SPONSOR_TYPE_LABELS['shop'],
+        })),
+        summary: {
+          totalCoupons: coupons.length,
+          activeCoupons,
+          inactiveCoupons: coupons.length - activeCoupons,
+          totalRedemptions,
+          totalDiscountGiven: Number(totalDiscountGiven.toFixed(2)),
+        },
+      });
+    } catch (error) {
+      console.error('Shop coupons fetch failed:', error);
+      return res.status(500).json({ message: 'Unable to fetch coupons' });
+    }
+  });
+
+  // 2. Create coupon by shop
+  router.post(['/coupons', '/coupon'], async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user?.userId) return res.status(401).json({ message: 'Unauthorized' });
+
+      const shop = await resolveShopPartner(user);
+      if (!shop) return res.status(404).json({ message: 'Shop partner profile not found' });
+
+      const body = req.body ?? {};
+      const code = String(body.code || '')
+        .trim()
+        .toUpperCase()
+        .replace(/\s+/g, '');
+      const title = String(body.title || '').trim();
+      const description = String(body.description || '').trim();
+      const discountType = body.discountType === 'flat' ? 'flat' : 'percentage';
+      const discountValue = Number(body.discountValue ?? 0);
+      const maxDiscountAmount = Math.max(0, Number(body.maxDiscountAmount ?? 0));
+      const minOrderAmount = Math.max(0, Number(body.minOrderAmount ?? 0));
+      const targetItemCategory = String(body.targetItemCategory || '').trim();
+      const occasionName = String(body.occasionName || '').trim();
+      const usageLimitPerUser = Math.max(1, Number(body.usageLimitPerUser ?? 1));
+      const totalUsageLimit = Math.max(0, Number(body.totalUsageLimit ?? 0));
+      const validFrom = body.validFrom ? new Date(body.validFrom) : new Date();
+      const validUntil = body.validUntil ? new Date(body.validUntil) : null;
+      const isActive = body.isActive !== undefined ? Boolean(body.isActive) : true;
+
+      if (!code || code.length < 3) {
+        return res.status(400).json({ message: 'Coupon code must be at least 3 characters' });
+      }
+      if (!title) {
+        return res.status(400).json({ message: 'Coupon title is required' });
+      }
+      if (!discountValue || discountValue <= 0) {
+        return res.status(400).json({ message: 'Discount value must be greater than 0' });
+      }
+      if (discountType === 'percentage' && discountValue > 100) {
+        return res.status(400).json({ message: 'Percentage discount cannot exceed 100%' });
+      }
+
+      const existing = await Coupon.findOne({ code });
+      if (existing) {
+        return res.status(409).json({ message: `Coupon code "${code}" already exists` });
+      }
+
+      const partnerIdToSave = shop._id && mongoose.isValidObjectId(shop._id)
+        ? new mongoose.Types.ObjectId(shop._id)
+        : (user.userId && mongoose.isValidObjectId(user.userId) ? new mongoose.Types.ObjectId(user.userId) : shop._id || user.userId);
+
+      const created = await Coupon.create({
+        code,
+        title,
+        description,
+        couponType: 'shop',
+        sponsorType: 'shop',
+        partnerId: partnerIdToSave,
+        partnerName: shop.name,
+        discountType,
+        discountValue,
+        maxDiscountAmount,
+        minOrderAmount,
+        targetItemCategory,
+        occasionName,
+        applicableStoreType: 'shop',
+        usageLimitPerUser,
+        totalUsageLimit,
+        validFrom,
+        validUntil,
+        isActive,
+        createdBy: shop.name || 'Shop',
+      });
+
+      return res.status(201).json({
+        message: `Coupon "${created.code}" created successfully for ${shop.name}`,
+        coupon: {
+          ...created.toObject(),
+          id: String(created._id),
+          couponTypeLabel: COUPON_TYPE_LABELS[created.couponType] || created.couponType,
+          sponsorType: 'shop',
+          sponsorTypeLabel: SPONSOR_TYPE_LABELS['shop'],
+        },
+      });
+    } catch (error) {
+      console.error('Shop create coupon failed:', error);
+      return res.status(500).json({ message: 'Unable to create coupon' });
+    }
+  });
+
+  // 3. Update coupon by shop
+  router.put(['/coupons/:couponId', '/coupon/:couponId'], async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user?.userId) return res.status(401).json({ message: 'Unauthorized' });
+
+      const couponId = String(req.params.couponId || '');
+      if (!mongoose.isValidObjectId(couponId)) {
+        return res.status(400).json({ message: 'Valid coupon ID required' });
+      }
+
+      const shop = await resolveShopPartner(user);
+      const partnerFilter = getShopPartnerFilter(shop, user);
+
+      const coupon = await Coupon.findOne({
+        _id: couponId,
+        ...partnerFilter,
+        sponsorType: 'shop',
+      });
+
+      if (!coupon) {
+        return res.status(404).json({ message: 'Coupon not found or unauthorized' });
+      }
+
+      const body = req.body ?? {};
+      if (body.code !== undefined) {
+        const nextCode = String(body.code || '')
+          .trim()
+          .toUpperCase()
+          .replace(/\s+/g, '');
+        if (nextCode && nextCode !== coupon.code) {
+          const dup = await Coupon.findOne({ code: nextCode, _id: { $ne: coupon._id } });
+          if (dup) {
+            return res.status(409).json({ message: `Coupon code "${nextCode}" already exists` });
+          }
+          coupon.code = nextCode;
+        }
+      }
+      if (body.title !== undefined) coupon.title = String(body.title).trim();
+      if (body.description !== undefined) coupon.description = String(body.description).trim();
+      if (body.discountType === 'flat' || body.discountType === 'percentage') {
+        coupon.discountType = body.discountType;
+      }
+      if (body.discountValue !== undefined) {
+        coupon.discountValue = Math.max(1, Number(body.discountValue));
+      }
+      if (body.maxDiscountAmount !== undefined) {
+        coupon.maxDiscountAmount = Math.max(0, Number(body.maxDiscountAmount));
+      }
+      if (body.minOrderAmount !== undefined) {
+        coupon.minOrderAmount = Math.max(0, Number(body.minOrderAmount));
+      }
+      if (body.targetItemCategory !== undefined) {
+        coupon.targetItemCategory = String(body.targetItemCategory).trim();
+      }
+      if (body.occasionName !== undefined) {
+        coupon.occasionName = String(body.occasionName).trim();
+      }
+      if (body.usageLimitPerUser !== undefined) {
+        coupon.usageLimitPerUser = Math.max(1, Number(body.usageLimitPerUser));
+      }
+      if (body.totalUsageLimit !== undefined) {
+        coupon.totalUsageLimit = Math.max(0, Number(body.totalUsageLimit));
+      }
+      if (body.validFrom !== undefined) {
+        coupon.validFrom = body.validFrom ? new Date(body.validFrom) : new Date();
+      }
+      if (body.validUntil !== undefined) {
+        coupon.validUntil = body.validUntil ? new Date(body.validUntil) : null;
+      }
+      if (body.isActive !== undefined) {
+        coupon.isActive = Boolean(body.isActive);
+      }
+
+      await coupon.save();
+      return res.json({
+        message: `Coupon "${coupon.code}" updated successfully`,
+        coupon: {
+          ...coupon.toObject(),
+          id: String(coupon._id),
+          couponTypeLabel: COUPON_TYPE_LABELS[coupon.couponType] || coupon.couponType,
+          sponsorType: 'shop',
+          sponsorTypeLabel: SPONSOR_TYPE_LABELS['shop'],
+        },
+      });
+    } catch (error) {
+      console.error('Shop update coupon failed:', error);
+      return res.status(500).json({ message: 'Unable to update coupon' });
+    }
+  });
+
+  // 4. Toggle coupon active state
+  router.patch(['/coupons/:couponId/toggle', '/coupon/:couponId/toggle'], async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user?.userId) return res.status(401).json({ message: 'Unauthorized' });
+
+      const couponId = String(req.params.couponId || '');
+      if (!mongoose.isValidObjectId(couponId)) {
+        return res.status(400).json({ message: 'Valid coupon ID required' });
+      }
+
+      const shop = await resolveShopPartner(user);
+      const partnerFilter = getShopPartnerFilter(shop, user);
+
+      const coupon = await Coupon.findOne({
+        _id: couponId,
+        ...partnerFilter,
+        sponsorType: 'shop',
+      });
+
+      if (!coupon) {
+        return res.status(404).json({ message: 'Coupon not found or unauthorized' });
+      }
+
+      coupon.isActive = !coupon.isActive;
+      await coupon.save();
+
+      return res.json({
+        message: `Coupon "${coupon.code}" is now ${coupon.isActive ? 'Active' : 'Inactive'}`,
+        coupon: {
+          ...coupon.toObject(),
+          id: String(coupon._id),
+          couponTypeLabel: COUPON_TYPE_LABELS[coupon.couponType] || coupon.couponType,
+          sponsorType: 'shop',
+          sponsorTypeLabel: SPONSOR_TYPE_LABELS['shop'],
+        },
+      });
+    } catch (error) {
+      console.error('Shop toggle coupon failed:', error);
+      return res.status(500).json({ message: 'Unable to toggle coupon' });
+    }
+  });
+
+  // 5. Delete coupon by shop
+  router.delete(['/coupons/:couponId', '/coupon/:couponId'], async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user?.userId) return res.status(401).json({ message: 'Unauthorized' });
+
+      const couponId = String(req.params.couponId || '');
+      if (!mongoose.isValidObjectId(couponId)) {
+        return res.status(400).json({ message: 'Valid coupon ID required' });
+      }
+
+      const shop = await resolveShopPartner(user);
+      const partnerFilter = getShopPartnerFilter(shop, user);
+
+      const coupon = await Coupon.findOneAndDelete({
+        _id: couponId,
+        ...partnerFilter,
+        sponsorType: 'shop',
+      });
+
+      if (!coupon) {
+        return res.status(404).json({ message: 'Coupon not found or unauthorized' });
+      }
+
+      return res.json({
+        message: `Coupon "${coupon.code}" deleted successfully`,
+      });
+    } catch (error) {
+      console.error('Shop delete coupon failed:', error);
+      return res.status(500).json({ message: 'Unable to delete coupon' });
     }
   });
 

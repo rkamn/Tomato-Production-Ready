@@ -1762,6 +1762,20 @@
         background: #fff !important;
         color: #0284c7 !important;
       }
+      #partner-overview-report-btn.active {
+        background: #1e3a8a !important;
+        color: #fff !important;
+        border-color: #1e3a8a !important;
+      }
+      #partner-overview-notif-btn.active {
+        background: #0284c7 !important;
+        color: #fff !important;
+        border-color: #0284c7 !important;
+      }
+      #partner-overview-notif-btn.active #partner-overview-notif-badge {
+        background: #fff !important;
+        color: #0284c7 !important;
+      }
 
       /* Order view header cart button */
       .order-header-cart-button {

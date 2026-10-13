@@ -22,6 +22,10 @@ import {
   validateBankAndPanDetails,
   syncOrderToTomatoPayment,
 } from '../../utils/bankHelpers.js';
+import {
+  handleRiderLocationRealtimeUpdate,
+  broadcastOrderLiveTrackingUpdate,
+} from '../../utils/websocket.js';
 import Payment from '../../model/Payment.js';
 
 const createRiderRouter = () => {
@@ -57,7 +61,7 @@ const createRiderRouter = () => {
     }
   });
 
-  // Update Rider live GPS location & online status
+  // Update Rider live GPS location & online status (and broadcast over WebSocket to active order trackers)
   router.put('/location', async (req: Request, res: Response) => {
     try {
       const user = (req as AuthenticatedRequest).user;
@@ -72,17 +76,12 @@ const createRiderRouter = () => {
           .json({ message: 'Valid lat and lng coordinates are required' });
       }
 
-      const updated: any = await Rider.findByIdAndUpdate(
-        user.userId,
-        {
-          $set: {
-            currentLocation: { lat: numLat, lng: numLng },
-            isOnline: isOnline !== undefined ? Boolean(isOnline) : true,
-            lastLocationUpdated: new Date(),
-          },
-        },
-        { returnDocument: 'after' },
-      ).lean();
+      const updated: any = await handleRiderLocationRealtimeUpdate({
+        riderUserId: user.userId,
+        lat: numLat,
+        lng: numLng,
+        isOnline: isOnline !== undefined ? Boolean(isOnline) : true,
+      });
 
       const displayName = updated ? updated.name : '';
       const riderIdStr = updated?.riderId || '';
@@ -331,6 +330,10 @@ const createRiderRouter = () => {
           riderUser?.phone,
         );
 
+        broadcastOrderLiveTrackingUpdate(String(order._id)).catch((wsErr) =>
+          console.warn('WebSocket order accept broadcast warning:', wsErr),
+        );
+
         return res.json({ message: 'Delivery accepted successfully', order });
       } catch (error) {
         console.error('Rider accept order failed:', error);
@@ -399,6 +402,10 @@ const createRiderRouter = () => {
         await syncOrderToTomatoPayment(order);
 
         await notificationService.notifyOnDelivered(order);
+
+        broadcastOrderLiveTrackingUpdate(String(order._id)).catch((wsErr) =>
+          console.warn('WebSocket order deliver broadcast warning:', wsErr),
+        );
 
         return res.json({
           message: 'Order marked as delivered successfully',

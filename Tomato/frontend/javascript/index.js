@@ -339,6 +339,9 @@
 
           localStorage.setItem('tomatoToken', data.token);
           localStorage.setItem('tomatoUser', JSON.stringify(data.user));
+          try {
+            sessionStorage.removeItem('tomato_active_view');
+          } catch (_) {}
           document.getElementById('account-name').textContent = data.user.displayName || data.user.name;
           document.getElementById('account-email').textContent =
             data.user.email || 'Not provided';

@@ -44,6 +44,9 @@ export interface IAppliedOrderCoupon {
   code: string;
   title?: string;
   couponType?: string;
+  sponsorType?: 'tomato' | 'restaurant' | 'shop' | 'common';
+  partnerShare?: number;
+  tomatoShare?: number;
   discountAmount: number;
 }
 

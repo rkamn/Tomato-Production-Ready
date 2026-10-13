@@ -14,6 +14,16 @@ export const COUPON_TYPES = [
 
 export type CouponType = (typeof COUPON_TYPES)[number];
 
+export const SPONSOR_TYPES = ['tomato', 'restaurant', 'shop', 'common'] as const;
+export type SponsorType = (typeof SPONSOR_TYPES)[number];
+
+export const SPONSOR_TYPE_LABELS: Record<SponsorType, string> = {
+  tomato: 'Tomato Specific (Paid by Tomato)',
+  restaurant: 'Restaurant Specific (Paid by Restaurant)',
+  shop: 'Shop Specific (Paid by Shop)',
+  common: 'Common Coupon (Paid based on Agreement %)',
+};
+
 export const COUPON_TYPE_LABELS: Record<CouponType, string> = {
   restaurant_item_category: 'Restaurant Item Category',
   category_occasion: 'Category Occasion',
@@ -40,6 +50,9 @@ export interface ICoupon extends Document {
   title: string;
   description: string;
   couponType: CouponType;
+  sponsorType: SponsorType;
+  partnerId?: mongoose.Types.ObjectId | string | null;
+  partnerName?: string;
   discountType: 'percentage' | 'flat';
   discountValue: number;
   maxDiscountAmount: number;
@@ -97,6 +110,22 @@ const couponSchema = new Schema<ICoupon>(
       enum: COUPON_TYPES,
       required: true,
       index: true,
+    },
+    sponsorType: {
+      type: String,
+      enum: SPONSOR_TYPES,
+      default: 'tomato',
+      index: true,
+    },
+    partnerId: {
+      type: Schema.Types.Mixed,
+      default: null,
+      index: true,
+    },
+    partnerName: {
+      type: String,
+      default: '',
+      trim: true,
     },
     discountType: {
       type: String,
@@ -182,6 +211,10 @@ const Coupon = mongoose.model<ICoupon>('Coupon', couponSchema, 'coupons');
 
 export const ensureDefaultCouponsSeeded = async () => {
   try {
+    await Coupon.updateMany(
+      { $or: [{ sponsorType: { $exists: false } }, { sponsorType: null }] },
+      { $set: { sponsorType: 'tomato' } },
+    );
     const count = await Coupon.countDocuments();
     if (count > 0) return;
 

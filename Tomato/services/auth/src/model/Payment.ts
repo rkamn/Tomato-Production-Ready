@@ -29,6 +29,10 @@ export interface IPayment extends Document {
   agreementCommissionPercent: number;
   tomatoCommissionAmount: number;
   partnerPayoutAmount: number;
+  couponDiscountAmount?: number;
+  couponSponsorType?: string;
+  tomatoCouponShare?: number;
+  partnerCouponShare?: number;
   partnerPayoutStatus: 'pending_approval' | 'approved_paid';
   partnerPaidAt?: Date;
   partnerPayoutRef?: string;
@@ -102,6 +106,10 @@ const paymentSchema: Schema<IPayment> = new Schema(
     agreementCommissionPercent: { type: Number, default: 15 },
     tomatoCommissionAmount: { type: Number, default: 0 },
     partnerPayoutAmount: { type: Number, default: 0 },
+    couponDiscountAmount: { type: Number, default: 0 },
+    couponSponsorType: { type: String, default: '' },
+    tomatoCouponShare: { type: Number, default: 0 },
+    partnerCouponShare: { type: Number, default: 0 },
     partnerPayoutStatus: {
       type: String,
       enum: ['pending_approval', 'approved_paid'],

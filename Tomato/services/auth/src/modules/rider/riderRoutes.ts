@@ -385,17 +385,23 @@ const createRiderRouter = () => {
             .status(404)
             .json({ message: 'Order not found or not assigned to you' });
 
+        const codCollectedVia = req.body?.codCollectedVia === 'upi' ? 'upi' : 'cash';
         order.status = 'delivered';
         if (order.paymentMethod === 'cod') {
           order.paymentStatus = 'paid';
           order.paidAt = new Date();
+          order.codCollectedVia = codCollectedVia;
+          order.codCollectedAt = new Date();
         }
 
         order.statusHistory.push({
           status: 'delivered',
           at: new Date(),
           by: String(user.userId),
-          note: 'Order safely delivered to customer address',
+          note:
+            order.paymentMethod === 'cod'
+              ? `Order safely delivered to customer address. COD payment collected via ${codCollectedVia.toUpperCase()}.`
+              : 'Order safely delivered to customer address',
         });
 
         await order.save();
@@ -408,7 +414,10 @@ const createRiderRouter = () => {
         );
 
         return res.json({
-          message: 'Order marked as delivered successfully',
+          message:
+            order.paymentMethod === 'cod'
+              ? `Order delivered successfully! ₹${order.totalAmount} collected via ${codCollectedVia.toUpperCase()}.`
+              : 'Order marked as delivered successfully',
           order,
         });
       } catch (error) {
@@ -432,9 +441,26 @@ const createRiderRouter = () => {
 
       const deliveryEarnings = completedOrders.length * 40;
 
+      let codCashTotal = 0;
+      let codUpiTotal = 0;
+      for (const ord of completedOrders) {
+        if (ord.paymentMethod === 'cod') {
+          if (ord.codCollectedVia === 'upi') {
+            codUpiTotal += Number(ord.totalAmount || 0);
+          } else {
+            codCashTotal += Number(ord.totalAmount || 0);
+          }
+        }
+      }
+
       return res.json({
         totalDeliveries: completedOrders.length,
         totalEarnings: deliveryEarnings,
+        codCollections: {
+          cash: codCashTotal,
+          upi: codUpiTotal,
+          total: codCashTotal + codUpiTotal,
+        },
         orders: completedOrders,
       });
     } catch (error) {
@@ -502,7 +528,8 @@ const createRiderRouter = () => {
           isLocked,
         },
         isApproved: rider.isApproved,
-        walletBalance: rider.walletBalance || 0,
+        walletBalance: Math.max(0, Number(rider.walletBalance || 0)),
+        creditPoint: Math.max(0, Number(rider.creditPoint || 0)),
         payouts,
       });
     } catch (error) {

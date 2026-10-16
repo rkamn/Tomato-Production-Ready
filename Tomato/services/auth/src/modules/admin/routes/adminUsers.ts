@@ -690,15 +690,17 @@ const router = Router();
       }
 
       try {
+        const rawPoints = req.body?.creditPoints;
+        const creditPoints = typeof rawPoints === 'string' ? parseInt(rawPoints, 10) : Number(rawPoints);
         const transfer = await transferCreditPoints(
           adminId,
           recipientId,
-          req.body?.creditPoints,
+          creditPoints,
           req.body?.purpose,
           req.body?.orderNumber,
         );
         return res.json({
-          message: `Transferred ${req.body.creditPoints} credit point(s) successfully`,
+          message: `Transferred ${creditPoints} credit point(s) successfully`,
           ...transfer,
         });
       } catch (error: any) {
@@ -980,11 +982,23 @@ const router = Router();
           { returnDocument: 'after' },
         );
         if (!user) {
-          user = await Employee.findByIdAndUpdate(
-            userId,
-            { $set: { isApproved: true } },
-            { returnDocument: 'after' },
-          );
+          const emp = await Employee.findById(userId);
+          if (emp) {
+            emp.isApproved = true;
+            const plainBd = (emp.bankDetails as any)?.toObject
+              ? (emp.bankDetails as any).toObject()
+              : emp.bankDetails || {};
+            emp.bankDetails = {
+              ...plainBd,
+              isSubmitted: Boolean(plainBd.accountNumber || plainBd.panNumber || plainBd.isSubmitted),
+              isApproved: true,
+              isLocked: true,
+              approvedAt: new Date(),
+              approvedBy: adminIdentifier,
+            };
+            await emp.save();
+            user = emp;
+          }
         }
       }
 

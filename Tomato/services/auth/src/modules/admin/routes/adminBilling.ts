@@ -103,10 +103,12 @@ const router = Router();
             email: r.email || '',
             bankDetails: r.bankDetails || null,
             isBankApproved: !!(r.isApproved && r.bankDetails?.isApproved),
-            walletBalance: Number(r.walletBalance || 0),
+            walletBalance: Math.max(0, Number(r.walletBalance || 0)),
+            creditPoint: Math.max(0, Number(r.creditPoint || 0)),
             totalOrders: 0,
             grossVolume: 0,
             tomatoCommission: 0,
+            gstAmount: 0,
             discountsFunded: 0,
             totalPayable: 0,
             totalPaid: 0,
@@ -133,10 +135,12 @@ const router = Router();
             email: s.email || '',
             bankDetails: s.bankDetails || null,
             isBankApproved: !!(s.isApproved && s.bankDetails?.isApproved),
-            walletBalance: Number(s.walletBalance || 0),
+            walletBalance: Math.max(0, Number(s.walletBalance || 0)),
+            creditPoint: Math.max(0, Number(s.creditPoint || 0)),
             totalOrders: 0,
             grossVolume: 0,
             tomatoCommission: 0,
+            gstAmount: 0,
             discountsFunded: 0,
             totalPayable: 0,
             totalPaid: 0,
@@ -163,14 +167,20 @@ const router = Router();
             email: rd.email || '',
             bankDetails: rd.bankDetails || null,
             isBankApproved: !!(rd.isApproved && rd.bankDetails?.isApproved),
-            walletBalance: Number(rd.walletBalance || 0),
+            walletBalance: Math.max(0, Number(rd.walletBalance || 0)),
+            creditPoint: Math.max(0, Number(rd.creditPoint || 0)),
             totalOrders: 0,
             grossVolume: 0,
             tomatoCommission: 0,
+            gstAmount: 0,
             discountsFunded: 0,
             totalPayable: 0,
             totalPaid: 0,
             totalPending: 0,
+            codOrdersCount: 0,
+            codTotalCollected: 0,
+            codCashCollected: 0,
+            codUpiCollected: 0,
             unsettledPaymentIds: [] as string[],
             payoutStatus: 'settled',
           });
@@ -179,8 +189,29 @@ const router = Router();
           if (rd.name) riderAliasMap.set(rd.name.trim().toLowerCase(), rKey);
         });
 
+        // Track platform COD counters
+        let totalPlatformCodCollected = 0;
+        let totalPlatformCodCash = 0;
+        let totalPlatformCodUpi = 0;
+        let totalPlatformCodOrders = 0;
+
         // Process all payments for the period
         allPayments.forEach((p: any) => {
+          const isCod = p.paymentMethod === 'cod';
+          const isCodReceived = isCod && (p.tomatoAccountStatus === 'received' || Boolean(p.codCollectedAt));
+          const codAmt = Number(p.totalAmount || 0);
+          const codMode = p.codCollectedVia === 'upi' ? 'upi' : 'cash';
+
+          if (isCodReceived) {
+            totalPlatformCodCollected += codAmt;
+            totalPlatformCodOrders += 1;
+            if (codMode === 'upi') {
+              totalPlatformCodUpi += codAmt;
+            } else {
+              totalPlatformCodCash += codAmt;
+            }
+          }
+
           const pType = p.orderType === 'shop' ? 'shop' : 'restaurant';
           let partnerKey = `${pType}_${String(p.partnerId || '')}`;
           if (!billingMap.has(partnerKey)) {
@@ -197,6 +228,7 @@ const router = Router();
             const gross = Number(p.totalAmount || 0);
             partnerEntry.grossVolume += gross;
             partnerEntry.tomatoCommission += Number(p.tomatoCommissionAmount || 0);
+            partnerEntry.gstAmount += Number(p.tax || 0);
             partnerEntry.discountsFunded += Number(p.partnerDiscountShare || 0);
 
             const partnerPayout = Number(p.partnerPayoutAmount || 0);
@@ -224,6 +256,12 @@ const router = Router();
             const riderEntry = billingMap.get(riderKey);
             if (riderEntry) {
               riderEntry.totalOrders += 1;
+              const riderGross = Number(p.deliveryFee || p.riderPayoutAmount || 40);
+              riderEntry.grossVolume += riderGross;
+              // GST applied to riders (standard 5% GST rate on delivery)
+              const riderGst = Number((riderGross * 0.05).toFixed(2));
+              riderEntry.gstAmount += riderGst;
+
               const riderPayout = Number(p.riderPayoutAmount || 0);
               riderEntry.totalPayable += riderPayout;
 
@@ -233,6 +271,16 @@ const router = Router();
                 riderEntry.totalPending += riderPayout;
                 riderEntry.unsettledPaymentIds.push(String(p._id));
               }
+
+              if (isCodReceived) {
+                riderEntry.codOrdersCount = (riderEntry.codOrdersCount || 0) + 1;
+                riderEntry.codTotalCollected = (riderEntry.codTotalCollected || 0) + codAmt;
+                if (codMode === 'upi') {
+                  riderEntry.codUpiCollected = (riderEntry.codUpiCollected || 0) + codAmt;
+                } else {
+                  riderEntry.codCashCollected = (riderEntry.codCashCollected || 0) + codAmt;
+                }
+              }
             }
           }
         });
@@ -241,14 +289,24 @@ const router = Router();
         let totalPlatformPayable = 0;
         let totalPlatformPaid = 0;
         let totalPlatformPending = 0;
+        let totalPlatformGst = 0;
+        let totalPlatformCommission = 0;
         let pendingRestaurantsCount = 0;
         let pendingShopsCount = 0;
         let pendingRidersCount = 0;
 
         const partnerBillingList = Array.from(billingMap.values()).map((item) => {
+          item.grossVolume = Math.round(item.grossVolume * 100) / 100;
+          item.tomatoCommission = Math.round(item.tomatoCommission * 100) / 100;
+          item.gstAmount = Math.round((item.gstAmount || 0) * 100) / 100;
+          item.discountsFunded = Math.round(item.discountsFunded * 100) / 100;
           item.totalPayable = Math.round(item.totalPayable * 100) / 100;
           item.totalPaid = Math.round(item.totalPaid * 100) / 100;
           item.totalPending = Math.round(item.totalPending * 100) / 100;
+          item.codTotalCollected = Math.round((item.codTotalCollected || 0) * 100) / 100;
+          item.codCashCollected = Math.round((item.codCashCollected || 0) * 100) / 100;
+          item.codUpiCollected = Math.round((item.codUpiCollected || 0) * 100) / 100;
+          item.codOrdersCount = item.codOrdersCount || 0;
 
           if (item.totalOrders === 0) {
             item.payoutStatus = 'no_orders';
@@ -264,6 +322,8 @@ const router = Router();
           totalPlatformPayable += item.totalPayable;
           totalPlatformPaid += item.totalPaid;
           totalPlatformPending += item.totalPending;
+          totalPlatformGst += item.gstAmount;
+          totalPlatformCommission += item.tomatoCommission;
 
           return item;
         });
@@ -296,6 +356,12 @@ const router = Router();
             totalPlatformPayable: Math.round(totalPlatformPayable * 100) / 100,
             totalPlatformPaid: Math.round(totalPlatformPaid * 100) / 100,
             totalPlatformPending: Math.round(totalPlatformPending * 100) / 100,
+            totalPlatformGst: Math.round(totalPlatformGst * 100) / 100,
+            totalPlatformCommission: Math.round(totalPlatformCommission * 100) / 100,
+            totalPlatformCodCollected: Math.round(totalPlatformCodCollected * 100) / 100,
+            totalPlatformCodCash: Math.round(totalPlatformCodCash * 100) / 100,
+            totalPlatformCodUpi: Math.round(totalPlatformCodUpi * 100) / 100,
+            totalPlatformCodOrders,
             pendingRestaurantsCount,
             pendingShopsCount,
             pendingRidersCount,

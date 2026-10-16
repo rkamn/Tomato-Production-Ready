@@ -20,6 +20,8 @@ export interface IPayment extends Document {
   transactionId: string;
   tomatoAccountStatus: 'received' | 'pending_cod';
   tomatoReceivedAt?: Date;
+  codCollectedVia?: 'cash' | 'upi';
+  codCollectedAt?: Date;
 
   // Partner (Shop / Restaurant) Settlement
   partnerId?: string;
@@ -94,6 +96,8 @@ const paymentSchema: Schema<IPayment> = new Schema(
       default: 'received',
     },
     tomatoReceivedAt: { type: Date, default: Date.now },
+    codCollectedVia: { type: String, enum: ['cash', 'upi'] },
+    codCollectedAt: { type: Date },
 
     partnerId: { type: String, default: '', index: true },
     partnerCode: { type: String, default: '' },

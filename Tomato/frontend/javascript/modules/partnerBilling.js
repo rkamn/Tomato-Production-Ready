@@ -5,18 +5,29 @@
 // VIEW 17.5: ADMIN PARTNERS BILLING (WEEKLY SETTLEMENTS & PAYOUT ENGINE)
 // =========================================================================
 let currentAdminPartnerBillingTab = 'weekly';
+try {
+  const savedTab = sessionStorage.getItem('tomato_partner_billing_tab');
+  if (savedTab === 'settlements' || savedTab === 'weekly') {
+    currentAdminPartnerBillingTab = savedTab;
+  }
+} catch (_) {}
 let adminPartnerBillingData = [];
 let adminPartnerBillingSummary = {};
 let adminPartnerBillingWeekStart = '';
 let adminPartnerBillingWeekEnd = '';
 let adminPartnerBillingLoading = false;
 
-function switchAdminPartnerBillingTab(tabName) {
+function switchAdminPartnerBillingTab(tabName, skipFetch = false) {
   currentAdminPartnerBillingTab = tabName || 'weekly';
+  try {
+    sessionStorage.setItem('tomato_partner_billing_tab', currentAdminPartnerBillingTab);
+  } catch (_) {}
+
   const weeklyTab = document.getElementById('admin-billing-tab-weekly');
   const settlementsTab = document.getElementById('admin-billing-tab-settlements');
   const weeklyBtn = document.getElementById('admin-billing-tab-weekly-btn');
   const settlementsBtn = document.getElementById('admin-billing-tab-settlements-btn');
+  const exportBtn = document.getElementById('admin-billing-export-btn');
 
   if (weeklyTab) weeklyTab.style.display = currentAdminPartnerBillingTab === 'weekly' ? 'block' : 'none';
   if (settlementsTab) settlementsTab.style.display = currentAdminPartnerBillingTab === 'settlements' ? 'block' : 'none';
@@ -27,20 +38,41 @@ function switchAdminPartnerBillingTab(tabName) {
   if (settlementsBtn) {
     settlementsBtn.className = currentAdminPartnerBillingTab === 'settlements' ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm';
   }
+  if (exportBtn) {
+    exportBtn.textContent = currentAdminPartnerBillingTab === 'settlements' ? '📥 Export Settlements CSV' : '📥 Export Billing CSV';
+  }
 
-  if (currentAdminPartnerBillingTab === 'weekly') {
-    fetchAdminPartnerBilling();
-  } else {
-    fetchAdminBankSettlements();
+  const subBadge = document.getElementById('admin-billing-subbadge');
+  if (subBadge) {
+    if (currentAdminPartnerBillingTab === 'settlements') {
+      subBadge.textContent = 'Escrow & Order Payouts Engine';
+      subBadge.className = 'badge badge-accepted';
+    } else {
+      subBadge.textContent = 'Weekly Settlement Engine';
+      subBadge.className = 'badge badge-delivered';
+    }
+  }
+
+  if (!skipFetch) {
+    if (currentAdminPartnerBillingTab === 'weekly') {
+      fetchAdminPartnerBilling();
+    } else {
+      fetchAdminBankSettlements();
+    }
   }
 }
 
 function refreshAdminPartnerBillingCurrentTab() {
+  switchAdminPartnerBillingTab(currentAdminPartnerBillingTab, true);
   if (currentAdminPartnerBillingTab === 'settlements') {
     fetchAdminBankSettlements();
   } else {
     fetchAdminPartnerBilling();
   }
+}
+
+function loadAdminPartnerBillingPanel() {
+  refreshAdminPartnerBillingCurrentTab();
 }
 
 function getAdminCurrentWeekString(d = new Date()) {
@@ -76,6 +108,175 @@ function setAdminBillingAllTime() {
     weekInput.value = '';
   }
   fetchAdminPartnerBilling('all');
+}
+
+function getAdminWeekOffset(baseWeekStr, offsetWeeks) {
+  let baseDate = new Date();
+  if (baseWeekStr && /^\d{4}-W\d{2}$/.test(baseWeekStr.trim())) {
+    const parts = baseWeekStr.trim().split('-W');
+    const y = parseInt(parts[0], 10);
+    const w = parseInt(parts[1], 10);
+    const simple = new Date(Date.UTC(y, 0, 1 + (w - 1) * 7));
+    const dow = simple.getUTCDay();
+    const monday = new Date(simple);
+    if (dow <= 4) {
+      monday.setUTCDate(simple.getUTCDate() - simple.getUTCDay() + 1);
+    } else {
+      monday.setUTCDate(simple.getUTCDate() + 8 - simple.getUTCDay());
+    }
+    baseDate = monday;
+  }
+  const targetDate = new Date(baseDate);
+  targetDate.setUTCDate(targetDate.getUTCDate() + offsetWeeks * 7);
+  return getAdminCurrentWeekString(targetDate);
+}
+
+function getAdminWeekDateRangeLabel(weekStr) {
+  if (!weekStr || weekStr === 'all') return 'All Time';
+  if (!/^\d{4}-W\d{2}$/.test(weekStr)) return weekStr;
+  try {
+    const parts = weekStr.split('-W');
+    const y = parseInt(parts[0], 10);
+    const w = parseInt(parts[1], 10);
+    const simple = new Date(Date.UTC(y, 0, 1 + (w - 1) * 7));
+    const dow = simple.getUTCDay();
+    const monday = new Date(simple);
+    if (dow <= 4) {
+      monday.setUTCDate(simple.getUTCDate() - simple.getUTCDay() + 1);
+    } else {
+      monday.setUTCDate(simple.getUTCDate() + 8 - simple.getUTCDay());
+    }
+    const sunday = new Date(monday);
+    sunday.setUTCDate(sunday.getUTCDate() + 6);
+    const opt = { day: 'numeric', month: 'short', timeZone: 'UTC' };
+    const startStr = monday.toLocaleDateString('en-IN', opt);
+    const endStr = sunday.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+    return `${startStr} – ${endStr}`;
+  } catch (_) {
+    return weekStr;
+  }
+}
+
+function selectAdminBillingWeek(targetWeekStr) {
+  const weekInput = document.getElementById('admin-billing-week-input');
+  if (targetWeekStr === 'all') {
+    setAdminBillingAllTime();
+    return;
+  }
+  if (weekInput) {
+    weekInput.value = targetWeekStr;
+  }
+  fetchAdminPartnerBilling(targetWeekStr);
+}
+
+function navigateAdminBillingWeekOffset(offset) {
+  const weekInput = document.getElementById('admin-billing-week-input');
+  const currentVal = (weekInput?.value || '').trim();
+  const base = (/^\d{4}-W\d{2}$/.test(currentVal)) ? currentVal : getAdminCurrentWeekString();
+  const targetWeek = getAdminWeekOffset(base, offset);
+  selectAdminBillingWeek(targetWeek);
+}
+
+function renderAdminPartnerBillingWeekPaginationHTML() {
+  const weekInput = document.getElementById('admin-billing-week-input');
+  const currentVal = (weekInput?.value || '').trim();
+  const isAllTime = currentVal === 'all' || (!currentVal && adminPartnerBillingWeekStart === 'All Time');
+  const realCurrentWeek = getAdminCurrentWeekString();
+  const centerWeek = (/^\d{4}-W\d{2}$/.test(currentVal)) ? currentVal : realCurrentWeek;
+
+  // Window of weeks around the center week (7 weeks: e.g. w39, w40, w41, w42, w43, w44, w45)
+  const weekOffsets = [-3, -2, -1, 0, 1, 2, 3];
+  const weekPills = weekOffsets.map((offset) => {
+    const wStr = getAdminWeekOffset(centerWeek, offset);
+    const wNum = parseInt(wStr.split('-W')[1], 10);
+    const isSelected = !isAllTime && (wStr === currentVal || (!currentVal && wStr === realCurrentWeek));
+    const isCurrent = (wStr === realCurrentWeek);
+    const dateRange = getAdminWeekDateRangeLabel(wStr);
+
+    let btnStyle = 'font-size:0.75rem; padding:0.24rem 0.58rem; min-width:44px; height:29px; font-weight:700; border-radius:6px; cursor:pointer;';
+    let btnClass = 'btn btn-outline btn-sm';
+    if (isSelected) {
+      btnClass = 'btn btn-primary btn-sm';
+      btnStyle += ' background:#0f172a; color:#fff; border-color:#0f172a; box-shadow:0 1px 3px rgba(0,0,0,0.18);';
+    } else if (isCurrent) {
+      btnStyle += ' border-color:#2563eb; color:#1d4ed8; background:#eff6ff;';
+    }
+
+    return `
+      <button
+        type="button"
+        class="${btnClass}"
+        style="${btnStyle}"
+        onclick="selectAdminBillingWeek('${wStr}')"
+        title="Week ${wNum}: ${dateRange}${isCurrent ? ' (Current Week)' : ''}"
+      >
+        w${wNum}${isCurrent ? '<span style="color:#2563eb; font-size:0.55rem; margin-left:2px; vertical-align:super;">●</span>' : ''}
+      </button>
+    `;
+  }).join('');
+
+  const activeDateLabel = isAllTime
+    ? 'All Historical Settlements'
+    : (adminPartnerBillingWeekStart && adminPartnerBillingWeekEnd && adminPartnerBillingWeekStart !== 'All Time'
+        ? `${adminPartnerBillingWeekStart} → ${adminPartnerBillingWeekEnd}`
+        : getAdminWeekDateRangeLabel(centerWeek));
+
+  const activeBadgeText = isAllTime ? 'All Time' : `w${parseInt(centerWeek.split('-W')[1] || '0', 10)}`;
+
+  return `
+    <div style="background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:0.55rem 0.85rem; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.5rem; box-shadow:0 1px 2px rgba(0,0,0,0.03);">
+      <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+        <span style="font-size:0.73rem; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:0.04em;">🗓️ Billing Cycle:</span>
+        <span style="font-size:0.83rem; font-weight:800; color:#0f172a; background:#f1f5f9; padding:0.18rem 0.55rem; border-radius:6px; border:1px solid #cbd5e1; font-family:monospace;">
+          ${escapeHtml(activeBadgeText)}
+        </span>
+        <span style="font-size:0.75rem; color:#475569; font-weight:600;">
+          (${escapeHtml(activeDateLabel)})
+        </span>
+      </div>
+
+      <div style="display:inline-flex; align-items:center; gap:0.25rem; flex-wrap:wrap;">
+        <button
+          type="button"
+          class="btn btn-outline btn-sm"
+          style="font-size:0.74rem; padding:0.24rem 0.52rem; height:29px; border-radius:6px;"
+          onclick="navigateAdminBillingWeekOffset(-1)"
+          title="Go to previous week"
+        >
+          ◀ Prev
+        </button>
+
+        ${weekPills}
+
+        <button
+          type="button"
+          class="btn btn-outline btn-sm"
+          style="font-size:0.74rem; padding:0.24rem 0.52rem; height:29px; border-radius:6px;"
+          onclick="navigateAdminBillingWeekOffset(1)"
+          title="Go to next week"
+        >
+          Next ▶
+        </button>
+
+        <button
+          type="button"
+          class="btn ${isAllTime ? 'btn-primary' : 'btn-outline'} btn-sm"
+          style="font-size:0.74rem; padding:0.24rem 0.55rem; height:29px; border-radius:6px; ${isAllTime ? 'background:#0f172a; color:#fff; border-color:#0f172a;' : ''}"
+          onclick="setAdminBillingAllTime()"
+          title="View all time billing without week filter"
+        >
+          All Time
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function renderAdminPartnerBillingWeekPagination() {
+  const container = document.getElementById('admin-partner-billing-weekly-pagination');
+  if (container) {
+    container.innerHTML = renderAdminPartnerBillingWeekPaginationHTML();
+  }
 }
 
 function resetAdminBillingFilters() {
@@ -135,6 +336,7 @@ async function fetchAdminPartnerBilling(overrideWeek) {
     adminPartnerBillingWeekEnd = res.weekEnd || '';
 
     renderAdminPartnerBillingKPIs();
+    renderAdminPartnerBillingWeekPagination();
     renderAdminPartnerBillingTable();
   } catch (err) {
     console.error('Failed to load partner billing:', err);
@@ -166,11 +368,26 @@ function renderAdminPartnerBillingKPIs() {
     ? `${adminPartnerBillingWeekStart} → ${adminPartnerBillingWeekEnd}`
     : 'Current Week';
 
+  const codTotal = Number(s.totalPlatformCodCollected || 0);
+  const codCash = Number(s.totalPlatformCodCash || 0);
+  const codUpi = Number(s.totalPlatformCodUpi || 0);
+  const codOrders = Number(s.totalPlatformCodOrders || 0);
+
   kpiEl.innerHTML = `
     <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:0.8rem 1rem;">
       <div style="font-size:0.72rem; color:#1d4ed8; font-weight:700; text-transform:uppercase;">📅 Week Period</div>
       <div style="font-size:1.15rem; font-weight:800; color:#1e3a8a; margin-top:0.2rem;">${escapeHtml(rangeStr)}</div>
       <div style="font-size:0.72rem; color:#1e40af; margin-top:0.15rem;">${s.trackedPartnersCount || 0} Registered Partners Tracked</div>
+    </div>
+    <div style="background:#fefce8; border:1.5px solid #fef08a; border-radius:10px; padding:0.8rem 1rem;">
+      <div style="font-size:0.72rem; color:#854d0e; font-weight:700; text-transform:uppercase; display:flex; justify-content:space-between; align-items:center;">
+        <span>🛵 Rider COD Received</span>
+        <span class="badge" style="background:#fef08a; color:#713f12; font-size:0.68rem; padding:1px 6px;">${codOrders} Orders</span>
+      </div>
+      <div style="font-size:1.45rem; font-weight:800; color:#713f12; margin-top:0.15rem;">₹${codTotal.toLocaleString('en-IN')}</div>
+      <div style="font-size:0.72rem; color:#854d0e; margin-top:0.15rem; font-weight:600;">
+        💵 Cash: <strong style="color:#0f172a;">₹${codCash.toLocaleString('en-IN')}</strong> • 📱 UPI: <strong style="color:#1d4ed8;">₹${codUpi.toLocaleString('en-IN')}</strong>
+      </div>
     </div>
     <div style="background:#fff7ed; border:1px solid #fed7aa; border-radius:10px; padding:0.8rem 1rem;">
       <div style="font-size:0.72rem; color:#c2410c; font-weight:700; text-transform:uppercase;">⏳ Total Amount Pending to Pay</div>
@@ -211,6 +428,9 @@ function renderAdminPartnerBillingTable() {
         <p style="font-size:0.95rem; font-weight:700; color:var(--charcoal);">No partner billing records found</p>
         <p style="font-size:0.8rem; margin:0;">${q ? `No partners matched "${escapeHtml(q)}".` : 'No orders or activity recorded for this period.'}</p>
       </div>
+      <div style="margin-top:0.85rem;">
+        ${renderAdminPartnerBillingWeekPaginationHTML()}
+      </div>
     `;
     return;
   }
@@ -244,7 +464,7 @@ function renderAdminPartnerBillingTable() {
     if (p.totalPending > 0) {
       if (!bankApproved) {
         actionBtnHtml = `
-          <button type="button" class="btn btn-outline btn-sm" style="font-size:0.74rem; color:#dc2626; border-color:#fca5a5;" onclick="switchView('admin-bank'); quickFilterSettlementsById('${escapeHtml(p.partnerCode)}');">
+          <button type="button" class="btn btn-outline btn-sm" style="font-size:0.74rem; color:#dc2626; border-color:#fca5a5;" onclick="quickFilterBankPartnerById('${escapeHtml(p.partnerCode)}');">
             ⚠️ Approve Bank KYC First
           </button>
         `;
@@ -254,7 +474,7 @@ function renderAdminPartnerBillingTable() {
             type="button"
             class="btn btn-success btn-sm"
             style="font-size:0.76rem; font-weight:700; white-space:nowrap; padding:0.3rem 0.65rem;"
-            onclick="disbursePartnerWeeklyBillingPayout('${escapeHtml(p.partnerType)}', '${escapeHtml(p.partnerId)}', '${escapeHtml(p.name)}', ${p.totalPending})"
+            onclick="disbursePartnerWeeklyBillingPayout('${escapeHtml(p.partnerType)}', '${escapeHtml(p.partnerId)}', '${escapeHtml(p.name)}', ${p.totalPending}, this)"
           >
             💸 Pay Pending (₹${p.totalPending.toLocaleString('en-IN')})
           </button>
@@ -277,6 +497,15 @@ function renderAdminPartnerBillingTable() {
             <span style="font-family:monospace; font-weight:700; color:#1e40af; background:#dbeafe; padding:1px 5px; border-radius:4px; font-size:0.7rem;">🆔 ${escapeHtml(p.partnerCode)}</span>
             ${p.phone ? `<span>📞 ${escapeHtml(p.phone)}</span>` : ''}
           </div>
+          ${isRider ? `
+            <div style="margin-top:0.35rem; padding:0.25rem 0.5rem; background:#fefce8; border:1px solid #fef08a; border-radius:6px; font-size:0.72rem;">
+              <span style="font-weight:700; color:#854d0e;">🛵 COD Received:</span>
+              <strong style="color:#713f12; font-size:0.78rem;">₹${Number(p.codTotalCollected || 0).toLocaleString('en-IN')}</strong>
+              <div style="font-size:0.67rem; color:#854d0e; margin-top:1px;">
+                💵 Cash: <strong>₹${Number(p.codCashCollected || 0).toLocaleString('en-IN')}</strong> • 📱 UPI: <strong>₹${Number(p.codUpiCollected || 0).toLocaleString('en-IN')}</strong>
+              </div>
+            </div>
+          ` : ''}
         </td>
         <td>
           ${hasBank ? `
@@ -293,7 +522,8 @@ function renderAdminPartnerBillingTable() {
         </td>
         <td style="text-align:right;">
           <div style="font-weight:700; color:var(--ink); font-size:0.86rem;">₹${Number(p.grossVolume || 0).toLocaleString('en-IN')}</div>
-          ${!isRider ? `<div style="font-size:0.7rem; color:var(--muted);">Comm: -₹${Number(p.tomatoCommission || 0).toLocaleString('en-IN')}</div>` : ''}
+          ${!isRider || Number(p.tomatoCommission || 0) > 0 ? `<div style="font-size:0.7rem; color:var(--muted);">Comm: -₹${Number(p.tomatoCommission || 0).toLocaleString('en-IN')}</div>` : ''}
+          <div style="font-size:0.7rem; color:var(--muted);">GST: -₹${Number(p.gstAmount || 0).toLocaleString('en-IN')}</div>
           ${p.discountsFunded > 0 ? `<div style="font-size:0.7rem; color:#dc2626;">Disc: -₹${Number(p.discountsFunded).toLocaleString('en-IN')}</div>` : ''}
         </td>
         <td style="text-align:right;">
@@ -318,7 +548,7 @@ function renderAdminPartnerBillingTable() {
               type="button"
               class="btn btn-outline btn-sm"
               style="font-size:0.7rem; padding:0.15rem 0.45rem;"
-              onclick="switchAdminPartnerBillingTab('settlements'); quickFilterSettlementsById('${escapeHtml(p.partnerCode)}');"
+              onclick="switchAdminPartnerBillingTab('settlements'); quickFilterSettlementsById('${escapeHtml(p.partnerCode)}', true);"
               title="View individual order settlements"
             >
               Order Ledger ↗
@@ -329,6 +559,15 @@ function renderAdminPartnerBillingTable() {
     `;
   }).join('');
 
+  const sumOrders = list.reduce((sum, p) => sum + Number(p.totalOrders || 0), 0);
+  const sumGross = list.reduce((sum, p) => sum + Number(p.grossVolume || 0), 0);
+  const sumComm = list.reduce((sum, p) => sum + Number(p.tomatoCommission || 0), 0);
+  const sumGst = list.reduce((sum, p) => sum + Number(p.gstAmount || 0), 0);
+  const sumDisc = list.reduce((sum, p) => sum + Number(p.discountsFunded || 0), 0);
+  const sumPaid = list.reduce((sum, p) => sum + Number(p.totalPaid || 0), 0);
+  const sumPending = list.reduce((sum, p) => sum + Number(p.totalPending || 0), 0);
+  const pendingCount = list.filter((p) => Number(p.totalPending || 0) > 0).length;
+
   container.innerHTML = `
     <div class="table-wrapper">
       <table>
@@ -337,7 +576,7 @@ function renderAdminPartnerBillingTable() {
             <th>Partner / Rider</th>
             <th>Bank &amp; KYC Status</th>
             <th style="text-align:center;">Orders</th>
-            <th style="text-align:right;">Total Volume &amp; Comm</th>
+            <th style="text-align:right;">Total Volume, Comm &amp; gst</th>
             <th style="text-align:right;">Total Paid (₹)</th>
             <th style="text-align:right;">Still Pending (₹)</th>
             <th style="text-align:center;">Payout Status</th>
@@ -346,35 +585,146 @@ function renderAdminPartnerBillingTable() {
         </thead>
         <tbody>
           ${rows}
+          <tr style="background:#f8fafc; font-weight:700; border-top:2px solid #cbd5e1; border-bottom:2px solid #cbd5e1;">
+            <td>
+              <div style="font-size:0.86rem; font-weight:800; color:#0f172a;">Total (${list.length})</div>
+              <div style="font-size:0.7rem; color:var(--muted); font-weight:500;">All Filtered Partners</div>
+            </td>
+            <td>
+              <div style="font-size:0.75rem; color:var(--muted); font-weight:600;">—</div>
+            </td>
+            <td style="text-align:center;">
+              <div style="font-weight:800; font-size:0.95rem; color:#0f172a;">${sumOrders.toLocaleString('en-IN')}</div>
+              <div style="font-size:0.7rem; color:var(--muted); font-weight:500;">orders</div>
+            </td>
+            <td style="text-align:right;">
+              <div style="font-weight:800; color:#0f172a; font-size:0.9rem;">₹${sumGross.toLocaleString('en-IN')}</div>
+              <div style="font-size:0.7rem; color:var(--muted); font-weight:500;">Comm: -₹${sumComm.toLocaleString('en-IN')}</div>
+              <div style="font-size:0.7rem; color:var(--muted); font-weight:500;">GST: -₹${sumGst.toLocaleString('en-IN')}</div>
+              ${sumDisc > 0 ? `<div style="font-size:0.7rem; color:#dc2626; font-weight:500;">Disc: -₹${sumDisc.toLocaleString('en-IN')}</div>` : ''}
+            </td>
+            <td style="text-align:right;">
+              <div style="font-weight:800; color:#15803d; font-size:0.92rem;">₹${sumPaid.toLocaleString('en-IN')}</div>
+              <div style="font-size:0.68rem; color:#15803d; font-weight:600;">total disbursed</div>
+            </td>
+            <td style="text-align:right;">
+              <div style="font-weight:800; color:${sumPending > 0 ? '#b91c1c' : '#15803d'}; font-size:0.95rem;">
+                ₹${sumPending.toLocaleString('en-IN')}
+              </div>
+              <div style="font-size:0.68rem; color:${sumPending > 0 ? '#b91c1c' : '#15803d'}; font-weight:600;">
+                ${sumPending > 0 ? `${pendingCount} awaiting pay` : 'all settled'}
+              </div>
+            </td>
+            <td style="text-align:center;">
+              <span class="badge ${sumPending > 0 ? 'badge-pending' : 'badge-delivered'}" style="font-size:0.72rem; font-weight:700;">
+                ${sumPending > 0 ? `⏳ ₹${sumPending.toLocaleString('en-IN')} Pending` : '✅ All Settled'}
+              </span>
+            </td>
+            <td style="text-align:right;">
+              <span style="font-size:0.75rem; color:var(--muted);">—</span>
+            </td>
+          </tr>
         </tbody>
       </table>
+    </div>
+    <div style="margin-top:0.85rem;">
+      ${renderAdminPartnerBillingWeekPaginationHTML()}
     </div>
   `;
 }
 
-async function disbursePartnerWeeklyBillingPayout(partnerType, partnerId, partnerName, pendingAmount) {
+async function disbursePartnerWeeklyBillingPayout(partnerType, partnerId, partnerName, pendingAmount, btnElement) {
   if (!confirm(`Are you sure you want to disburse the weekly pending payout of ₹${Number(pendingAmount).toLocaleString('en-IN')} from Tomato central account to ${partnerName}?`)) {
     return;
+  }
+
+  let originalHtml = '';
+  if (btnElement && btnElement.innerHTML) {
+    originalHtml = btnElement.innerHTML;
+    btnElement.disabled = true;
+    btnElement.innerHTML = '⏳ Disbursing...';
   }
 
   try {
     const res = await apiFetch(`/api/admin/billing/partners/${encodeURIComponent(partnerType)}/${encodeURIComponent(partnerId)}/settle`, {
       method: 'POST',
     });
-    alert(res.message || 'Weekly payout disbursed successfully!');
-    fetchAdminPartnerBilling();
+    if (typeof showToast === 'function') {
+      showToast(res.message || 'Weekly payout disbursed successfully!', 'success');
+    } else {
+      alert(res.message || 'Weekly payout disbursed successfully!');
+    }
+    await fetchAdminPartnerBilling();
+    if (typeof fetchAdminBankSettlements === 'function' && typeof cachedAdminBankSettlements !== 'undefined' && cachedAdminBankSettlements.length) {
+      fetchAdminBankSettlements();
+    }
   } catch (err) {
-    alert(err.message || 'Unable to disburse weekly payout.');
+    if (typeof showToast === 'function') {
+      showToast(err.message || 'Unable to disburse weekly payout.', 'error');
+    } else {
+      alert(err.message || 'Unable to disburse weekly payout.');
+    }
+  } finally {
+    if (btnElement && originalHtml) {
+      btnElement.disabled = false;
+      btnElement.innerHTML = originalHtml;
+    }
   }
 }
 
+function getAdminBillingDateString() {
+  const weekInput = document.getElementById('admin-billing-week-input');
+  const rawWeek = (weekInput?.value || '').trim();
+
+  let startDate = adminPartnerBillingWeekStart || '';
+  let endDate = adminPartnerBillingWeekEnd || '';
+
+  if (rawWeek === 'all') {
+    return 'All Time';
+  }
+
+  if (startDate && endDate && startDate !== 'All Time') {
+    return startDate === endDate ? startDate : `${startDate} to ${endDate}`;
+  }
+
+  if (/^\d{4}-W\d{2}$/.test(rawWeek)) {
+    try {
+      const parts = rawWeek.split('-W');
+      const year = parseInt(parts[0], 10);
+      const weekNo = parseInt(parts[1], 10);
+      const simple = new Date(Date.UTC(year, 0, 1 + (weekNo - 1) * 7));
+      const dow = simple.getUTCDay();
+      const ISOweekStart = new Date(simple);
+      if (dow <= 4) {
+        ISOweekStart.setUTCDate(simple.getUTCDate() - simple.getUTCDay() + 1);
+      } else {
+        ISOweekStart.setUTCDate(simple.getUTCDate() + 8 - simple.getUTCDay());
+      }
+      const ISOweekEnd = new Date(ISOweekStart);
+      ISOweekEnd.setUTCDate(ISOweekEnd.getUTCDate() + 6);
+      return `${ISOweekStart.toISOString().slice(0, 10)} to ${ISOweekEnd.toISOString().slice(0, 10)}`;
+    } catch (_) {}
+  }
+
+  return new Date().toISOString().slice(0, 10);
+}
+
 function exportAdminPartnerBillingCsv() {
+  if (currentAdminPartnerBillingTab === 'settlements') {
+    if (typeof exportAdminBankSettlementsCsv === 'function') {
+      exportAdminBankSettlementsCsv();
+      return;
+    }
+  }
+
   if (!adminPartnerBillingData.length) {
     alert('No partner billing records to export.');
     return;
   }
 
   const weekStr = document.getElementById('admin-billing-week-input')?.value || 'current';
+  const dateValue = getAdminBillingDateString();
+
   const headers = [
     'Partner ID',
     'Partner Name',
@@ -391,6 +741,7 @@ function exportAdminPartnerBillingCsv() {
     'Total Paid (INR)',
     'Still Pending (INR)',
     'Status',
+    'Date',
   ];
 
   const rows = adminPartnerBillingData.map((p) => [
@@ -409,9 +760,41 @@ function exportAdminPartnerBillingCsv() {
     Number(p.totalPaid || 0).toFixed(2),
     Number(p.totalPending || 0).toFixed(2),
     p.payoutStatus || 'settled',
+    dateValue,
   ]);
 
-  const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))].join('\n');
+  const sumOrders = adminPartnerBillingData.reduce((sum, p) => sum + Number(p.totalOrders || 0), 0);
+  const sumGross = adminPartnerBillingData.reduce((sum, p) => sum + Number(p.grossVolume || 0), 0);
+  const sumComm = adminPartnerBillingData.reduce((sum, p) => sum + Number(p.tomatoCommission || 0), 0);
+  const sumDisc = adminPartnerBillingData.reduce((sum, p) => sum + Number(p.discountsFunded || 0), 0);
+  const sumPaid = adminPartnerBillingData.reduce((sum, p) => sum + Number(p.totalPaid || 0), 0);
+  const sumPending = adminPartnerBillingData.reduce((sum, p) => sum + Number(p.totalPending || 0), 0);
+  const pendingCount = adminPartnerBillingData.filter((p) => Number(p.totalPending || 0) > 0).length;
+
+  const totalRow = [
+    `Total (${adminPartnerBillingData.length})`,
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    sumOrders,
+    sumGross.toFixed(2),
+    sumComm.toFixed(2),
+    sumDisc.toFixed(2),
+    sumPaid.toFixed(2),
+    sumPending.toFixed(2),
+    sumPending > 0 ? `${pendingCount} Pending` : 'All Settled',
+    dateValue,
+  ];
+
+  const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [
+    headers.join(','),
+    ...rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')),
+    totalRow.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','),
+  ].join('\n');
   const encodedUri = encodeURI(csvContent);
   const link = document.createElement('a');
   link.setAttribute('href', encodedUri);
@@ -421,8 +804,15 @@ function exportAdminPartnerBillingCsv() {
   document.body.removeChild(link);
 }
 
+window.selectAdminBillingWeek = selectAdminBillingWeek;
+window.navigateAdminBillingWeekOffset = navigateAdminBillingWeekOffset;
+window.renderAdminPartnerBillingWeekPagination = renderAdminPartnerBillingWeekPagination;
+window.renderAdminPartnerBillingWeekPaginationHTML = renderAdminPartnerBillingWeekPaginationHTML;
+window.getAdminWeekOffset = getAdminWeekOffset;
+window.getAdminWeekDateRangeLabel = getAdminWeekDateRangeLabel;
 window.switchAdminPartnerBillingTab = switchAdminPartnerBillingTab;
 window.refreshAdminPartnerBillingCurrentTab = refreshAdminPartnerBillingCurrentTab;
+window.loadAdminPartnerBillingPanel = loadAdminPartnerBillingPanel;
 window.fetchAdminPartnerBilling = fetchAdminPartnerBilling;
 window.renderAdminPartnerBillingKPIs = renderAdminPartnerBillingKPIs;
 window.renderAdminPartnerBillingTable = renderAdminPartnerBillingTable;
@@ -432,4 +822,5 @@ window.setAdminBillingAllTime = setAdminBillingAllTime;
 window.resetAdminBillingFilters = resetAdminBillingFilters;
 window.disbursePartnerWeeklyBillingPayout = disbursePartnerWeeklyBillingPayout;
 window.exportAdminPartnerBillingCsv = exportAdminPartnerBillingCsv;
+window.getAdminCurrentWeekString = getAdminCurrentWeekString;
 

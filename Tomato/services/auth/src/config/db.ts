@@ -7,6 +7,7 @@ import Rider from "../model/Rider.js";
 import Counter from "../model/Counter.js";
 import Shop from "../model/Shop.js";
 import ShopOrder from "../model/ShopOrder.js";
+import WalletCreditTrack from "../model/WalletCreditTrack.js";
 import { hashPassword } from "../modules/auth/authController.js";
 
 try {
@@ -329,6 +330,34 @@ export const migrateCountersAndDropOldCounterTables = async () => {
     }
 };
 
+export const sanitizeAllUserWalletBalancesAndCreditPoints = async () => {
+    try {
+        await Promise.all([
+            Employee.updateMany({ walletBalance: { $lt: 0 } }, { $set: { walletBalance: 0 } }),
+            Employee.updateMany({ creditPoint: { $lt: 0 } }, { $set: { creditPoint: 0 } }),
+            Customer.updateMany({ walletBalance: { $lt: 0 } }, { $set: { walletBalance: 0 } }),
+            Customer.updateMany({ creditPoint: { $lt: 0 } }, { $set: { creditPoint: 0 } }),
+            Restaurant.updateMany({ walletBalance: { $lt: 0 } }, { $set: { walletBalance: 0 } }),
+            Restaurant.updateMany({ creditPoint: { $lt: 0 } }, { $set: { creditPoint: 0 } }),
+            Shop.updateMany({ walletBalance: { $lt: 0 } }, { $set: { walletBalance: 0 } }),
+            Shop.updateMany({ creditPoint: { $lt: 0 } }, { $set: { creditPoint: 0 } }),
+            Rider.updateMany({ walletBalance: { $lt: 0 } }, { $set: { walletBalance: 0 } }),
+            Rider.updateMany({ creditPoint: { $lt: 0 } }, { $set: { creditPoint: 0 } }),
+            WalletCreditTrack.updateMany(
+                { recordType: 'balance_snapshot', $or: [{ wallet_balance: { $lt: 0 } }, { walletBalance: { $lt: 0 } }] },
+                { $set: { wallet_balance: 0, walletBalance: 0 } },
+            ),
+            WalletCreditTrack.updateMany(
+                { recordType: 'balance_snapshot', $or: [{ credit_point: { $lt: 0 } }, { creditPoint: { $lt: 0 } }] },
+                { $set: { credit_point: 0, creditPoint: 0 } },
+            ),
+        ]);
+        console.log("[DB Setup] All user wallet balances and credit points sanitized (non-negative floor enforced).");
+    } catch (err: any) {
+        console.warn("[DB Setup Warning - Wallet Balance Sanitization]:", err?.message);
+    }
+};
+
 export const connectDB = async (attempts = 3) => {
     const mongoUri = process.env.MONGO_URI;
     if (!mongoUri) {
@@ -391,6 +420,7 @@ export const connectDB = async (attempts = 3) => {
                 console.log("[DB Setup] Default Shop partner (shop@tomato.com) created in 'shop' collection.");
             }
 
+            await sanitizeAllUserWalletBalancesAndCreditPoints();
             console.log("Connected to MongoDB (Tomato_clone database ready)");
             return;
         } catch (error) {

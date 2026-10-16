@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import Restaurant from '../../../model/Restaurant.js';
 import Shop from '../../../model/Shop.js';
 import Rider from '../../../model/Rider.js';
+import Employee from '../../../model/Employee.js';
 import Order from '../../../model/Order.js';
 import ShopOrder from '../../../model/ShopOrder.js';
 import Payment from '../../../model/Payment.js';
@@ -31,13 +32,17 @@ const router = Router();
       try {
         const { role, status, search } = req.query;
 
-        const [restaurants, shops, riders] = await Promise.all([
+        const [restaurants, shops, riders, subadmins] = await Promise.all([
           Restaurant.find().sort({ createdAt: -1 }).lean(),
           Shop.find().sort({ createdAt: -1 }).lean(),
           Rider.find().sort({ createdAt: -1 }).lean(),
+          Employee.find({ role: 'subadmin' }).sort({ createdAt: -1 }).lean(),
         ]);
 
-        const formatPartnerBankRow = (doc: any, partnerRole: 'restaurant' | 'shop' | 'deliveryPartner') => {
+        const formatPartnerBankRow = (
+          doc: any,
+          partnerRole: 'restaurant' | 'shop' | 'deliveryPartner' | 'subadmin',
+        ) => {
           const bd = doc.bankDetails || {};
           const hasAnyField = Boolean(
             bd.accountNumber || bd.ifscCode || bd.accountHolderName || bd.panNumber || bd.panHolderName,
@@ -54,15 +59,15 @@ const router = Router();
             id: String(doc._id),
             _id: String(doc._id),
             partnerCode:
-              doc.restaurantId || doc.shopId || doc.riderId || String(doc._id).slice(-6),
+              doc.restaurantId || doc.shopId || doc.riderId || doc.subadminId || String(doc._id).slice(-6),
             name: doc.name,
             displayName: doc.name,
             email: doc.email || '',
             phone: doc.phone || '',
             role: partnerRole,
             isApproved: Boolean(doc.isApproved),
-            isBlocked: Boolean(doc.isBlocked),
-            walletBalance: Number(doc.walletBalance || 0),
+            walletBalance: Math.max(0, Number(doc.walletBalance || 0)),
+            creditPoint: Math.max(0, Number((doc as any).creditPoint || 0)),
             namesMatch: nameMatched,
             bankDetails: {
               accountHolderName: bd.accountHolderName || '',
@@ -76,8 +81,8 @@ const router = Router();
               isApproved,
               isLocked,
               agreementCommissionPercent:
-                bd.agreementCommissionPercent ?? (partnerRole === 'shop' ? 12 : 15),
-              riderPayoutPerOrder: bd.riderPayoutPerOrder ?? 40,
+                bd.agreementCommissionPercent ?? (partnerRole === 'shop' ? 12 : partnerRole === 'restaurant' ? 15 : 0),
+              riderPayoutPerOrder: bd.riderPayoutPerOrder ?? (partnerRole === 'deliveryPartner' ? 40 : 0),
               submittedAt: bd.submittedAt || null,
               approvedAt: bd.approvedAt || null,
               approvedBy: bd.approvedBy || '',
@@ -99,6 +104,7 @@ const router = Router();
           ...restaurants.map((r) => formatPartnerBankRow(r, 'restaurant')),
           ...shops.map((s) => formatPartnerBankRow(s, 'shop')),
           ...riders.map((r) => formatPartnerBankRow(r, 'deliveryPartner')),
+          ...subadmins.map((sa) => formatPartnerBankRow(sa, 'subadmin')),
         ];
 
         if (typeof role === 'string' && role !== 'all' && role.trim()) {
@@ -154,7 +160,7 @@ const router = Router();
         }
 
         let doc: any = await Restaurant.findById(userId);
-        let partnerRole: 'restaurant' | 'shop' | 'deliveryPartner' = 'restaurant';
+        let partnerRole: 'restaurant' | 'shop' | 'deliveryPartner' | 'subadmin' = 'restaurant';
         if (!doc) {
           doc = await Shop.findById(userId);
           partnerRole = 'shop';
@@ -164,7 +170,13 @@ const router = Router();
           partnerRole = 'deliveryPartner';
         }
         if (!doc) {
-          return res.status(404).json({ message: 'Partner (Restaurant, Shop, or Rider) not found' });
+          doc = await Employee.findOne({ _id: userId, role: 'subadmin' });
+          if (doc) {
+            partnerRole = 'subadmin';
+          }
+        }
+        if (!doc) {
+          return res.status(404).json({ message: 'Partner (Restaurant, Shop, Rider, or Sub-Admin) not found' });
         }
 
         const existingBd = (doc.bankDetails as any)?.toObject
@@ -244,12 +256,12 @@ const router = Router();
         const agreementCommissionPercent =
           req.body.agreementCommissionPercent !== undefined
             ? Math.min(100, Math.max(0, Number(req.body.agreementCommissionPercent)))
-            : (existingBd.agreementCommissionPercent ?? (partnerRole === 'shop' ? 12 : 15));
+            : (existingBd.agreementCommissionPercent ?? (partnerRole === 'shop' ? 12 : partnerRole === 'restaurant' ? 15 : 0));
 
         const riderPayoutPerOrder =
           req.body.riderPayoutPerOrder !== undefined
             ? Math.max(0, Number(req.body.riderPayoutPerOrder))
-            : (existingBd.riderPayoutPerOrder ?? 40);
+            : (existingBd.riderPayoutPerOrder ?? (partnerRole === 'deliveryPartner' ? 40 : 0));
 
         const adminIdentifier =
           adminUser?.name || adminUser?.email || adminUser?.userId || 'Admin';
@@ -542,11 +554,26 @@ const router = Router();
         let completedPartnerPayouts = 0;
         let pendingRiderPayouts = 0;
         let completedRiderPayouts = 0;
+        let codReceivedAmount = 0;
+        let codCashReceivedAmount = 0;
+        let codUpiReceivedAmount = 0;
+        let codOrdersCount = 0;
 
         filtered.forEach((p: any) => {
           const total = Number(p.totalAmount || p.amount || 0);
+          const isCod = p.paymentMethod === 'cod';
+
           if (p.tomatoAccountStatus === 'received') {
             tomatoTotalReceived += total;
+            if (isCod) {
+              codReceivedAmount += total;
+              codOrdersCount += 1;
+              if (p.codCollectedVia === 'upi') {
+                codUpiReceivedAmount += total;
+              } else {
+                codCashReceivedAmount += total;
+              }
+            }
           } else {
             pendingCodAmount += total;
           }
@@ -574,6 +601,10 @@ const router = Router();
               (tomatoTotalReceived - completedPartnerPayouts - completedRiderPayouts).toFixed(2),
             ),
             pendingCodAmount: Number(pendingCodAmount.toFixed(2)),
+            codReceivedAmount: Number(codReceivedAmount.toFixed(2)),
+            codCashReceivedAmount: Number(codCashReceivedAmount.toFixed(2)),
+            codUpiReceivedAmount: Number(codUpiReceivedAmount.toFixed(2)),
+            codOrdersCount,
             tomatoCommissionEarned: Number(tomatoCommissionEarned.toFixed(2)),
             totalTomatoCommission: Number(tomatoCommissionEarned.toFixed(2)),
             pendingPartnerPayouts: Number(pendingPartnerPayouts.toFixed(2)),

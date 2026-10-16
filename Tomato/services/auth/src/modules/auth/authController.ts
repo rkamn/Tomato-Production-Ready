@@ -197,13 +197,8 @@ export const userResponse = (user: {
 		image: user.image || '',
 		role: user.role,
 		isApproved: user.isApproved ?? true,
-		isBlocked: user.isBlocked ?? false,
-		...(user.role === 'admin'
-			? {}
-			: {
-				walletBalance: user.walletBalance ?? 0,
-				creditPoint: user.creditPoint ?? 0,
-			}),
+		walletBalance: Math.max(0, Number(user.walletBalance ?? 0)),
+		creditPoint: Math.max(0, Number(user.creditPoint ?? 0)),
 		restaurantId,
 		shopId,
 		riderId,

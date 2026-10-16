@@ -728,7 +728,8 @@ const createShopRouter = () => {
           isLocked,
         },
         isApproved: shop.isApproved,
-        walletBalance: shop.walletBalance || 0,
+        walletBalance: Math.max(0, Number(shop.walletBalance || 0)),
+        creditPoint: Math.max(0, Number(shop.creditPoint || 0)),
         payouts,
       });
     } catch (error) {

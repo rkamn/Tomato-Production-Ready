@@ -1278,3 +1278,12 @@ window.savePartnerCoupon = savePartnerCoupon;
 window.togglePartnerCouponStatus = togglePartnerCouponStatus;
 window.deletePartnerCoupon = deletePartnerCoupon;
 
+// Coupon KPI & Discount calculation helpers
+window.renderAdminCouponsKPIs = renderAdminCouponsKPIs;
+window.renderPartnerCouponsKPIs = renderPartnerCouponsKPIs;
+window.populateAdminCouponDatalists = populateAdminCouponDatalists;
+window.renderCheckoutCouponsSection = renderCheckoutCouponsSection;
+window.updateGatewayBillingSummaryUI = updateGatewayBillingSummaryUI;
+window.getActiveCartDiscountAmount = getActiveCartDiscountAmount;
+window.resetAppliedCouponsState = resetAppliedCouponsState;
+

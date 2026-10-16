@@ -11,14 +11,21 @@ export async function adjustTomatoCentralBankBalance(deltaAmount: number) {
   const numDelta = Number(Number(deltaAmount || 0).toFixed(2));
   if (!numDelta) return;
   try {
-    await Employee.updateMany(
-      { role: 'admin' },
-      { $inc: { walletBalance: numDelta } },
-    );
-    await WalletCreditTrack.updateMany(
-      { recordType: 'balance_snapshot' },
-      { $inc: { wallet_balance: numDelta, walletBalance: numDelta } },
-    );
+    const admins = await Employee.find({ role: 'admin' }).select('_id walletBalance');
+    for (const admin of admins) {
+      const current = Math.max(0, Number(admin.walletBalance || 0));
+      const updated = Math.max(0, Number((current + numDelta).toFixed(2)));
+      await Employee.updateOne({ _id: admin._id }, { $set: { walletBalance: updated } });
+    }
+    const snapshots = await WalletCreditTrack.find({ recordType: 'balance_snapshot' });
+    for (const snap of snapshots) {
+      const current = Math.max(0, Number(snap.wallet_balance ?? snap.walletBalance ?? 0));
+      const updated = Math.max(0, Number((current + numDelta).toFixed(2)));
+      await WalletCreditTrack.updateOne(
+        { _id: snap._id },
+        { $set: { wallet_balance: updated, walletBalance: updated } },
+      );
+    }
   } catch (err) {
     console.warn('adjustTomatoCentralBankBalance warning:', err);
   }
@@ -215,6 +222,9 @@ export async function syncOrderToTomatoPayment(order: any, isShopOrder = false) 
       ? 'received'
       : 'pending_cod';
 
+    const codCollectedVia = order.codCollectedVia || (order.paymentMethod === 'cod' && (order.status === 'delivered' || order.paymentStatus === 'paid') ? 'cash' : undefined);
+    const codCollectedAt = order.codCollectedAt || (order.paymentMethod === 'cod' && (order.status === 'delivered' || order.paymentStatus === 'paid') ? (order.paidAt || order.updatedAt || new Date()) : undefined);
+
     if (existing) {
       let changed = false;
       if (existing.tomatoAccountStatus !== tomatoAccountStatus && tomatoAccountStatus === 'received') {
@@ -222,6 +232,14 @@ export async function syncOrderToTomatoPayment(order: any, isShopOrder = false) 
         existing.tomatoReceivedAt = new Date();
         changed = true;
         await adjustTomatoCentralBankBalance(totalAmount);
+      }
+      if (codCollectedVia && existing.codCollectedVia !== codCollectedVia) {
+        existing.codCollectedVia = codCollectedVia;
+        changed = true;
+      }
+      if (codCollectedAt && !existing.codCollectedAt) {
+        existing.codCollectedAt = codCollectedAt;
+        changed = true;
       }
       if (riderIdStr && !existing.riderId) {
         existing.riderId = riderIdStr;
@@ -254,6 +272,8 @@ export async function syncOrderToTomatoPayment(order: any, isShopOrder = false) 
       transactionId: order.paymentTransactionId || `TXN-${order.orderNumber}`,
       tomatoAccountStatus,
       tomatoReceivedAt: order.paidAt || order.createdAt || new Date(),
+      codCollectedVia,
+      codCollectedAt,
       partnerId: partnerIdStr,
       partnerCode: order.shopCode || order.restaurantCode || partnerDoc?.shopId || partnerDoc?.restaurantId || '',
       partnerRole,

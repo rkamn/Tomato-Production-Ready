@@ -1368,4 +1368,12 @@ window.refreshPartnerReportData = refreshPartnerReportData;
 window.renderPartnerReportData = renderPartnerReportData;
 window.exportPartnerReportCsv = exportPartnerReportCsv;
 window.printPartnerReport = printPartnerReport;
+window.viewOrderBill = viewOrderBill;
+window.renderRestaurantOrdersTable = renderRestaurantOrdersTable;
+window.fetchRestaurantOrders = fetchRestaurantOrders;
+window.updateOrderStatus = updateOrderStatus;
+window.fetchRestaurantMenu = fetchRestaurantMenu;
+window.openAddMenuItemModal = openAddMenuItemModal;
+window.editMenuItem = editMenuItem;
+window.saveMenuItem = saveMenuItem;
 

@@ -776,4 +776,22 @@ window.onAdminResetPasswordDobChange = onAdminResetPasswordDobChange;
 window.fillDefaultDobPasswordInResetModal = fillDefaultDobPasswordInResetModal;
 window.submitAdminResetPassword = submitAdminResetPassword;
 
+// Sub-Admin Management & RBAC
+window.applySubAdminPreset = applySubAdminPreset;
+window.handleAdminSubAdminSearchInput = handleAdminSubAdminSearchInput;
+window.clearAdminSubAdminsSearch = clearAdminSubAdminsSearch;
+window.fetchAdminSubAdmins = fetchAdminSubAdmins;
+window.openCreateSubAdminModal = openCreateSubAdminModal;
+window.submitCreateSubAdmin = submitCreateSubAdmin;
+window.openEditSubAdminModal = openEditSubAdminModal;
+window.submitEditSubAdminPermissions = submitEditSubAdminPermissions;
+window.toggleSubAdminStatus = toggleSubAdminStatus;
+window.deleteSubAdmin = deleteSubAdmin;
+
+// Partner Fleet Directory
+window.fetchAllAdminFleetPartners = fetchAllAdminFleetPartners;
+window.updateAdminFleetModalTabs = updateAdminFleetModalTabs;
+window.formatDobToDDMMYYYYFrontend = formatDobToDDMMYYYYFrontend;
+window.normalizeDobForDateInput = normalizeDobForDateInput;
+
 

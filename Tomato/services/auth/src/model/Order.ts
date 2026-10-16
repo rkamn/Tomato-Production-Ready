@@ -82,6 +82,8 @@ export interface IOrder extends Document {
   paymentMethod: PaymentMethod;
   paymentTransactionId?: string;
   paidAt?: Date;
+  codCollectedVia?: 'cash' | 'upi';
+  codCollectedAt?: Date;
   status: OrderStatus;
   statusHistory: IOrderStatusHistory[];
   rejectedByRiders?: mongoose.Types.ObjectId[];
@@ -268,6 +270,14 @@ const orderSchema: Schema<IOrder> = new Schema(
       default: '',
     },
     paidAt: {
+      type: Date,
+    },
+    codCollectedVia: {
+      type: String,
+      enum: ['cash', 'upi'],
+      default: undefined,
+    },
+    codCollectedAt: {
       type: Date,
     },
     status: {

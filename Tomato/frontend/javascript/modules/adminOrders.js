@@ -1662,3 +1662,52 @@ window.renderAdminReportData = renderAdminReportData;
 window.exportAdminReportCsv = exportAdminReportCsv;
 window.printAdminReport = printAdminReport;
 
+// Admin Orders Controls & Bulk Actions
+window.navigateAdminOrderDay = navigateAdminOrderDay;
+window.fetchAdminOrdersByDate = fetchAdminOrdersByDate;
+window.fetchAdminOrders = fetchAdminOrders;
+window.resetAdminOrdersFilter = resetAdminOrdersFilter;
+window.getSelectedAdminOrderIds = getSelectedAdminOrderIds;
+window.toggleSelectAllAdminOrders = toggleSelectAllAdminOrders;
+window.updateAdminOrdersSelection = updateAdminOrdersSelection;
+window.archiveAdminOrder = archiveAdminOrder;
+window.deleteAdminOrder = deleteAdminOrder;
+window.executeAdminBulkArchive = executeAdminBulkArchive;
+window.executeAdminBulkDelete = executeAdminBulkDelete;
+window.executeAdminPeriodArchive = executeAdminPeriodArchive;
+window.executeAdminPeriodDelete = executeAdminPeriodDelete;
+
+// Partner & Customer Management Desk (Shops, Restaurants, Riders, Customers)
+window.fetchAdminUsers = fetchAdminUsers;
+window.changeAdminUserPage = changeAdminUserPage;
+window.fetchAdminRestaurants = fetchAdminRestaurants;
+window.fetchAdminRiders = fetchAdminRiders;
+window.fetchAdminCustomers = fetchAdminCustomers;
+window.searchAdminUsers = searchAdminUsers;
+window.clearAdminSearch = clearAdminSearch;
+window.handleAdminSearchInput = handleAdminSearchInput;
+window.renderPartnerManagementTable = renderPartnerManagementTable;
+window.approveUser = approveUser;
+window.rejectUser = rejectUser;
+window.toggleBlockUser = toggleBlockUser;
+window.deleteAdminUser = deleteAdminUser;
+window.openAdminCreditTransferModal = openAdminCreditTransferModal;
+window.showCurrentAdminWalletTransfer = showCurrentAdminWalletTransfer;
+window.submitAdminCreditTransfer = submitAdminCreditTransfer;
+window.refreshAdminViews = refreshAdminViews;
+window.detectAdminRestaurantGPS = detectAdminRestaurantGPS;
+window.openAdminCreateUserModal = openAdminCreateUserModal;
+window.editAdminUser = editAdminUser;
+window.toggleAdminUserFields = toggleAdminUserFields;
+window.saveAdminUser = saveAdminUser;
+
+// Pincodes & Live Radar
+window.fetchAdminServiceablePincodes = fetchAdminServiceablePincodes;
+window.renderAdminServiceablePincodesBars = renderAdminServiceablePincodesBars;
+window.resolveFrontendPartnerPincode = resolveFrontendPartnerPincode;
+window.openAdminFleetTrackerModal = openAdminFleetTrackerModal;
+window.closeAdminFleetTrackerModal = closeAdminFleetTrackerModal;
+window.refreshAdminFleet = refreshAdminFleet;
+window.renderAdminFleet = renderAdminFleet;
+window.drawAdminFleetCanvas = drawAdminFleetCanvas;
+

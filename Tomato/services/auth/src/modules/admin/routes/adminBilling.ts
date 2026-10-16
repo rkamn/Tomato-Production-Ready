@@ -107,6 +107,7 @@ const router = Router();
             totalOrders: 0,
             grossVolume: 0,
             tomatoCommission: 0,
+            gstAmount: 0,
             discountsFunded: 0,
             totalPayable: 0,
             totalPaid: 0,
@@ -137,6 +138,7 @@ const router = Router();
             totalOrders: 0,
             grossVolume: 0,
             tomatoCommission: 0,
+            gstAmount: 0,
             discountsFunded: 0,
             totalPayable: 0,
             totalPaid: 0,
@@ -167,6 +169,7 @@ const router = Router();
             totalOrders: 0,
             grossVolume: 0,
             tomatoCommission: 0,
+            gstAmount: 0,
             discountsFunded: 0,
             totalPayable: 0,
             totalPaid: 0,
@@ -197,6 +200,7 @@ const router = Router();
             const gross = Number(p.totalAmount || 0);
             partnerEntry.grossVolume += gross;
             partnerEntry.tomatoCommission += Number(p.tomatoCommissionAmount || 0);
+            partnerEntry.gstAmount += Number(p.tax || 0);
             partnerEntry.discountsFunded += Number(p.partnerDiscountShare || 0);
 
             const partnerPayout = Number(p.partnerPayoutAmount || 0);
@@ -224,6 +228,12 @@ const router = Router();
             const riderEntry = billingMap.get(riderKey);
             if (riderEntry) {
               riderEntry.totalOrders += 1;
+              const riderGross = Number(p.deliveryFee || p.riderPayoutAmount || 40);
+              riderEntry.grossVolume += riderGross;
+              // GST applied to riders (standard 5% GST rate on delivery)
+              const riderGst = Number((riderGross * 0.05).toFixed(2));
+              riderEntry.gstAmount += riderGst;
+
               const riderPayout = Number(p.riderPayoutAmount || 0);
               riderEntry.totalPayable += riderPayout;
 
@@ -241,11 +251,17 @@ const router = Router();
         let totalPlatformPayable = 0;
         let totalPlatformPaid = 0;
         let totalPlatformPending = 0;
+        let totalPlatformGst = 0;
+        let totalPlatformCommission = 0;
         let pendingRestaurantsCount = 0;
         let pendingShopsCount = 0;
         let pendingRidersCount = 0;
 
         const partnerBillingList = Array.from(billingMap.values()).map((item) => {
+          item.grossVolume = Math.round(item.grossVolume * 100) / 100;
+          item.tomatoCommission = Math.round(item.tomatoCommission * 100) / 100;
+          item.gstAmount = Math.round((item.gstAmount || 0) * 100) / 100;
+          item.discountsFunded = Math.round(item.discountsFunded * 100) / 100;
           item.totalPayable = Math.round(item.totalPayable * 100) / 100;
           item.totalPaid = Math.round(item.totalPaid * 100) / 100;
           item.totalPending = Math.round(item.totalPending * 100) / 100;
@@ -264,6 +280,8 @@ const router = Router();
           totalPlatformPayable += item.totalPayable;
           totalPlatformPaid += item.totalPaid;
           totalPlatformPending += item.totalPending;
+          totalPlatformGst += item.gstAmount;
+          totalPlatformCommission += item.tomatoCommission;
 
           return item;
         });
@@ -296,6 +314,8 @@ const router = Router();
             totalPlatformPayable: Math.round(totalPlatformPayable * 100) / 100,
             totalPlatformPaid: Math.round(totalPlatformPaid * 100) / 100,
             totalPlatformPending: Math.round(totalPlatformPending * 100) / 100,
+            totalPlatformGst: Math.round(totalPlatformGst * 100) / 100,
+            totalPlatformCommission: Math.round(totalPlatformCommission * 100) / 100,
             pendingRestaurantsCount,
             pendingShopsCount,
             pendingRidersCount,

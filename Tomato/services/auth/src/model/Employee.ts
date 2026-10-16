@@ -1,4 +1,5 @@
 import mongoose, { Document, Schema } from 'mongoose';
+import { IBankDetails } from './Restaurant.js';
 
 export const EMPLOYEE_ROLES = ['admin', 'subadmin'] as const;
 export type EmployeeRole = (typeof EMPLOYEE_ROLES)[number];
@@ -32,6 +33,7 @@ export interface IEmployee extends Document {
   creditPoint?: number;
   dob?: string;
   gsnNumber?: string;
+  bankDetails?: IBankDetails;
   createdBy?: string;
   createdAt?: Date;
   updatedAt?: Date;
@@ -68,6 +70,24 @@ const schema: Schema<IEmployee> = new Schema(
     creditPoint: { type: Number, default: 0 },
     dob: { type: String, default: '', trim: true },
     gsnNumber: { type: String, default: 'NA', uppercase: true, trim: true },
+    bankDetails: {
+      accountHolderName: { type: String, default: '', trim: true },
+      bankName: { type: String, default: '', trim: true },
+      accountNumber: { type: String, default: '', trim: true },
+      ifscCode: { type: String, default: '', uppercase: true, trim: true },
+      panNumber: { type: String, default: '', uppercase: true, trim: true },
+      panHolderName: { type: String, default: '', trim: true },
+      upiId: { type: String, default: '', trim: true },
+      isSubmitted: { type: Boolean, default: false },
+      isApproved: { type: Boolean, default: false },
+      isLocked: { type: Boolean, default: false },
+      agreementCommissionPercent: { type: Number, default: 0, min: 0, max: 100 },
+      riderPayoutPerOrder: { type: Number, default: 0 },
+      submittedAt: { type: Date },
+      approvedAt: { type: Date },
+      approvedBy: { type: String, default: '' },
+      adminNote: { type: String, default: '' },
+    },
     createdBy: { type: String, default: '' },
   },
   { timestamps: true, collection: 'employees' },

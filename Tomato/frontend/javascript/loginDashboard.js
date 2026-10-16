@@ -206,7 +206,7 @@ const getDefaultRoleView = () => {
   if (role === 'admin' || (role === 'subadmin' && hasPerm('dashboard_view'))) return 'admin-analytics';
   if (role === 'shop') return 'overview';
   if (role === 'restaurant') return 'overview';
-  if (role === 'deliveryPartner') return 'rider-available';
+  if (role === 'deliveryPartner') return 'overview';
   if (role === 'customer') return 'customer-order';
   return 'overview';
 };
@@ -1336,6 +1336,25 @@ function initDashboard() {
       adminOverviewReportBtn.classList.remove('active');
     }
   }
+  const isRider = role === 'deliveryPartner';
+  const riderOverviewNotifBtn = document.getElementById('rider-overview-notif-btn');
+  if (riderOverviewNotifBtn) {
+    riderOverviewNotifBtn.style.display = isRider ? 'inline-flex' : 'none';
+    if (isRider && typeof overviewRiderSubView !== 'undefined' && overviewRiderSubView === 'report') {
+      riderOverviewNotifBtn.classList.remove('active');
+    } else if (isRider) {
+      riderOverviewNotifBtn.classList.add('active');
+    }
+  }
+  const riderOverviewReportBtn = document.getElementById('rider-overview-report-btn');
+  if (riderOverviewReportBtn) {
+    riderOverviewReportBtn.style.display = isRider ? 'inline-flex' : 'none';
+    if (isRider && typeof overviewRiderSubView !== 'undefined' && overviewRiderSubView === 'report') {
+      riderOverviewReportBtn.classList.add('active');
+    } else if (isRider) {
+      riderOverviewReportBtn.classList.remove('active');
+    }
+  }
   const orderHeaderCartBtn = document.getElementById('order-header-cart-btn');
   if (orderHeaderCartBtn) {
     orderHeaderCartBtn.style.display = role === 'customer' ? 'inline-flex' : 'none';
@@ -1411,21 +1430,75 @@ function initDashboard() {
   // Initialize rider location reporting
   initRiderLocationTracking();
 
-  // Sign out
-  document.getElementById('sign-out').addEventListener('click', () => {
-    if (notificationEventSource) {
-      try { notificationEventSource.close(); } catch (_) {}
-    }
-    localStorage.removeItem('tomatoToken');
-    localStorage.removeItem('tomatoUser');
-    try {
-      sessionStorage.removeItem(getActiveViewStorageKey());
-      sessionStorage.removeItem('tomato_active_view');
-    } catch (_) {}
-    window.alert('Signed out from Tomato. Visit again soon!');
-    window.location.href = '../index.html';
-  });
+  // Sign out (with Yes/No confirmation)
+  const signOutBtn = document.getElementById('sign-out');
+  if (signOutBtn) {
+    signOutBtn.onclick = handleSignOut;
+  }
 }
+
+// =========================================================================
+// GLOBAL SIGN OUT CONFIRMATION SYSTEM (YES / NO)
+// =========================================================================
+function handleSignOut(event) {
+  if (event) {
+    try {
+      event.preventDefault();
+      event.stopPropagation();
+    } catch (_) {}
+  }
+  const modal = document.getElementById('sign-out-confirm-modal');
+  if (modal) {
+    openModal('sign-out-confirm-modal');
+  } else {
+    // Native browser Yes/No fallback (OK=Yes, Cancel=No)
+    const confirmed = window.confirm('Are you sure you want to sign out from Tomato?\n\n• Click OK (Yes) to sign out\n• Click Cancel (No) to stay');
+    if (confirmed) {
+      executeSignOut();
+    }
+  }
+}
+
+function cancelSignOut() {
+  closeModal('sign-out-confirm-modal');
+}
+
+function executeSignOut() {
+  closeModal('sign-out-confirm-modal');
+  if (notificationEventSource) {
+    try { notificationEventSource.close(); } catch (_) {}
+  }
+  localStorage.removeItem('tomatoToken');
+  localStorage.removeItem('tomatoUser');
+  try {
+    sessionStorage.removeItem(getActiveViewStorageKey());
+    sessionStorage.removeItem('tomato_active_view');
+  } catch (_) {}
+  window.location.href = '../index.html';
+}
+
+window.handleSignOut = handleSignOut;
+window.confirmSignOut = handleSignOut;
+window.cancelSignOut = cancelSignOut;
+window.executeSignOut = executeSignOut;
+
+// Global event delegation for any sign-out button across the dashboard
+document.addEventListener('click', (event) => {
+  const trigger = event.target && event.target.closest && event.target.closest('#sign-out, .sign-out, [data-action="sign-out"], [data-sign-out]');
+  if (trigger) {
+    handleSignOut(event);
+  }
+});
+
+// Escape key to dismiss sign-out confirmation modal (equivalent to "No, Stay")
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    const modal = document.getElementById('sign-out-confirm-modal');
+    if (modal && modal.classList.contains('visible')) {
+      cancelSignOut();
+    }
+  }
+});
 
 // Navigation Drag & Drop, Persistence & Ordering
 let isDraggingNav = false;
@@ -1809,6 +1882,13 @@ function switchView(viewId, filter = null, force = false) {
         showOverviewCartView();
       } else if (role === 'restaurant' || role === 'shop') {
         showOverviewPartnerReportView();
+      } else if (role === 'deliveryPartner') {
+        if (typeof overviewRiderSubView !== 'undefined' && overviewRiderSubView === 'notifications') {
+          showOverviewNotificationsView();
+          loadNotifications();
+        } else {
+          showOverviewRiderReportView();
+        }
       } else if (role === 'admin' || role === 'subadmin') {
         if (typeof overviewAdminSubView !== 'undefined' && overviewAdminSubView === 'notifications') {
           showOverviewNotificationsView();
@@ -1821,7 +1901,11 @@ function switchView(viewId, filter = null, force = false) {
         loadNotifications();
       }
     } else if (viewId === 'admin-partner-billing') {
-      fetchAdminPartnerBilling();
+      if (typeof refreshAdminPartnerBillingCurrentTab === 'function') {
+        refreshAdminPartnerBillingCurrentTab();
+      } else {
+        fetchAdminPartnerBilling();
+      }
     }
     return;
   }
@@ -1864,6 +1948,13 @@ function switchView(viewId, filter = null, force = false) {
       showOverviewCartView();
     } else if (role === 'restaurant' || role === 'shop') {
       showOverviewPartnerReportView();
+    } else if (role === 'deliveryPartner') {
+      if (typeof overviewRiderSubView !== 'undefined' && overviewRiderSubView === 'notifications') {
+        showOverviewNotificationsView();
+        loadNotifications();
+      } else {
+        showOverviewRiderReportView();
+      }
     } else if (role === 'admin' || role === 'subadmin') {
       if (typeof overviewAdminSubView !== 'undefined' && overviewAdminSubView === 'notifications') {
         showOverviewNotificationsView();
@@ -1917,7 +2008,11 @@ function switchView(viewId, filter = null, force = false) {
   } else if (viewId === 'admin-bank') {
     loadAdminBankPanel();
   } else if (viewId === 'admin-partner-billing') {
-    fetchAdminPartnerBilling();
+    if (typeof refreshAdminPartnerBillingCurrentTab === 'function') {
+      refreshAdminPartnerBillingCurrentTab();
+    } else {
+      fetchAdminPartnerBilling();
+    }
   } else if (viewId === 'admin-coupons') {
     fetchAdminCoupons();
   } else if (viewId === 'partner-bank') {
@@ -1930,6 +2025,11 @@ function switchView(viewId, filter = null, force = false) {
     loadProfileSettings();
   } else if (viewId === 'overview') {
     loadRoleOverview();
+    if (role === 'deliveryPartner' && typeof overviewRiderSubView !== 'undefined' && overviewRiderSubView === 'report') {
+      if (typeof showOverviewRiderReportView === 'function') {
+        showOverviewRiderReportView();
+      }
+    }
   }
 }
 
@@ -2192,11 +2292,57 @@ async function loadRoleOverview() {
         apiFetch('/api/rider/orders/history').catch(() => ({ orders: [], totalEarnings: 0, totalDeliveries: 0 })),
       ]);
 
+      const allOrders = histData.orders || [];
+      const now = new Date();
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+      // Filter deliveries completed today
+      const todayDeliveredOrders = allOrders.filter((o) => {
+        const orderDate = new Date(o.updatedAt || o.createdAt || o.date);
+        return orderDate >= startOfToday;
+      });
+
+      const todayDeliveriesCount = todayDeliveredOrders.length;
+      const todayEarnings = todayDeliveriesCount * 40;
+
+      const todayCodCollections = {
+        cash: todayDeliveredOrders
+          .filter(o => o.paymentMethod === 'cod' && o.codCollectedVia !== 'upi')
+          .reduce((s, o) => s + Number(o.totalAmount || 0), 0),
+        upi: todayDeliveredOrders
+          .filter(o => o.paymentMethod === 'cod' && o.codCollectedVia === 'upi')
+          .reduce((s, o) => s + Number(o.totalAmount || 0), 0),
+        total: todayDeliveredOrders
+          .filter(o => o.paymentMethod === 'cod')
+          .reduce((s, o) => s + Number(o.totalAmount || 0), 0),
+      };
+
       statsEl.innerHTML = `
-        <div class="stat-card"><span class="stat-label">Available Pickups</span><div class="stat-value" style="color:var(--tomato);">${availData.orders?.length || 0}</div><span class="stat-note">Ready for pickup</span></div>
-        <div class="stat-card"><span class="stat-label">Active Trip</span><div class="stat-value">${activeData.orders?.length || 0}</div><span class="stat-note">In transit</span></div>
-        <div class="stat-card"><span class="stat-label">Delivered Orders</span><div class="stat-value">${histData.totalDeliveries || 0}</div><span class="stat-note">Trips completed</span></div>
-        <div class="stat-card"><span class="stat-label">Trip Earnings</span><div class="stat-value" style="color:var(--green);">₹${histData.totalEarnings || 0}</div><span class="stat-note">₹40 per delivery</span></div>
+        <div class="stat-card clickable" onclick="switchView('rider-available')" title="Click to view available pickups">
+          <span class="stat-label">Available Pickups</span>
+          <div class="stat-value" style="color:var(--tomato);">${availData.orders?.length || 0}</div>
+          <span class="stat-note">Ready for pickup ↗</span>
+        </div>
+        <div class="stat-card clickable" onclick="switchView('rider-active')" title="Click to view active trip in progress">
+          <span class="stat-label">Active Trip</span>
+          <div class="stat-value">${activeData.orders?.length || 0}</div>
+          <span class="stat-note">In transit ↗</span>
+        </div>
+        <div class="stat-card clickable" onclick="handleRiderOverviewReportClick()" title="Click to view Delivery & Earnings Report (Delivered Today: ${todayDeliveriesCount})">
+          <span class="stat-label">Delivered Orders</span>
+          <div class="stat-value">${todayDeliveriesCount}</div>
+          <span class="stat-note">Delivered today ↗</span>
+        </div>
+        <div class="stat-card clickable" onclick="handleRiderOverviewReportClick()" title="Click to view Delivery & Collections Report (Collected Today: ₹${Number(todayCodCollections.total || 0).toLocaleString('en-IN')})">
+          <span class="stat-label">Collections</span>
+          <div class="stat-value" style="color:#0f172a;">₹${Number(todayCodCollections.total || 0).toLocaleString('en-IN')}</div>
+          <span class="stat-note" style="font-weight:700; color:#1d4ed8;">UPI: ₹${Number(todayCodCollections.upi || 0).toLocaleString('en-IN')} / Cash: ₹${Number(todayCodCollections.cash || 0).toLocaleString('en-IN')} (Today) ↗</span>
+        </div>
+        <div class="stat-card clickable" onclick="handleRiderOverviewReportClick()" title="Click to view Delivery & Earnings Report (Earned Today: ₹${todayEarnings})">
+          <span class="stat-label">Trip Earnings</span>
+          <div class="stat-value" style="color:var(--green);">₹${Number(todayEarnings).toLocaleString('en-IN')}</div>
+          <span class="stat-note">₹40 per delivery today ↗</span>
+        </div>
       `;
     } catch (e) {
       console.error(e);
@@ -3442,4 +3588,15 @@ window.escapeHtml = escapeHtml;
 window.switchView = switchView;
 window.loadRoleOverview = loadRoleOverview;
 window.initDashboard = initDashboard;
+window.viewLastFetched = viewLastFetched;
+window.loadNotifications = loadNotifications;
+window.changeNotifPage = changeNotifPage;
+window.goToNotifPage = goToNotifPage;
+window.renderTableSkeleton = renderTableSkeleton;
+window.renderAnalyticsSkeleton = renderAnalyticsSkeleton;
+window.openOrderLiveTrackingModal = openOrderLiveTrackingModal;
+window.closeOrderLiveTrackingModal = closeOrderLiveTrackingModal;
+window.refreshProfileWallet = refreshProfileWallet;
+window.showStatusBanner = showStatusBanner;
+window.hideStatusBanner = hideStatusBanner;
 

@@ -2007,6 +2007,8 @@ window.toggleCustomerOrderCart = toggleCustomerOrderCart;
 let overviewCustomerSubView = 'cart'; // 'cart' | 'notifications'
 let overviewPartnerSubView = 'report'; // 'report' | 'notifications'
 let overviewAdminSubView = 'report'; // 'report' | 'notifications'
+let overviewRiderSubView = 'report'; // 'report' | 'notifications'
+window.overviewRiderSubView = overviewRiderSubView;
 
 function showOverviewCartView() {
   overviewCustomerSubView = 'cart';
@@ -2014,6 +2016,7 @@ function showOverviewCartView() {
   const feed = document.getElementById('activity-feed');
   const partnerReportContainer = document.getElementById('overview-partner-report-container');
   const adminReportContainer = document.getElementById('overview-admin-report-container');
+  const riderReportContainer = document.getElementById('overview-rider-report-container');
   const paginationBar = document.getElementById('notif-pagination-container');
   const titleEl = document.getElementById('overview-activity-title');
   const countBadge = document.getElementById('notif-count-badge');
@@ -2028,6 +2031,7 @@ function showOverviewCartView() {
   if (feed) feed.style.display = 'none';
   if (partnerReportContainer) partnerReportContainer.style.display = 'none';
   if (adminReportContainer) adminReportContainer.style.display = 'none';
+  if (riderReportContainer) riderReportContainer.style.display = 'none';
   if (paginationBar) paginationBar.style.display = 'none';
   if (countBadge) countBadge.style.display = 'none';
   if (refreshBtn) refreshBtn.style.display = 'inline-block';
@@ -2072,6 +2076,7 @@ function showOverviewPartnerReportView() {
   overviewPartnerSubView = 'report';
   const reportContainer = document.getElementById('overview-partner-report-container');
   const adminReportContainer = document.getElementById('overview-admin-report-container');
+  const riderReportContainer = document.getElementById('overview-rider-report-container');
   const drawer = document.getElementById('overview-cart-drawer');
   const feed = document.getElementById('activity-feed');
   const paginationBar = document.getElementById('notif-pagination-container');
@@ -2084,6 +2089,7 @@ function showOverviewPartnerReportView() {
   if (drawer) drawer.style.display = 'none';
   if (feed) feed.style.display = 'none';
   if (adminReportContainer) adminReportContainer.style.display = 'none';
+  if (riderReportContainer) riderReportContainer.style.display = 'none';
   if (paginationBar) paginationBar.style.display = 'none';
   if (countBadge) countBadge.style.display = 'none';
   if (refreshBtn) refreshBtn.style.display = 'inline-block';
@@ -2105,12 +2111,72 @@ function showOverviewPartnerReportView() {
 }
 window.showOverviewPartnerReportView = showOverviewPartnerReportView;
 
+function showOverviewRiderReportView() {
+  overviewRiderSubView = 'report';
+  const riderReportContainer = document.getElementById('overview-rider-report-container');
+  const partnerReportContainer = document.getElementById('overview-partner-report-container');
+  const adminReportContainer = document.getElementById('overview-admin-report-container');
+  const drawer = document.getElementById('overview-cart-drawer');
+  const feed = document.getElementById('activity-feed');
+  const paginationBar = document.getElementById('notif-pagination-container');
+  const titleEl = document.getElementById('overview-activity-title');
+  const countBadge = document.getElementById('notif-count-badge');
+  const refreshBtn = document.getElementById('overview-refresh-btn');
+  const reportBtn = document.getElementById('rider-overview-report-btn');
+  const notifBtn = document.getElementById('rider-overview-notif-btn');
+
+  if (drawer) drawer.style.display = 'none';
+  if (feed) feed.style.display = 'none';
+  if (partnerReportContainer) partnerReportContainer.style.display = 'none';
+  if (adminReportContainer) adminReportContainer.style.display = 'none';
+  if (paginationBar) paginationBar.style.display = 'none';
+  if (countBadge) countBadge.style.display = 'none';
+  if (refreshBtn) refreshBtn.style.display = 'inline-block';
+  if (riderReportContainer) riderReportContainer.style.display = 'block';
+
+  if (reportBtn) reportBtn.classList.add('active');
+  if (notifBtn) notifBtn.classList.remove('active');
+
+  if (titleEl) {
+    titleEl.textContent = 'Rider Delivery & Collections Report';
+  }
+
+  if (typeof refreshRiderReportData === 'function') {
+    refreshRiderReportData();
+  }
+  loadNotifications();
+}
+window.showOverviewRiderReportView = showOverviewRiderReportView;
+
+function handleRiderOverviewNotifClick() {
+  if (overviewRiderSubView === 'report') {
+    showOverviewNotificationsView();
+  } else {
+    loadNotifications(1);
+  }
+}
+window.handleRiderOverviewNotifClick = handleRiderOverviewNotifClick;
+
+function handleRiderOverviewReportClick() {
+  if (activeView !== 'overview') {
+    switchView('overview');
+  }
+  showOverviewRiderReportView();
+  const el = document.getElementById('overview-rider-report-container');
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+window.handleRiderOverviewReportClick = handleRiderOverviewReportClick;
+
 function showOverviewNotificationsView() {
   overviewCustomerSubView = 'notifications';
   overviewPartnerSubView = 'notifications';
   overviewAdminSubView = 'notifications';
+  overviewRiderSubView = 'notifications';
   const reportContainer = document.getElementById('overview-partner-report-container');
   const adminReportContainer = document.getElementById('overview-admin-report-container');
+  const riderReportContainer = document.getElementById('overview-rider-report-container');
   const drawer = document.getElementById('overview-cart-drawer');
   const feed = document.getElementById('activity-feed');
   const paginationBar = document.getElementById('notif-pagination-container');
@@ -2123,12 +2189,15 @@ function showOverviewNotificationsView() {
   const partnerNotifBtn = document.getElementById('partner-overview-notif-btn');
   const adminReportBtn = document.getElementById('admin-overview-report-btn');
   const adminNotifBtn = document.getElementById('admin-overview-notif-btn');
+  const riderReportBtn = document.getElementById('rider-overview-report-btn');
+  const riderNotifBtn = document.getElementById('rider-overview-notif-btn');
   const notifIcon = document.getElementById('overview-notif-icon');
   const notifLabel = document.getElementById('overview-notif-label');
   const btn = document.getElementById('topbar-cart-btn');
 
   if (reportContainer) reportContainer.style.display = 'none';
   if (adminReportContainer) adminReportContainer.style.display = 'none';
+  if (riderReportContainer) riderReportContainer.style.display = 'none';
   if (drawer) drawer.style.display = 'none';
   if (feed) feed.style.display = 'block';
   if (countBadge) {
@@ -2164,6 +2233,13 @@ function showOverviewNotificationsView() {
     adminNotifBtn.classList.add('active');
   }
 
+  if (riderReportBtn) {
+    riderReportBtn.classList.remove('active');
+  }
+  if (riderNotifBtn) {
+    riderNotifBtn.classList.add('active');
+  }
+
   if (btn) {
     btn.classList.remove('active');
   }
@@ -2195,6 +2271,7 @@ function showOverviewAdminReportView() {
   overviewAdminSubView = 'report';
   const adminReportContainer = document.getElementById('overview-admin-report-container');
   const partnerReportContainer = document.getElementById('overview-partner-report-container');
+  const riderReportContainer = document.getElementById('overview-rider-report-container');
   const drawer = document.getElementById('overview-cart-drawer');
   const feed = document.getElementById('activity-feed');
   const paginationBar = document.getElementById('notif-pagination-container');
@@ -2207,6 +2284,7 @@ function showOverviewAdminReportView() {
   if (drawer) drawer.style.display = 'none';
   if (feed) feed.style.display = 'none';
   if (partnerReportContainer) partnerReportContainer.style.display = 'none';
+  if (riderReportContainer) riderReportContainer.style.display = 'none';
   if (paginationBar) paginationBar.style.display = 'none';
   if (countBadge) countBadge.style.display = 'none';
   if (refreshBtn) refreshBtn.style.display = 'inline-block';
@@ -2256,6 +2334,10 @@ function handleOverviewRefreshClick() {
     refreshPartnerReportData();
   } else if (overviewAdminSubView === 'report' && (role === 'admin' || role === 'subadmin')) {
     refreshAdminReportData();
+  } else if (overviewRiderSubView === 'report' && role === 'deliveryPartner') {
+    if (typeof refreshRiderReportData === 'function') {
+      refreshRiderReportData();
+    }
   } else {
     loadNotifications(1);
     if (role === 'admin' || role === 'subadmin') {
@@ -2263,7 +2345,6 @@ function handleOverviewRefreshClick() {
     }
   }
 }
-window.handleOverviewRefreshClick = handleOverviewRefreshClick;
 window.handleOverviewRefreshClick = handleOverviewRefreshClick;
 
 function handleHeaderCartClick() {

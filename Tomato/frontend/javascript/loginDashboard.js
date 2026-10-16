@@ -1098,8 +1098,8 @@ async function toggleDutyStatus() {
 async function refreshProfileWallet() {
   try {
     const wallet = await apiFetch('/api/auth/wallet');
-    user.walletBalance = Number(wallet.walletBalance ?? 0);
-    user.creditPoint = Number(wallet.creditPoint ?? 0);
+    user.walletBalance = Math.max(0, Number(wallet.walletBalance ?? 0));
+    user.creditPoint = Math.max(0, Number(wallet.creditPoint ?? 0));
     localStorage.setItem('tomatoUser', JSON.stringify(user));
 
     const walletText = document.getElementById('profile-wallet-text');
@@ -1280,7 +1280,11 @@ function initDashboard() {
   const walletText = document.getElementById('profile-wallet-text');
   const walletLabel = document.getElementById('profile-wallet-label');
   if (walletChip) walletChip.style.display = 'inline-flex';
-  if (walletText) walletText.textContent = `${Number(user.walletBalance ?? 0).toFixed(2)}/${Number(user.creditPoint ?? 0).toFixed(0)}`;
+  if (walletText) {
+    const wb = Math.max(0, Number(user.walletBalance ?? 0)).toFixed(2);
+    const cp = Math.max(0, Number(user.creditPoint ?? 0)).toFixed(0);
+    walletText.textContent = `${wb}/${cp}`;
+  }
   if (walletLabel) walletLabel.textContent = role === 'admin' || role === 'subadmin' ? 'W' : 'Wallet';
   const creditTransferButton = document.getElementById('admin-credit-transfer-open');
   if (creditTransferButton) {

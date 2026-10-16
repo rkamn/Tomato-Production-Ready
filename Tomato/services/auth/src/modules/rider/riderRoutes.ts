@@ -528,7 +528,8 @@ const createRiderRouter = () => {
           isLocked,
         },
         isApproved: rider.isApproved,
-        walletBalance: rider.walletBalance || 0,
+        walletBalance: Math.max(0, Number(rider.walletBalance || 0)),
+        creditPoint: Math.max(0, Number(rider.creditPoint || 0)),
         payouts,
       });
     } catch (error) {

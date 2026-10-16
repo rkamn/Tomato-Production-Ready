@@ -66,8 +66,8 @@ const router = Router();
             phone: doc.phone || '',
             role: partnerRole,
             isApproved: Boolean(doc.isApproved),
-            isBlocked: Boolean(doc.isBlocked),
-            walletBalance: Number(doc.walletBalance || 0),
+            walletBalance: Math.max(0, Number(doc.walletBalance || 0)),
+            creditPoint: Math.max(0, Number((doc as any).creditPoint || 0)),
             namesMatch: nameMatched,
             bankDetails: {
               accountHolderName: bd.accountHolderName || '',

@@ -11,14 +11,21 @@ export async function adjustTomatoCentralBankBalance(deltaAmount: number) {
   const numDelta = Number(Number(deltaAmount || 0).toFixed(2));
   if (!numDelta) return;
   try {
-    await Employee.updateMany(
-      { role: 'admin' },
-      { $inc: { walletBalance: numDelta } },
-    );
-    await WalletCreditTrack.updateMany(
-      { recordType: 'balance_snapshot' },
-      { $inc: { wallet_balance: numDelta, walletBalance: numDelta } },
-    );
+    const admins = await Employee.find({ role: 'admin' }).select('_id walletBalance');
+    for (const admin of admins) {
+      const current = Math.max(0, Number(admin.walletBalance || 0));
+      const updated = Math.max(0, Number((current + numDelta).toFixed(2)));
+      await Employee.updateOne({ _id: admin._id }, { $set: { walletBalance: updated } });
+    }
+    const snapshots = await WalletCreditTrack.find({ recordType: 'balance_snapshot' });
+    for (const snap of snapshots) {
+      const current = Math.max(0, Number(snap.wallet_balance ?? snap.walletBalance ?? 0));
+      const updated = Math.max(0, Number((current + numDelta).toFixed(2)));
+      await WalletCreditTrack.updateOne(
+        { _id: snap._id },
+        { $set: { wallet_balance: updated, walletBalance: updated } },
+      );
+    }
   } catch (err) {
     console.warn('adjustTomatoCentralBankBalance warning:', err);
   }

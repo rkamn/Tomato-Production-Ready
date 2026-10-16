@@ -1365,37 +1365,208 @@
         color: var(--muted);
       }
 
-      /* Payment Gateway UI */
+      /* Payment Gateway UI - Fintech Redesign */
       .gateway-tabs {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 0.5rem;
-        margin-bottom: 1.2rem;
+        grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+        gap: 0.45rem;
+        margin-bottom: 1.1rem;
       }
       .gateway-tab {
-        padding: 0.6rem;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        background: var(--paper);
+        padding: 0.65rem 0.45rem;
+        border: 1.5px solid var(--line);
+        border-radius: 9px;
+        background: #f8fafc;
         text-align: center;
-        font-size: 0.8rem;
+        font-size: 0.77rem;
         font-weight: 600;
+        color: #475569;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.2rem;
+      }
+      .gateway-tab:hover {
+        background: #fff;
+        border-color: #cbd5e1;
+        color: #1e293b;
+        transform: translateY(-1px);
       }
       .gateway-tab.active {
         background: #fff;
         border-color: var(--tomato);
         color: var(--tomato);
+        box-shadow: 0 2px 8px rgba(226, 55, 68, 0.15);
       }
       .gateway-panel {
         display: none;
-        padding: 1.2rem;
+        padding: 1.15rem;
         border: 1px solid var(--line);
-        border-radius: 8px;
+        border-radius: 10px;
         background: #fff;
-        margin-bottom: 1.2rem;
+        margin-bottom: 1.1rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.02);
       }
       .gateway-panel.active {
         display: block;
+        animation: gatewayFadeIn 0.25s ease-out;
+      }
+      @keyframes gatewayFadeIn {
+        from { opacity: 0; transform: translateY(4px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+
+      /* Official Tomato Bank Settlement Card */
+      .gateway-settlement-card {
+        background: linear-gradient(135deg, #f0fdf4 0%, #e0f2fe 100%);
+        border: 1.5px solid #86efac;
+        border-radius: 10px;
+        padding: 0.85rem 1rem;
+        margin-bottom: 0.95rem;
+        display: grid;
+        gap: 0.45rem;
+      }
+      .gateway-settlement-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+      }
+      .gateway-settlement-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+        gap: 0.5rem;
+        background: rgba(255, 255, 255, 0.85);
+        padding: 0.6rem 0.8rem;
+        border-radius: 8px;
+        border: 1px solid rgba(134, 239, 172, 0.6);
+        font-size: 0.76rem;
+      }
+
+      /* Interactive Virtual Card Preview */
+      .gateway-card-preview {
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #334155 100%);
+        color: #fff;
+        border-radius: 14px;
+        padding: 1.25rem 1.4rem;
+        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.35);
+        position: relative;
+        overflow: hidden;
+        margin-bottom: 1.1rem;
+        max-width: 380px;
+        margin-left: auto;
+        margin-right: auto;
+        transition: transform 0.3s ease;
+      }
+      .gateway-card-preview::before {
+        content: "";
+        position: absolute;
+        top: -40px;
+        right: -40px;
+        width: 140px;
+        height: 140px;
+        background: radial-gradient(circle, rgba(226, 55, 68, 0.3) 0%, transparent 70%);
+        border-radius: 50%;
+      }
+      .gateway-card-chip {
+        width: 38px;
+        height: 28px;
+        background: linear-gradient(135deg, #fcd34d, #d97706);
+        border-radius: 5px;
+        display: inline-block;
+        box-shadow: inset 0 1px 2px rgba(255,255,255,0.4);
+      }
+      .gateway-card-num-display {
+        font-family: 'Courier New', Courier, monospace;
+        font-size: 1.15rem;
+        letter-spacing: 0.14em;
+        margin: 1rem 0 0.8rem 0;
+        font-weight: 700;
+        color: #f8fafc;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+      }
+      .gateway-card-meta-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #cbd5e1;
+      }
+      .gateway-card-brand-badge {
+        font-size: 0.88rem;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        background: rgba(255,255,255,0.15);
+        padding: 0.2rem 0.6rem;
+        border-radius: 4px;
+        backdrop-filter: blur(4px);
+      }
+
+      /* Quick Handle Chips */
+      .gateway-quick-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+        margin-top: 0.35rem;
+      }
+      .gateway-chip {
+        font-size: 0.73rem;
+        padding: 0.22rem 0.55rem;
+        border-radius: 12px;
+        background: #f1f5f9;
+        color: #334155;
+        border: 1px solid #cbd5e1;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      .gateway-chip:hover {
+        background: #e2e8f0;
+        color: #0f172a;
+        border-color: #94a3b8;
+      }
+
+      /* NetBanking Tile Selector */
+      .gateway-banks-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.55rem;
+        margin-bottom: 0.9rem;
+      }
+      .gateway-bank-tile {
+        border: 1.5px solid var(--line);
+        border-radius: 8px;
+        padding: 0.7rem 0.5rem;
+        text-align: center;
+        background: #fbfbfc;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.25rem;
+      }
+      .gateway-bank-tile:hover {
+        border-color: #94a3b8;
+        background: #fff;
+      }
+      .gateway-bank-tile.selected {
+        border-color: var(--tomato);
+        background: #fff5f5;
+        color: var(--tomato);
+        box-shadow: 0 0 0 2px rgba(226, 55, 68, 0.15);
+      }
+      .gateway-bank-tile strong {
+        font-size: 0.78rem;
+      }
+      .gateway-bank-tile span {
+        font-size: 0.68rem;
+        color: var(--muted);
       }
       .form-group {
         display: grid;

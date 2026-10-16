@@ -2720,33 +2720,88 @@
          MODAL 1: PAYMENT GATEWAY CHECKOUT (CUSTOMER)
          ===================================================================== -->
     <div id="payment-gateway-modal" class="modal-overlay">
-      <div class="modal-box" style="max-width:600px; max-height:92vh; overflow-y:auto;">
-        <div class="modal-header">
+      <div class="modal-box" style="max-width:640px; max-height:92vh; overflow-y:auto; border-radius:12px;">
+        <div class="modal-header" style="align-items:flex-start; padding-bottom:0.75rem;">
           <div>
-            <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--green); font-weight:700;">🔒 256-Bit SSL Encrypted</span>
-            <h2 style="font-size:1.4rem; margin-top:0.2rem;">Tomato Secure Billing &amp; Payment</h2>
+            <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.25rem;">
+              <span style="font-size:0.72rem; text-transform:uppercase; letter-spacing:0.08em; background:#dcfce7; color:#15803d; font-weight:700; padding:0.18rem 0.5rem; border-radius:4px; border:1px solid #86efac;">
+                🔒 256-Bit SSL Encrypted
+              </span>
+              <span style="font-size:0.72rem; text-transform:uppercase; letter-spacing:0.08em; background:#eff6ff; color:#1d4ed8; font-weight:700; padding:0.18rem 0.5rem; border-radius:4px; border:1px solid #bfdbfe;">
+                🏛️ Official Tomato Central Settlement
+              </span>
+            </div>
+            <h2 style="font-size:1.35rem; margin:0; color:var(--ink); font-weight:800;">Tomato Secure Billing &amp; Payment</h2>
+            <div style="font-size:0.78rem; color:var(--muted); margin-top:0.2rem;">
+              Instant, verified checkout directly credited to Tomato Official Treasury Bank Account
+            </div>
           </div>
-          <button class="modal-close" onclick="closeModal('payment-gateway-modal')">&times;</button>
+          <button class="modal-close" onclick="closeModal('payment-gateway-modal')" style="font-size:1.6rem; line-height:1;">&times;</button>
         </div>
 
-        <div style="background:#f7f4ed; padding:0.9rem 1rem; border-radius:8px; margin-bottom:0.9rem;">
+        <!-- OFFICIAL TOMATO CENTRAL BANK SETTLEMENT CARD -->
+        <div class="gateway-settlement-card">
+          <div class="gateway-settlement-header">
+            <div style="display:flex; align-items:center; gap:0.45rem;">
+              <span style="font-size:1.25rem;">🏦</span>
+              <div>
+                <strong style="font-size:0.85rem; color:#14532d; display:block;">Tomato Official Treasury Account</strong>
+                <span style="font-size:0.71rem; color:#166534;">Tomato Technologies Private Limited (HDFC Bank Ltd)</span>
+              </div>
+            </div>
+            <span class="badge" style="background:#dcfce7; color:#15803d; font-size:0.7rem; font-weight:700; border:1px solid #86efac; padding:0.2rem 0.55rem; border-radius:20px;">
+              ✓ Direct Settlement Enabled
+            </span>
+          </div>
+
+          <div class="gateway-settlement-grid">
+            <div>
+              <span style="color:#64748b; display:block; font-size:0.67rem; text-transform:uppercase; font-weight:600;">Beneficiary</span>
+              <strong style="color:#0f172a; font-size:0.76rem;" id="settle-holder">Tomato Central Treasury</strong>
+            </div>
+            <div>
+              <span style="color:#64748b; display:block; font-size:0.67rem; text-transform:uppercase; font-weight:600;">Bank &amp; Branch</span>
+              <strong style="color:#0f172a; font-size:0.76rem;" id="settle-bank">HDFC Bank Ltd (Central Indiranagar)</strong>
+            </div>
+            <div>
+              <span style="color:#64748b; display:block; font-size:0.67rem; text-transform:uppercase; font-weight:600;">Current Account No</span>
+              <strong style="color:#0f172a; font-family:monospace; font-size:0.8rem; letter-spacing:0.04em;" id="settle-ac">50200088991122</strong>
+            </div>
+            <div>
+              <span style="color:#64748b; display:block; font-size:0.67rem; text-transform:uppercase; font-weight:600;">IFSC Code</span>
+              <strong style="color:#0f172a; font-family:monospace; font-size:0.8rem;" id="settle-ifsc">HDFC0000060</strong>
+            </div>
+            <div style="grid-column: 1 / -1; display:flex; justify-content:space-between; align-items:center; background:#ffffff; padding:0.4rem 0.65rem; border-radius:6px; border:1px dashed #86efac; flex-wrap:wrap; gap:0.4rem;">
+              <div style="display:flex; align-items:center; gap:0.45rem;">
+                <span style="font-size:0.74rem; color:#166534; font-weight:700;">Official UPI VPA:</span>
+                <span style="font-family:monospace; font-weight:800; color:#15803d; font-size:0.82rem;" id="settle-upi">tomato.official@hdfcbank</span>
+              </div>
+              <button type="button" class="btn btn-outline btn-sm" style="font-size:0.7rem; padding:0.18rem 0.55rem; height:auto; border-color:#86efac; color:#15803d;" onclick="copyTomatoOfficialUpi()">
+                📋 Copy UPI ID
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- FINAL AMOUNT & ITEM BREAKDOWN -->
+        <div style="background:#f8fafc; border:1px solid var(--line); padding:0.85rem 1rem; border-radius:9px; margin-bottom:0.95rem;">
           <div style="display:flex; justify-content:space-between; align-items:center;">
             <div>
-              <div style="font-size:0.8rem; color:var(--muted);">Final Amount Payable</div>
-              <strong style="font-size:1.4rem; color:var(--tomato);" id="gateway-amount">₹0.00</strong>
+              <div style="font-size:0.78rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em; font-weight:600;">Final Amount Payable</div>
+              <strong style="font-size:1.45rem; color:var(--tomato); font-weight:800;" id="gateway-amount">₹0.00</strong>
             </div>
             <div style="font-size:0.8rem; text-align:right;">
               <div>Items: <strong id="gateway-items-count">0</strong></div>
-              <div id="gateway-savings-badge" style="color:var(--green); font-weight:700;">No extra gateway fees</div>
+              <div id="gateway-savings-badge" style="color:var(--green); font-weight:700; font-size:0.76rem;">No extra gateway fees</div>
             </div>
           </div>
-          <div id="gateway-bill-breakdown" style="margin-top:0.55rem; padding-top:0.55rem; border-top:1px dashed #dcd6c8; font-size:0.79rem; color:var(--charcoal); display:grid; gap:0.2rem;">
+          <div id="gateway-bill-breakdown" style="margin-top:0.55rem; padding-top:0.55rem; border-top:1px dashed #cbd5e1; font-size:0.79rem; color:var(--charcoal); display:grid; gap:0.25rem;">
             <!-- Populated dynamically with Subtotal, GST, Delivery Fee, and 1 Applied Coupon -->
           </div>
         </div>
 
         <!-- COUPON & DISCOUNT BOX IN BILLING (MAX 1 COUPON AT A TIME) -->
-        <div style="background:#fff; border:1.5px solid #fed7aa; border-radius:8px; padding:0.85rem 0.95rem; margin-bottom:0.95rem;">
+        <div style="background:#fff; border:1.5px solid #fed7aa; border-radius:9px; padding:0.85rem 0.95rem; margin-bottom:0.95rem;">
           <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.45rem;">
             <strong style="font-size:0.86rem; color:var(--ink); display:flex; align-items:center; gap:0.35rem;">
               <span>🎟️ Apply Coupon &amp; Discount</span>
@@ -2761,10 +2816,10 @@
               type="text"
               id="checkout-coupon-input"
               placeholder="Enter coupon code (e.g. WELCOME100, SWEETS25, FESTIVAL30)..."
-              style="flex:1; padding:0.42rem 0.65rem; border:1px solid var(--line); border-radius:6px; font-size:0.82rem; text-transform:uppercase; font-family:monospace;"
+              style="flex:1; padding:0.45rem 0.65rem; border:1px solid var(--line); border-radius:6px; font-size:0.82rem; text-transform:uppercase; font-family:monospace;"
               onkeydown="if(event.key==='Enter'){ event.preventDefault(); applyManualCouponCode(); }"
             />
-            <button type="button" class="btn btn-primary btn-sm" style="padding:0.42rem 0.85rem; font-size:0.8rem;" onclick="applyManualCouponCode()">Apply</button>
+            <button type="button" class="btn btn-primary btn-sm" style="padding:0.45rem 0.85rem; font-size:0.8rem;" onclick="applyManualCouponCode()">Apply</button>
           </div>
 
           <!-- Applied Coupons Chips -->
@@ -2778,115 +2833,301 @@
             <summary style="font-size:0.78rem; font-weight:700; color:#1e3a8a; cursor:pointer; user-select:none;">
               ✨ View Available Coupons for Billing (Tap to Apply 1 Coupon)
             </summary>
-            <div id="checkout-available-coupons-list" style="margin-top:0.5rem; max-height:165px; overflow-y:auto; display:grid; gap:0.4rem;">
+            <div id="checkout-available-coupons-list" style="margin-top:0.5rem; max-height:150px; overflow-y:auto; display:grid; gap:0.4rem;">
               <span style="font-size:0.78rem; color:var(--muted);">Loading available coupons...</span>
             </div>
           </details>
         </div>
 
         <!-- Delivery Destination Box -->
-        <div style="background:#fff; border:1px solid var(--line); border-radius:8px; padding:0.9rem; margin-bottom:1.2rem;">
+        <div style="background:#fff; border:1px solid var(--line); border-radius:9px; padding:0.85rem 0.95rem; margin-bottom:1.1rem;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
-            <strong style="font-size:0.88rem; color:var(--ink);">📍 Delivery Destination:</strong>
-            <button type="button" class="btn btn-outline btn-sm" style="font-size:0.75rem; padding:0.2rem 0.6rem;" onclick="switchToAddressManagement()">+ Add / Manage</button>
+            <strong style="font-size:0.86rem; color:var(--ink);">📍 Delivery Destination:</strong>
+            <button type="button" class="btn btn-outline btn-sm" style="font-size:0.74rem; padding:0.2rem 0.6rem;" onclick="switchToAddressManagement()">+ Add / Manage</button>
           </div>
           <div id="checkout-address-container">
-            <select id="checkout-address-select" style="width:100%; padding:0.5rem; border:1px solid var(--line); border-radius:6px; font-size:0.85rem; margin-bottom:0.4rem; background:#fff;" onchange="updateCheckoutAddressPreview()">
+            <select id="checkout-address-select" style="width:100%; padding:0.5rem; border:1px solid var(--line); border-radius:6px; font-size:0.84rem; margin-bottom:0.4rem; background:#fff;" onchange="updateCheckoutAddressPreview()">
               <!-- Options populated dynamically -->
             </select>
-            <div id="checkout-address-preview" style="font-size:0.82rem; color:var(--muted); background:#faf8f5; padding:0.5rem 0.7rem; border-radius:6px; line-height:1.4;">
+            <div id="checkout-address-preview" style="font-size:0.81rem; color:var(--muted); background:#faf8f5; padding:0.5rem 0.7rem; border-radius:6px; line-height:1.4;">
               Loading delivery addresses...
             </div>
             <div id="checkout-default-prompt" style="margin-top:0.4rem;">
-              <label style="display:inline-flex; align-items:center; gap:0.4rem; font-size:0.8rem; color:var(--muted); cursor:pointer;">
+              <label style="display:inline-flex; align-items:center; gap:0.4rem; font-size:0.78rem; color:var(--muted); cursor:pointer;">
                 <input type="checkbox" id="checkout-make-default" /> Set this address as my new default delivery address
               </label>
             </div>
           </div>
         </div>
 
+        <!-- PAYMENT METHOD TABS -->
         <div class="gateway-tabs">
-          <button type="button" class="gateway-tab active" onclick="switchGatewayTab('razorpay')">⚡ Razorpay (UPI / Card / NetBanking)</button>
-          <button type="button" class="gateway-tab" onclick="switchGatewayTab('cod')">💵 COD</button>
-          <button type="button" class="gateway-tab" onclick="switchGatewayTab('card')">💳 Direct Card</button>
-          <button type="button" class="gateway-tab" onclick="switchGatewayTab('upi')">📱 Direct UPI</button>
+          <button type="button" class="gateway-tab active" onclick="switchGatewayTab('razorpay')">
+            <span style="font-size:1.15rem;">⚡</span>
+            <span>Razorpay</span>
+          </button>
+          <button type="button" class="gateway-tab" onclick="switchGatewayTab('upi')">
+            <span style="font-size:1.15rem;">📱</span>
+            <span>Direct UPI</span>
+          </button>
+          <button type="button" class="gateway-tab" onclick="switchGatewayTab('card')">
+            <span style="font-size:1.15rem;">💳</span>
+            <span>Card</span>
+          </button>
+          <button type="button" class="gateway-tab" onclick="switchGatewayTab('netbanking')">
+            <span style="font-size:1.15rem;">🏦</span>
+            <span>NetBanking</span>
+          </button>
+          <button type="button" class="gateway-tab" onclick="switchGatewayTab('cod')">
+            <span style="font-size:1.15rem;">💵</span>
+            <span>COD</span>
+          </button>
         </div>
 
-        <!-- Razorpay Tab (Default Active) -->
+        <!-- TAB 1: RAZORPAY (DEFAULT ACTIVE) -->
         <div id="tab-razorpay" class="gateway-panel active">
-          <div style="background:#fff; border:1px solid #bfdbfe; border-radius:8px; padding:1.2rem; text-align:center;">
-            <div style="display:inline-flex; align-items:center; gap:0.5rem; background:#eff6ff; color:#1d4ed8; padding:0.35rem 0.9rem; border-radius:20px; font-size:0.82rem; font-weight:700; margin-bottom:0.8rem;">
-              <span>⚡ Powered by Razorpay</span>
-              <span style="background:#dbeafe; padding:0.1rem 0.45rem; border-radius:4px; font-size:0.72rem; color:#1e40af;">Test Gateway (rzp_test)</span>
+          <div style="background:#fff; border:1.5px solid #bfdbfe; border-radius:9px; padding:1.2rem; text-align:center;">
+            <div style="display:inline-flex; align-items:center; gap:0.5rem; background:#eff6ff; color:#1d4ed8; padding:0.35rem 0.9rem; border-radius:20px; font-size:0.8rem; font-weight:700; margin-bottom:0.7rem;">
+              <span>⚡ Razorpay Smart Checkout</span>
+              <span style="background:#dbeafe; padding:0.1rem 0.45rem; border-radius:4px; font-size:0.7rem; color:#1e40af;">Official Gateway Integration</span>
             </div>
-            <p style="font-size:0.92rem; color:var(--ink); margin:0 0 0.5rem 0; font-weight:600;">
-              Instant Online Payment via Google Pay, PhonePe, Paytm, UPI QR, Cards &amp; NetBanking
+            <h4 style="font-size:0.95rem; color:var(--ink); margin:0 0 0.45rem 0; font-weight:700;">
+              Instant Online Payment with 100+ Methods
+            </h4>
+            <p style="font-size:0.81rem; color:var(--muted); margin:0 0 0.9rem 0; line-height:1.45;">
+              Pay seamlessly using <strong>Google Pay, PhonePe, Paytm, BHIM, CRED, Credit/Debit Cards, UPI QR</strong> and 50+ NetBanking options. All transactions settle directly into Tomato's verified HDFC treasury account.
             </p>
-            <p style="font-size:0.8rem; color:var(--muted); margin:0;">
-              Clicking <strong>Authorize &amp; Pay</strong> will open the official Razorpay Checkout popup for test payment completion.
-            </p>
+            <div style="display:flex; justify-content:center; gap:0.6rem; flex-wrap:wrap; font-size:0.75rem; color:#3b82f6; font-weight:600;">
+              <span style="background:#eff6ff; padding:0.25rem 0.6rem; border-radius:6px;">✓ Google Pay</span>
+              <span style="background:#eff6ff; padding:0.25rem 0.6rem; border-radius:6px;">✓ PhonePe</span>
+              <span style="background:#eff6ff; padding:0.25rem 0.6rem; border-radius:6px;">✓ Paytm</span>
+              <span style="background:#eff6ff; padding:0.25rem 0.6rem; border-radius:6px;">✓ RuPay / Visa / MC</span>
+            </div>
           </div>
         </div>
 
-        <!-- Card Tab -->
-        <div id="tab-card" class="gateway-panel">
-          <div class="form-group">
-            <label>Card Number</label>
-            <input id="gw-card-num" type="text" placeholder="4111 2222 3333 4444" maxlength="19" />
+        <!-- TAB 2: DIRECT UPI & QR -->
+        <div id="tab-upi" class="gateway-panel">
+          <div style="display:grid; grid-template-columns: 160px 1fr; gap:1.1rem; align-items:center; background:#f8fafc; border:1px solid var(--line); border-radius:9px; padding:0.9rem; margin-bottom:0.95rem;">
+            <div style="text-align:center;">
+              <div style="background:#fff; padding:0.4rem; border:1px solid #cbd5e1; border-radius:8px; display:inline-block; box-shadow:0 2px 6px rgba(0,0,0,0.04);">
+                <img id="gw-dynamic-upi-qr" src="" alt="Tomato Official UPI QR" style="width:130px; height:130px; display:block; object-fit:contain;" />
+              </div>
+              <span style="font-size:0.68rem; color:#64748b; font-weight:600; display:block; margin-top:0.3rem;">Scan via any UPI App</span>
+            </div>
+            <div>
+              <div style="font-size:0.74rem; text-transform:uppercase; color:#15803d; font-weight:700; letter-spacing:0.05em; margin-bottom:0.2rem;">
+                Official Tomato UPI QR Code
+              </div>
+              <strong style="font-size:0.95rem; color:#0f172a; display:block; margin-bottom:0.35rem;">
+                Scan &amp; Pay to Tomato Official Treasury
+              </strong>
+              <div style="font-size:0.78rem; color:var(--muted); line-height:1.4; margin-bottom:0.45rem;">
+                Scan with Google Pay, PhonePe, Paytm, or BHIM. Amount is pre-filled directly to Tomato's verified bank account (<code style="color:#15803d; font-weight:700;">tomato.official@hdfcbank</code>).
+              </div>
+              <span class="badge" style="background:#e0f2fe; color:#0369a1; font-size:0.7rem;">Dynamic Exact-Amount QR</span>
+            </div>
           </div>
+
+          <div class="form-group" style="margin-bottom:0.6rem;">
+            <label style="display:flex; justify-content:space-between; align-items:center;">
+              <span>Your Virtual Payment Address (UPI ID)</span>
+              <span id="gw-upi-format-status" style="font-size:0.7rem; color:var(--muted); font-weight:normal;">e.g. name@okhdfcbank</span>
+            </label>
+            <input id="gw-upi-id" type="text" placeholder="Enter your UPI ID (e.g. yourname@okhdfcbank / yourname@paytm)" oninput="handleUpiInputChange()" style="font-family:monospace; font-size:0.86rem;" />
+            <div class="gateway-quick-chips">
+              <span style="font-size:0.71rem; color:var(--muted); margin-right:0.2rem; align-self:center;">Quick Handles:</span>
+              <button type="button" class="gateway-chip" onclick="appendUpiHandle('@okhdfcbank')">@okhdfcbank</button>
+              <button type="button" class="gateway-chip" onclick="appendUpiHandle('@okaxis')">@okaxis</button>
+              <button type="button" class="gateway-chip" onclick="appendUpiHandle('@oksbi')">@oksbi</button>
+              <button type="button" class="gateway-chip" onclick="appendUpiHandle('@paytm')">@paytm</button>
+              <button type="button" class="gateway-chip" onclick="appendUpiHandle('@ybl')">@ybl</button>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom:0;">
+            <label style="display:flex; justify-content:space-between;">
+              <span>Bank Reference / UPI UTR Number (Optional)</span>
+              <span style="font-size:0.7rem; color:var(--muted); font-weight:normal;">12-digit transaction reference</span>
+            </label>
+            <input id="gw-upi-utr" type="text" placeholder="e.g. 428901234567 (if already paid via QR)" maxlength="22" style="font-family:monospace; font-size:0.84rem;" />
+          </div>
+        </div>
+
+        <!-- TAB 3: DIRECT CARD WITH LIVE INTERACTIVE VISUAL -->
+        <div id="tab-card" class="gateway-panel">
+          <!-- Virtual Interactive Card Graphic -->
+          <div class="gateway-card-preview">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span class="gateway-card-chip"></span>
+              <div style="display:flex; align-items:center; gap:0.5rem;">
+                <span style="font-size:1.1rem; opacity:0.8;">📡</span>
+                <span class="gateway-card-brand-badge" id="gw-card-brand-display">CARD</span>
+              </div>
+            </div>
+            <div class="gateway-card-num-display" id="gw-card-num-preview">•••• •••• •••• ••••</div>
+            <div class="gateway-card-meta-row">
+              <div>
+                <span style="display:block; font-size:0.58rem; color:#94a3b8;">Cardholder</span>
+                <span id="gw-card-name-preview" style="font-weight:700; font-size:0.82rem; color:#fff;">CUSTOMER NAME</span>
+              </div>
+              <div style="text-align:right;">
+                <span style="display:block; font-size:0.58rem; color:#94a3b8;">Expires</span>
+                <span id="gw-card-exp-preview" style="font-weight:700; font-size:0.82rem; color:#fff; font-family:monospace;">MM/YY</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label style="display:flex; justify-content:space-between; align-items:center;">
+              <span>Card Number</span>
+              <span id="gw-card-validation-badge" style="font-size:0.72rem; color:var(--muted); font-weight:600;">16-digit debit/credit card</span>
+            </label>
+            <input
+              id="gw-card-num"
+              type="text"
+              placeholder="4111 2222 3333 4444"
+              maxlength="23"
+              oninput="handleCardNumberInput(this)"
+              style="font-family:monospace; font-size:0.92rem; letter-spacing:0.06em;"
+            />
+          </div>
+
           <div class="form-row">
             <div class="form-group">
               <label>Valid Thru (MM/YY)</label>
-              <input id="gw-card-exp" type="text" placeholder="12/28" maxlength="5" />
+              <input
+                id="gw-card-exp"
+                type="text"
+                placeholder="12/28"
+                maxlength="5"
+                oninput="handleCardExpiryInput(this)"
+                style="font-family:monospace; font-size:0.9rem;"
+              />
             </div>
             <div class="form-group">
-              <label>CVV</label>
-              <input id="gw-card-cvv" type="password" placeholder="•••" maxlength="4" />
+              <label style="display:flex; justify-content:space-between;">
+                <span>CVV / CVC</span>
+                <span style="font-size:0.7rem; color:var(--muted); font-weight:normal;">3-4 digits</span>
+              </label>
+              <input
+                id="gw-card-cvv"
+                type="password"
+                placeholder="•••"
+                maxlength="4"
+                oninput="this.value = this.value.replace(/\D/g, '')"
+                style="font-family:monospace; font-size:0.9rem;"
+              />
             </div>
           </div>
-          <div class="form-group">
+
+          <div class="form-group" style="margin-bottom:0.4rem;">
             <label>Name on Card</label>
-            <input id="gw-card-name" type="text" placeholder="Cardholder Name" />
+            <input
+              id="gw-card-name"
+              type="text"
+              placeholder="Enter name as printed on card"
+              oninput="handleCardNameInput(this)"
+              style="text-transform:uppercase; font-size:0.86rem;"
+            />
+          </div>
+          <div style="font-size:0.74rem; color:var(--muted); display:flex; align-items:center; gap:0.35rem; margin-top:0.4rem;">
+            <span>🛡️</span>
+            <span>Card credentials undergo Luhn Mod-10 checksum validation and direct settlement authorization.</span>
           </div>
         </div>
 
-        <!-- UPI Tab -->
-        <div id="tab-upi" class="gateway-panel">
-          <div class="form-group">
-            <label>Virtual Payment Address (UPI ID)</label>
-            <input id="gw-upi-id" type="text" placeholder="yourname@oksbi / tomato@upi" />
-          </div>
-          <p style="font-size:0.8rem; color:var(--muted); margin:0;">Supported apps: Google Pay, PhonePe, Paytm, BHIM, Cred.</p>
-        </div>
-
-        <!-- NetBanking Tab -->
+        <!-- TAB 4: NETBANKING WITH POPULAR BANKS GRID -->
         <div id="tab-netbanking" class="gateway-panel">
-          <div class="form-group">
-            <label>Select Your Bank</label>
-            <select id="gw-bank-select">
-              <option value="HDFC">HDFC Bank</option>
-              <option value="ICICI">ICICI Bank</option>
+          <label style="font-size:0.78rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em; display:block; margin-bottom:0.5rem;">
+            Popular Indian Banks
+          </label>
+          <div class="gateway-banks-grid">
+            <div class="gateway-bank-tile selected" onclick="selectNetBankTile('HDFC', this)">
+              <strong style="color:#0f172a;">HDFC Bank</strong>
+              <span style="color:#15803d; font-weight:700;">★ Official Partner</span>
+            </div>
+            <div class="gateway-bank-tile" onclick="selectNetBankTile('SBI', this)">
+              <strong style="color:#0f172a;">State Bank of India</strong>
+              <span>Retail &amp; Corp</span>
+            </div>
+            <div class="gateway-bank-tile" onclick="selectNetBankTile('ICICI', this)">
+              <strong style="color:#0f172a;">ICICI Bank</strong>
+              <span>iMobile &amp; Net</span>
+            </div>
+            <div class="gateway-bank-tile" onclick="selectNetBankTile('AXIS', this)">
+              <strong style="color:#0f172a;">Axis Bank</strong>
+              <span>Internet Banking</span>
+            </div>
+            <div class="gateway-bank-tile" onclick="selectNetBankTile('KOTAK', this)">
+              <strong style="color:#0f172a;">Kotak Mahindra</strong>
+              <span>811 &amp; NetBanking</span>
+            </div>
+            <div class="gateway-bank-tile" onclick="selectNetBankTile('PNB', this)">
+              <strong style="color:#0f172a;">Punjab National</strong>
+              <span>PNB One</span>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom:0.4rem;">
+            <label>Or Choose Another Bank</label>
+            <select id="gw-bank-select" onchange="handleNetBankDropdownChange(this)">
+              <option value="HDFC">HDFC Bank Limited (Tomato Central Treasury)</option>
               <option value="SBI">State Bank of India</option>
-              <option value="Axis">Axis Bank</option>
-              <option value="Kotak">Kotak Mahindra Bank</option>
+              <option value="ICICI">ICICI Bank Limited</option>
+              <option value="AXIS">Axis Bank Limited</option>
+              <option value="KOTAK">Kotak Mahindra Bank</option>
+              <option value="PNB">Punjab National Bank</option>
+              <option value="BOB">Bank of Baroda</option>
+              <option value="CANARA">Canara Bank</option>
+              <option value="UNION">Union Bank of India</option>
+              <option value="INDUSIND">IndusInd Bank</option>
+              <option value="FEDERAL">Federal Bank</option>
+              <option value="IDFC">IDFC FIRST Bank</option>
+              <option value="YES">Yes Bank</option>
             </select>
           </div>
+          <div style="font-size:0.75rem; color:var(--muted); line-height:1.4;">
+            Direct corporate payment will route into Tomato's verified settlement treasury at HDFC Bank.
+          </div>
         </div>
 
-        <!-- COD Tab -->
+        <!-- TAB 5: CASH ON DELIVERY (COD) -->
         <div id="tab-cod" class="gateway-panel">
-          <p style="font-size:0.9rem; margin:0; line-height:1.5;">
-            💵 <strong>Cash on Delivery:</strong> Pay in cash or scan the delivery partner's UPI QR code upon food arrival at your doorstep.
-          </p>
+          <div style="background:#fefce8; border:1.5px solid #fef08a; border-radius:9px; padding:1.1rem;">
+            <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
+              <span style="font-size:1.3rem;">💵</span>
+              <strong style="font-size:0.95rem; color:#854d0e;">Cash on Delivery with Doorstep QR Verification</strong>
+            </div>
+            <p style="font-size:0.83rem; color:#713f12; margin:0 0 0.65rem 0; line-height:1.5;">
+              Pay via physical cash or scan the assigned delivery rider's live Tomato UPI QR code upon arrival at your doorstep.
+            </p>
+            <ul style="font-size:0.78rem; color:#854d0e; margin:0; padding-left:1.2rem; display:grid; gap:0.25rem;">
+              <li>Please keep exact change ready to speed up delivery.</li>
+              <li>Rider will hand over official order bill upon collection.</li>
+              <li>Once collected, collection updates automatically in Tomato's central treasury.</li>
+            </ul>
+          </div>
         </div>
 
-        <div id="gateway-loading" style="display:none; text-align:center; padding:1rem; font-weight:600; color:var(--tomato);">
-          Connecting to Tomato Secure Gateway... Processing transaction...
+        <!-- GATEWAY LOADING INDICATOR -->
+        <div id="gateway-loading" style="display:none; text-align:center; padding:1rem; font-weight:600; color:var(--tomato); background:#fff5f5; border-radius:8px; border:1px solid #fed7d7; margin-top:0.75rem;">
+          <div style="display:inline-block; animation:spin 1s linear infinite; margin-right:0.4rem;">⏳</div>
+          <span id="gateway-loading-text">Connecting to Tomato Central Gateway... Processing transaction...</span>
         </div>
 
-        <div style="display:flex; justify-content:flex-end; gap:0.8rem; margin-top:1.2rem;">
-          <button type="button" class="btn btn-secondary" onclick="closeModal('payment-gateway-modal')">Cancel</button>
-          <button type="button" class="btn btn-primary" id="gateway-pay-btn" onclick="executePaymentAndOrder()">Authorize & Pay</button>
+        <!-- MODAL FOOTER & ACTION BUTTONS -->
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:1.2rem; gap:0.8rem; flex-wrap:wrap; border-top:1px solid var(--line); padding-top:0.9rem;">
+          <div style="font-size:0.72rem; color:var(--muted); display:flex; align-items:center; gap:0.35rem;">
+            <span>🛡️</span>
+            <span>RBI Compliant • 256-Bit SSL • Direct Treasury Settlement</span>
+          </div>
+          <div style="display:flex; gap:0.6rem;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('payment-gateway-modal')" style="font-size:0.85rem; padding:0.55rem 1rem;">Cancel</button>
+            <button type="button" class="btn btn-primary" id="gateway-pay-btn" onclick="executePaymentAndOrder()" style="font-size:0.88rem; font-weight:700; padding:0.55rem 1.3rem; min-width:180px;">
+              Authorize &amp; Pay
+            </button>
+          </div>
         </div>
       </div>
     </div>

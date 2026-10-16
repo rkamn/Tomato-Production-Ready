@@ -957,7 +957,6 @@ async function submitAdminCreditTransfer(event) {
     alert('Enter the purpose for this credit-point transfer.');
     return;
   }
-  if (!confirm(`Transfer ${creditPoints} credit point(s) from your admin wallet to ${recipientId}?`)) return;
 
   const submitButton = document.getElementById('admin-credit-transfer-submit');
   if (submitButton) submitButton.disabled = true;
@@ -974,10 +973,15 @@ async function submitAdminCreditTransfer(event) {
 
     const walletText = document.getElementById('profile-wallet-text');
     if (walletText) {
-      walletText.textContent = `${Number(user.walletBalance ?? 0).toFixed(2)}/${Number(user.creditPoint ?? 0).toFixed(0)}`;
+      const wb = Math.max(0, Number(user.walletBalance ?? 0)).toFixed(2);
+      const cp = Math.max(0, Number(user.creditPoint ?? 0)).toFixed(0);
+      walletText.textContent = `${wb}/${cp}`;
     }
 
     document.getElementById('admin-credit-transfer-form')?.reset();
+    if (typeof closeModal === 'function') {
+      closeModal('admin-credit-transfer-modal');
+    }
     showCurrentAdminWalletTransfer({
       recipient: result.recipient,
       creditPoints,

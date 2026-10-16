@@ -2479,6 +2479,211 @@ function switchToAddressManagement() {
   showNewAddressForm();
 }
 
+let cachedPaymentConfig = null;
+
+async function fetchPaymentConfig() {
+  if (cachedPaymentConfig) return cachedPaymentConfig;
+  try {
+    const res = await apiFetch('/api/customer/payment/config');
+    if (res && res.tomatoOfficialBank) {
+      cachedPaymentConfig = res;
+      const b = res.tomatoOfficialBank;
+      const holderEl = document.getElementById('settle-holder');
+      if (holderEl) holderEl.textContent = b.accountHolderName || 'Tomato Central Treasury';
+      const bankEl = document.getElementById('settle-bank');
+      if (bankEl) bankEl.textContent = `${b.bankName || 'HDFC Bank Ltd'} (${b.branch || 'Central Indiranagar'})`;
+      const acEl = document.getElementById('settle-ac');
+      if (acEl) acEl.textContent = b.accountNumber || '50200088991122';
+      const ifscEl = document.getElementById('settle-ifsc');
+      if (ifscEl) ifscEl.textContent = b.ifscCode || 'HDFC0000060';
+      const upiEl = document.getElementById('settle-upi');
+      if (upiEl) upiEl.textContent = b.upiId || 'tomato.official@hdfcbank';
+    }
+  } catch (err) {
+    console.warn('Could not load payment config:', err);
+  }
+  return cachedPaymentConfig;
+}
+
+function copyTomatoOfficialUpi() {
+  const upiText = document.getElementById('settle-upi')?.textContent?.trim() || 'tomato.official@hdfcbank';
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(upiText).then(() => {
+      alert(`Copied official Tomato Treasury UPI ID to clipboard:\n${upiText}\n\nYou can pay directly via Google Pay, PhonePe, Paytm, or BHIM.`);
+    }).catch(() => {
+      prompt('Copy Tomato official UPI ID:', upiText);
+    });
+  } else {
+    prompt('Copy Tomato official UPI ID:', upiText);
+  }
+}
+window.copyTomatoOfficialUpi = copyTomatoOfficialUpi;
+
+function appendUpiHandle(handle) {
+  const input = document.getElementById('gw-upi-id');
+  if (!input) return;
+  let val = input.value.trim();
+  if (val.includes('@')) {
+    val = val.split('@')[0];
+  }
+  input.value = (val ? val : (user?.phone || 'customer')) + handle;
+  handleUpiInputChange();
+}
+window.appendUpiHandle = appendUpiHandle;
+
+function handleUpiInputChange() {
+  const input = document.getElementById('gw-upi-id');
+  const statusEl = document.getElementById('gw-upi-format-status');
+  if (!input || !statusEl) return;
+  const val = input.value.trim();
+  const upiRegex = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/;
+  if (!val) {
+    statusEl.textContent = 'e.g. name@okhdfcbank';
+    statusEl.style.color = 'var(--muted)';
+  } else if (upiRegex.test(val)) {
+    statusEl.textContent = '✓ Valid UPI ID format';
+    statusEl.style.color = '#15803d';
+  } else {
+    statusEl.textContent = '⚠ Must be username@bank';
+    statusEl.style.color = '#dc2626';
+  }
+}
+window.handleUpiInputChange = handleUpiInputChange;
+
+function clientLuhnCheck(digits) {
+  let sum = 0;
+  let alternate = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let n = parseInt(digits.charAt(i), 10);
+    if (isNaN(n)) return false;
+    if (alternate) {
+      n *= 2;
+      if (n > 9) n -= 9;
+    }
+    sum += n;
+    alternate = !alternate;
+  }
+  return sum % 10 === 0;
+}
+
+function clientIdentifyCardBrand(digits) {
+  if (/^4/.test(digits)) return 'Visa';
+  if (/^(5[1-5]|222[1-9]|22[3-9]|2[3-6]|27[01]|2720)/.test(digits)) return 'Mastercard';
+  if (/^3[47]/.test(digits)) return 'Amex';
+  if (/^(60|65|81|82|508)/.test(digits) || /^35(2[89]|[3-8][0-9])/.test(digits)) return 'RuPay';
+  if (/^(50|5[6-8]|6\d)/.test(digits)) return 'Maestro';
+  return 'Card';
+}
+
+function handleCardNumberInput(input) {
+  const raw = input.value.replace(/\D/g, '').substring(0, 19);
+  const formatted = raw.replace(/(\d{4})(?=\d)/g, '$1 ');
+  input.value = formatted;
+
+  const preview = document.getElementById('gw-card-num-preview');
+  if (preview) {
+    if (raw.length === 0) {
+      preview.textContent = '•••• •••• •••• ••••';
+    } else {
+      let padded = raw.padEnd(16, '•');
+      preview.textContent = padded.substring(0, 19).replace(/(.{4})/g, '$1 ').trim();
+    }
+  }
+
+  const brand = clientIdentifyCardBrand(raw);
+  const brandDisplay = document.getElementById('gw-card-brand-display');
+  if (brandDisplay) brandDisplay.textContent = brand.toUpperCase();
+
+  const badge = document.getElementById('gw-card-validation-badge');
+  if (badge) {
+    if (raw.length < 13) {
+      badge.textContent = `${raw.length}/16 digits`;
+      badge.style.color = 'var(--muted)';
+    } else if (clientLuhnCheck(raw)) {
+      badge.textContent = `✓ Valid ${brand} Card`;
+      badge.style.color = '#15803d';
+    } else {
+      badge.textContent = '⚠ Invalid Checksum (Luhn)';
+      badge.style.color = '#dc2626';
+    }
+  }
+}
+window.handleCardNumberInput = handleCardNumberInput;
+
+function handleCardExpiryInput(input) {
+  let val = input.value.replace(/\D/g, '').substring(0, 4);
+  if (val.length >= 2) {
+    val = val.substring(0, 2) + '/' + val.substring(2);
+  }
+  input.value = val;
+
+  const preview = document.getElementById('gw-card-exp-preview');
+  if (preview) {
+    preview.textContent = val || 'MM/YY';
+  }
+}
+window.handleCardExpiryInput = handleCardExpiryInput;
+
+function handleCardNameInput(input) {
+  const preview = document.getElementById('gw-card-name-preview');
+  if (preview) {
+    preview.textContent = (input.value.trim() || user?.name || 'CUSTOMER NAME').toUpperCase();
+  }
+}
+window.handleCardNameInput = handleCardNameInput;
+
+function selectNetBankTile(bankCode, el) {
+  document.querySelectorAll('.gateway-bank-tile').forEach((tile) => tile.classList.remove('selected'));
+  if (el) el.classList.add('selected');
+  const sel = document.getElementById('gw-bank-select');
+  if (sel) sel.value = bankCode;
+}
+window.selectNetBankTile = selectNetBankTile;
+
+function handleNetBankDropdownChange(sel) {
+  const val = sel.value;
+  document.querySelectorAll('.gateway-bank-tile').forEach((tile) => {
+    const tileText = tile.innerText || '';
+    if (tileText.toUpperCase().includes(val.toUpperCase())) {
+      tile.classList.add('selected');
+    } else {
+      tile.classList.remove('selected');
+    }
+  });
+}
+window.handleNetBankDropdownChange = handleNetBankDropdownChange;
+
+function updateGatewayPayButtonText() {
+  const payBtn = document.getElementById('gateway-pay-btn');
+  if (!payBtn) return;
+  const subtotal = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  const tax = Number((subtotal * 0.05).toFixed(2));
+  const discountAmt = typeof getActiveCartDiscountAmount === 'function' ? getActiveCartDiscountAmount(subtotal) : 0;
+  const totalAmount = Number(Math.max(1, subtotal + tax + 40 - discountAmt).toFixed(2));
+  const amtStr = `₹${totalAmount.toFixed(2)}`;
+
+  switch (selectedPaymentMethod) {
+    case 'razorpay':
+      payBtn.textContent = `Pay ${amtStr} via Razorpay ⚡`;
+      break;
+    case 'upi':
+      payBtn.textContent = `Pay ${amtStr} via Tomato UPI 📱`;
+      break;
+    case 'card':
+      payBtn.textContent = `Pay ${amtStr} via Card 💳`;
+      break;
+    case 'netbanking':
+      payBtn.textContent = `Pay ${amtStr} via NetBanking 🏦`;
+      break;
+    case 'cod':
+      payBtn.textContent = `Confirm Order (COD ${amtStr}) 💵`;
+      break;
+    default:
+      payBtn.textContent = `Authorize & Pay ${amtStr}`;
+  }
+}
+window.updateGatewayPayButtonText = updateGatewayPayButtonText;
+
 async function openPaymentGatewayModal() {
   if (!cart.length) {
     alert('Please add at least one dish to the cart.');
@@ -2491,17 +2696,60 @@ async function openPaymentGatewayModal() {
   updateGatewayBillingSummaryUI();
   await fetchCustomerServiceablePincodes();
   await populateCheckoutAddresses();
+
+  // Load backend payment config and official Tomato Bank details
+  await fetchPaymentConfig();
+
+  // Calculate amount and set dynamic UPI QR Code
+  const subtotal = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  const tax = Number((subtotal * 0.05).toFixed(2));
+  const discountAmt = typeof getActiveCartDiscountAmount === 'function' ? getActiveCartDiscountAmount(subtotal) : 0;
+  const totalAmount = Number(Math.max(1, subtotal + tax + 40 - discountAmt).toFixed(2));
+
+  const upiUrl = `upi://pay?pa=tomato.official@hdfcbank&pn=Tomato%20Official%20Treasury&am=${totalAmount.toFixed(2)}&cu=INR&tn=Order%20Payment`;
+  const qrImg = document.getElementById('gw-dynamic-upi-qr');
+  if (qrImg) {
+    qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(upiUrl)}`;
+  }
+
+  // Pre-fill card name & default preview if empty
+  const cardNameInput = document.getElementById('gw-card-name');
+  if (cardNameInput && !cardNameInput.value) {
+    cardNameInput.value = (user?.name || 'Tomato Customer').toUpperCase();
+    handleCardNameInput(cardNameInput);
+  }
+
+  // Default UPI input if empty
+  const upiInput = document.getElementById('gw-upi-id');
+  if (upiInput && !upiInput.value) {
+    const handle = (user?.email ? user.email.split('@')[0] : (user?.phone || 'customer'));
+    upiInput.value = `${handle}@okhdfcbank`;
+    handleUpiInputChange();
+  }
+
+  switchGatewayTab(selectedPaymentMethod || 'razorpay');
   openModal('payment-gateway-modal');
 }
+window.openPaymentGatewayModal = openPaymentGatewayModal;
 
 function switchGatewayTab(tab) {
   selectedPaymentMethod = tab;
   document.querySelectorAll('.gateway-tab').forEach((b) => b.classList.remove('active'));
   document.querySelectorAll('.gateway-panel').forEach((p) => p.classList.remove('active'));
 
-  event.target.classList.add('active');
-  document.getElementById(`tab-${tab}`).classList.add('active');
+  const tabButtons = document.querySelectorAll('.gateway-tab');
+  tabButtons.forEach((b) => {
+    if (b.getAttribute('onclick')?.includes(`'${tab}'`)) {
+      b.classList.add('active');
+    }
+  });
+
+  const panel = document.getElementById(`tab-${tab}`);
+  if (panel) panel.classList.add('active');
+
+  updateGatewayPayButtonText();
 }
+window.switchGatewayTab = switchGatewayTab;
 
 async function placeOrderAfterPayment(txnId, method, chosenAddr) {
   const isShopOrder = cart[0]?.storeType === 'shop' || customerBrowseMode === 'shop';
@@ -2546,7 +2794,12 @@ async function placeOrderAfterPayment(txnId, method, chosenAddr) {
   const discountLine = orderRes.order?.discountAmount > 0
     ? `\nCoupon Savings: -₹${Number(orderRes.order.discountAmount).toFixed(2)} (${(orderRes.order.couponCodes || []).join(', ')})`
     : '';
-  alert(`${storeLabel} Placed Successfully!\nOrder Number: ${orderRes.order.orderNumber}${discountLine}\nFinal Paid: ₹${Number(orderRes.order.totalAmount || 0).toFixed(2)}\nDelivering To: ${chosenAddr.label} (${chosenAddr.line1}, ${chosenAddr.city})\nPayment Mode: ${method.toUpperCase()}\nTransaction Ref: ${txnId}`);
+
+  const settlementNotice = method === 'cod'
+    ? '\nDoorstep Collection: Physical Cash / Doorstep QR upon delivery.'
+    : '\nOfficial Inflow: Credited directly to Tomato Treasury (HDFC Bank Limited A/c 50200088991122).';
+
+  alert(`🎉 ${storeLabel} Placed Successfully!\n\nOrder Number: ${orderRes.order.orderNumber}${discountLine}\nFinal Paid: ₹${Number(orderRes.order.totalAmount || 0).toFixed(2)}\nDelivering To: ${chosenAddr.label} (${chosenAddr.line1}, ${chosenAddr.city})\nPayment Mode: ${method.toUpperCase()}\nTransaction Ref: ${txnId}${settlementNotice}`);
 
   switchView('customer-orders');
 }
@@ -2554,6 +2807,7 @@ async function placeOrderAfterPayment(txnId, method, chosenAddr) {
 async function executePaymentAndOrder() {
   const payBtn = document.getElementById('gateway-pay-btn');
   const loadingEl = document.getElementById('gateway-loading');
+  const loadingText = document.getElementById('gateway-loading-text');
 
   // Resolve Delivery Address
   const selectedAddrId = document.getElementById('checkout-address-select')?.value;
@@ -2601,13 +2855,13 @@ async function executePaymentAndOrder() {
   // 1. Razorpay Payment Gateway Flow
   if (selectedPaymentMethod === 'razorpay') {
     if (typeof window.Razorpay === 'undefined') {
-      alert('Razorpay Checkout SDK is still loading. Please check your network and try again.');
+      alert('Razorpay Checkout SDK is still loading. Please check your network connection and try again.');
       return;
     }
 
     payBtn.disabled = true;
     loadingEl.style.display = 'block';
-    loadingEl.innerText = 'Creating Razorpay payment order...';
+    if (loadingText) loadingText.innerText = 'Creating Razorpay payment order...';
 
     try {
       const rzpOrderRes = await apiFetch('/api/customer/payment/razorpay/order', {
@@ -2623,14 +2877,14 @@ async function executePaymentAndOrder() {
         key: rzpOrderRes.keyId || 'rzp_test_TjUFioCQLtVxJn',
         amount: rzpOrderRes.amount,
         currency: rzpOrderRes.currency || 'INR',
-        name: 'Tomato Food Delivery',
-        description: `Order Payment (₹${totalAmount})`,
+        name: 'Tomato Technologies Treasury',
+        description: `Order Payment (₹${totalAmount.toFixed(2)})`,
         image: 'https://cdn-icons-png.flaticon.com/512/3075/3075977.png',
         order_id: rzpOrderRes.orderId,
         handler: async function (response) {
           try {
             loadingEl.style.display = 'block';
-            loadingEl.innerText = 'Verifying Razorpay payment signature...';
+            if (loadingText) loadingText.innerText = 'Verifying Razorpay payment signature & crediting Tomato Treasury...';
             const verifyRes = await apiFetch('/api/customer/payment/razorpay/verify', {
               method: 'POST',
               body: JSON.stringify(response),
@@ -2643,7 +2897,7 @@ async function executePaymentAndOrder() {
               return;
             }
 
-            loadingEl.innerText = 'Payment verified! Finalizing order...';
+            if (loadingText) loadingText.innerText = 'Payment verified! Finalizing order into Tomato Treasury...';
             await placeOrderAfterPayment(response.razorpay_payment_id, 'razorpay', chosenAddr);
           } catch (err) {
             alert('Payment verification error: ' + err.message);
@@ -2682,10 +2936,75 @@ async function executePaymentAndOrder() {
     return;
   }
 
-  // 2. COD / Direct Gateway Fallback Flow
+  // Client-side validations for Direct methods
+  if (selectedPaymentMethod === 'card') {
+    const rawCard = (document.getElementById('gw-card-num')?.value || '').replace(/\D/g, '');
+    if (rawCard.length < 13 || rawCard.length > 19) {
+      alert('Please enter a valid card number between 13 and 19 digits.');
+      document.getElementById('gw-card-num')?.focus();
+      return;
+    }
+    if (!clientLuhnCheck(rawCard)) {
+      alert('Card number failed Luhn Mod-10 checksum validation. Please check the digits.');
+      document.getElementById('gw-card-num')?.focus();
+      return;
+    }
+    const expVal = (document.getElementById('gw-card-exp')?.value || '').trim();
+    const expMatch = expVal.match(/^(\d{2})\/(\d{2})$/);
+    if (!expMatch) {
+      alert('Please enter a valid expiration date in MM/YY format (e.g. 12/28).');
+      document.getElementById('gw-card-exp')?.focus();
+      return;
+    }
+    const expMonth = parseInt(expMatch[1], 10);
+    const expYear = 2000 + parseInt(expMatch[2], 10);
+    const now = new Date();
+    if (expMonth < 1 || expMonth > 12) {
+      alert('Card expiry month must be between 01 and 12.');
+      document.getElementById('gw-card-exp')?.focus();
+      return;
+    }
+    if (expYear < now.getFullYear() || (expYear === now.getFullYear() && expMonth < (now.getMonth() + 1))) {
+      alert('Card has expired. Please use an active card.');
+      document.getElementById('gw-card-exp')?.focus();
+      return;
+    }
+    const cvvVal = (document.getElementById('gw-card-cvv')?.value || '').trim();
+    if (!/^\d{3,4}$/.test(cvvVal)) {
+      alert('Please enter a valid 3 or 4-digit CVV security code.');
+      document.getElementById('gw-card-cvv')?.focus();
+      return;
+    }
+    const nameVal = (document.getElementById('gw-card-name')?.value || '').trim();
+    if (nameVal.length < 2) {
+      alert('Please enter the cardholder name.');
+      document.getElementById('gw-card-name')?.focus();
+      return;
+    }
+  } else if (selectedPaymentMethod === 'upi') {
+    const upiVal = (document.getElementById('gw-upi-id')?.value || '').trim();
+    const upiRegex = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/;
+    if (!upiRegex.test(upiVal)) {
+      alert('Please enter a valid Virtual Payment Address (UPI ID) in the format username@bank (e.g. name@okhdfcbank).');
+      document.getElementById('gw-upi-id')?.focus();
+      return;
+    }
+  } else if (selectedPaymentMethod === 'netbanking') {
+    const bankVal = document.getElementById('gw-bank-select')?.value;
+    if (!bankVal) {
+      alert('Please select a bank for NetBanking authorization.');
+      return;
+    }
+  }
+
+  // Direct Gateway / COD Execution Flow
   payBtn.disabled = true;
   loadingEl.style.display = 'block';
-  loadingEl.innerText = 'Connecting to Tomato Secure Gateway... Processing transaction...';
+  if (loadingText) {
+    loadingText.innerText = selectedPaymentMethod === 'cod'
+      ? 'Registering Cash on Delivery order...'
+      : 'Authorizing direct settlement to Tomato Official Bank Account...';
+  }
 
   try {
     let txnId = 'COD-PAY-ON-DELIVERY';
@@ -2694,12 +3013,14 @@ async function executePaymentAndOrder() {
         amount: totalAmount,
         paymentMethod: selectedPaymentMethod,
         cardDetails: {
-          number: document.getElementById('gw-card-num')?.value || '4111222233334444',
-          exp: document.getElementById('gw-card-exp')?.value || '12/28',
-          cvv: document.getElementById('gw-card-cvv')?.value || '123',
-          name: document.getElementById('gw-card-name')?.value || user.name || 'Cardholder',
+          number: document.getElementById('gw-card-num')?.value || '',
+          exp: document.getElementById('gw-card-exp')?.value || '',
+          cvv: document.getElementById('gw-card-cvv')?.value || '',
+          name: document.getElementById('gw-card-name')?.value || user?.name || 'Cardholder',
         },
-        upiId: document.getElementById('gw-upi-id')?.value || 'customer@okaxis',
+        upiId: document.getElementById('gw-upi-id')?.value || '',
+        bankCode: document.getElementById('gw-bank-select')?.value || 'HDFC',
+        utrReference: document.getElementById('gw-upi-utr')?.value || '',
       };
 
       const payRes = await apiFetch('/api/customer/payment/process', {
@@ -2717,6 +3038,7 @@ async function executePaymentAndOrder() {
     loadingEl.style.display = 'none';
   }
 }
+window.executePaymentAndOrder = executePaymentAndOrder;
 
 // =========================================================================
 // CUSTOMER: ORDERS & TRACKING

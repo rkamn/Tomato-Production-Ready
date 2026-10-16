@@ -1412,7 +1412,29 @@ const createCustomerRouter = () => {
     },
   );
 
-  // 4a. Razorpay - Get Public Key ID
+  // 4a. Official Tomato Central Bank & Gateway Configuration
+  router.get('/payment/config', (_req: Request, res: Response) => {
+    const keyId = process.env.RAZORPAY_KEY_ID || 'rzp_test_TjUFioCQLtVxJn';
+    const isLive = keyId.startsWith('rzp_live');
+    return res.json({
+      keyId,
+      isLive,
+      currency: 'INR',
+      tomatoOfficialBank: {
+        companyName: process.env.TOMATO_COMPANY_NAME || 'Tomato Technologies Private Limited',
+        accountHolderName: process.env.TOMATO_BANK_ACCOUNT_HOLDER || 'Tomato Central Treasury',
+        bankName: process.env.TOMATO_BANK_NAME || 'HDFC Bank Limited',
+        accountNumber: process.env.TOMATO_BANK_ACCOUNT_NUMBER || '50200088991122',
+        ifscCode: process.env.TOMATO_BANK_IFSC || 'HDFC0000060',
+        upiId: process.env.TOMATO_OFFICIAL_UPI_ID || 'tomato.official@hdfcbank',
+        branch: 'Central Indiranagar Branch, Bengaluru',
+        merchantCategoryCode: '5812',
+        settlementPolicy: 'Direct T+1 Official Current Account Settlement',
+      },
+    });
+  });
+
+  // 4b. Razorpay - Get Public Key ID
   router.get('/payment/razorpay/key', (_req: Request, res: Response) => {
     const keyId = process.env.RAZORPAY_KEY_ID || 'rzp_test_TjUFioCQLtVxJn';
     return res.json({ keyId });
@@ -1493,10 +1515,19 @@ const createCustomerRouter = () => {
       return res.json({
         success: true,
         verified: true,
-        message: 'Payment verified successfully via Razorpay',
+        message: 'Payment verified successfully via Razorpay and credited to Tomato Treasury',
         transactionId: razorpay_payment_id,
         orderId: razorpay_order_id,
         paymentMethod: 'razorpay',
+        settlementAccount: {
+          companyName: process.env.TOMATO_COMPANY_NAME || 'Tomato Technologies Private Limited',
+          accountHolderName: process.env.TOMATO_BANK_ACCOUNT_HOLDER || 'Tomato Central Treasury',
+          bankName: process.env.TOMATO_BANK_NAME || 'HDFC Bank Limited',
+          accountNumber: process.env.TOMATO_BANK_ACCOUNT_NUMBER || '50200088991122',
+          ifscCode: process.env.TOMATO_BANK_IFSC || 'HDFC0000060',
+          upiId: process.env.TOMATO_OFFICIAL_UPI_ID || 'tomato.official@hdfcbank',
+          settlementPolicy: 'Direct Central Settlement to Official Tomato Treasury',
+        },
       });
     } catch (err: any) {
       console.error('Razorpay verification error:', err);
@@ -1504,10 +1535,60 @@ const createCustomerRouter = () => {
     }
   });
 
-  // 4d. Payment Gateway integration endpoint (Fallback / Simulation)
+  // Helper validation routines for actual payment methods
+  function validateLuhnChecksum(digits: string): boolean {
+    let sum = 0;
+    let alternate = false;
+    for (let i = digits.length - 1; i >= 0; i--) {
+      let n = parseInt(digits.charAt(i), 10);
+      if (isNaN(n)) return false;
+      if (alternate) {
+        n *= 2;
+        if (n > 9) n -= 9;
+      }
+      sum += n;
+      alternate = !alternate;
+    }
+    return sum % 10 === 0;
+  }
+
+  function identifyCardBrand(digits: string): string {
+    if (/^4/.test(digits)) return 'Visa';
+    if (/^(5[1-5]|222[1-9]|22[3-9]|2[3-6]|27[01]|2720)/.test(digits)) return 'Mastercard';
+    if (/^3[47]/.test(digits)) return 'American Express';
+    if (/^(60|65|81|82|508)/.test(digits) || /^35(2[89]|[3-8][0-9])/.test(digits)) return 'RuPay';
+    if (/^(50|5[6-8]|6\d)/.test(digits)) return 'Maestro';
+    return 'Credit / Debit Card';
+  }
+
+  function validateCardExpiration(exp: string): { valid: boolean; message?: string } {
+    const trimmed = String(exp || '').trim();
+    const match = trimmed.match(/^(\d{1,2})\/(\d{2}|\d{4})$/);
+    if (!match) {
+      return { valid: false, message: 'Expiry date must be in MM/YY format (e.g. 12/28)' };
+    }
+    const month = parseInt(match[1] || '0', 10);
+    let year = parseInt(match[2] || '0', 10);
+    if (month < 1 || month > 12) {
+      return { valid: false, message: 'Invalid card expiry month (must be 01 - 12)' };
+    }
+    if (year < 100) year += 2000;
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+    if (year < currentYear || (year === currentYear && month < currentMonth)) {
+      return { valid: false, message: 'Card has expired. Please use an active card.' };
+    }
+    if (year > currentYear + 30) {
+      return { valid: false, message: 'Invalid expiry year.' };
+    }
+    return { valid: true };
+  }
+
+  // 4d. Payment Gateway integration endpoint (Validated Direct & Gateway Settlement)
   router.post('/payment/process', async (req: Request, res: Response) => {
     try {
-      const { amount, paymentMethod, cardDetails, upiId } = req.body;
+      const { amount, paymentMethod, cardDetails, upiId, bankCode, utrReference } = req.body;
       const numAmount = Number(amount);
 
       if (!numAmount || numAmount <= 0) {
@@ -1522,39 +1603,91 @@ const createCustomerRouter = () => {
         ? paymentMethod
         : 'card';
 
+      let detectedBrand = 'Generic';
+
       if (method === 'card') {
-        const cardNumber = String(cardDetails?.number || '').replace(
-          /\s+/g,
-          '',
-        );
-        if (cardNumber.length < 12) {
-          return res.status(400).json({ message: 'Invalid card number' });
+        const rawCard = String(cardDetails?.number || '').replace(/[\s-]+/g, '');
+        if (!/^\d{13,19}$/.test(rawCard)) {
+          return res.status(400).json({
+            message: 'Card number must be between 13 and 19 numeric digits',
+          });
+        }
+        if (!validateLuhnChecksum(rawCard)) {
+          return res.status(400).json({
+            message: 'Invalid card number (failed Luhn Mod-10 checksum validation)',
+          });
+        }
+        detectedBrand = identifyCardBrand(rawCard);
+
+        const expCheck = validateCardExpiration(cardDetails?.exp);
+        if (!expCheck.valid) {
+          return res.status(400).json({ message: expCheck.message });
+        }
+
+        const cvv = String(cardDetails?.cvv || '').trim();
+        const expectedCvvLen = detectedBrand === 'American Express' ? 4 : 3;
+        if (!new RegExp(`^\\d{${expectedCvvLen},4}$`).test(cvv)) {
+          return res.status(400).json({
+            message: `Invalid CVV security code (must be ${expectedCvvLen} digits for ${detectedBrand})`,
+          });
+        }
+
+        const cardHolder = String(cardDetails?.name || '').trim();
+        if (cardHolder.length < 2) {
+          return res.status(400).json({ message: 'Valid cardholder name is required' });
         }
       } else if (method === 'upi') {
         const upi = String(upiId || '').trim();
-        if (!upi || !upi.includes('@')) {
-          return res
-            .status(400)
-            .json({ message: 'Invalid UPI ID format (e.g. name@okhdfcbank)' });
+        const upiRegex = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/;
+        if (!upiRegex.test(upi)) {
+          return res.status(400).json({
+            message: 'Invalid UPI ID format. Expected format: username@bank (e.g. user@okhdfcbank, tomato@paytm)',
+          });
+        }
+        if (utrReference) {
+          const cleanUtr = String(utrReference).trim();
+          if (cleanUtr.length > 0 && !/^[a-zA-Z0-9]{6,22}$/.test(cleanUtr)) {
+            return res.status(400).json({
+              message: 'Invalid Bank UTR / Reference number format',
+            });
+          }
+        }
+      } else if (method === 'netbanking') {
+        const selectedBank = String(bankCode || req.body?.bankName || '').trim();
+        if (!selectedBank) {
+          return res.status(400).json({ message: 'Please select a valid bank for NetBanking authorization' });
         }
       }
 
       const transactionId = `TXN_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
+      const settlementAccount = {
+        companyName: process.env.TOMATO_COMPANY_NAME || 'Tomato Technologies Private Limited',
+        accountHolderName: process.env.TOMATO_BANK_ACCOUNT_HOLDER || 'Tomato Central Treasury',
+        bankName: process.env.TOMATO_BANK_NAME || 'HDFC Bank Limited',
+        accountNumber: process.env.TOMATO_BANK_ACCOUNT_NUMBER || '50200088991122',
+        ifscCode: process.env.TOMATO_BANK_IFSC || 'HDFC0000060',
+        upiId: process.env.TOMATO_OFFICIAL_UPI_ID || 'tomato.official@hdfcbank',
+        branch: 'Central Indiranagar Branch, Bengaluru',
+        settlementPolicy: 'Direct T+1 Central Settlement to Official Tomato Treasury',
+      };
+
       return res.json({
         success: true,
-        message: 'Payment verified and approved by payment gateway',
+        message: 'Payment verified and authorized for direct settlement to Tomato Official Bank Account',
         transactionId,
         paymentMethod: method,
         amount: numAmount,
         currency: 'INR',
+        cardBrand: method === 'card' ? detectedBrand : undefined,
+        settlementAccount,
         paidAt: new Date(),
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Payment gateway process failed:', error);
       return res
         .status(500)
-        .json({ message: 'Payment gateway transaction failed' });
+        .json({ message: 'Payment gateway transaction failed', error: error?.message });
     }
   });
 

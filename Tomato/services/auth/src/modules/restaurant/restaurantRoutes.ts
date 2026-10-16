@@ -585,7 +585,8 @@ const createRestaurantRouter = () => {
           isLocked,
         },
         isApproved: rest.isApproved,
-        walletBalance: rest.walletBalance || 0,
+        walletBalance: Math.max(0, Number(rest.walletBalance || 0)),
+        creditPoint: Math.max(0, Number(rest.creditPoint || 0)),
         payouts,
       });
     } catch (error) {

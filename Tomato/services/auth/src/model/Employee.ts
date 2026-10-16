@@ -66,8 +66,8 @@ const schema: Schema<IEmployee> = new Schema(
     permissions: { type: [String], default: [] },
     subadminId: { type: String, unique: true, sparse: true, trim: true },
     adminId: { type: String, unique: true, sparse: true, trim: true },
-    walletBalance: { type: Number, default: 0 },
-    creditPoint: { type: Number, default: 0 },
+    walletBalance: { type: Number, default: 0, min: 0 },
+    creditPoint: { type: Number, default: 0, min: 0 },
     dob: { type: String, default: '', trim: true },
     gsnNumber: { type: String, default: 'NA', uppercase: true, trim: true },
     bankDetails: {

@@ -31,16 +31,245 @@ type Recipient =
   | { model: 'customer'; record: ICustomer }
   | { model: 'restaurant'; record: IRestaurant }
   | { model: 'shop'; record: IShop }
-  | { model: 'rider'; record: IRider };
+  | { model: 'rider'; record: IRider }
+  | { model: 'employee'; record: IEmployee };
 
 const RECIPIENT_PROJECTION =
-  '_id name role email phone walletBalance creditPoint';
+  '_id name role email phone walletBalance creditPoint customerId restaurantId shopId riderId subadminId adminId';
+
+const escapeRegex = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+export const findRecipientAccount = async (
+  rawLookupId: string,
+): Promise<Recipient | null> => {
+  const lookup = rawLookupId.trim();
+  if (!lookup) return null;
+
+  const escaped = escapeRegex(lookup);
+
+  // 1. Direct MongoDB ObjectId match
+  if (mongoose.isValidObjectId(lookup)) {
+    const objId = new mongoose.Types.ObjectId(lookup);
+    const [c, r, s, rd, emp] = await Promise.all([
+      Customer.findById(objId).select(RECIPIENT_PROJECTION),
+      Restaurant.findById(objId).select(RECIPIENT_PROJECTION),
+      Shop.findById(objId).select(RECIPIENT_PROJECTION),
+      Rider.findById(objId).select(RECIPIENT_PROJECTION),
+      Employee.findById(objId).select(RECIPIENT_PROJECTION),
+    ]);
+    if (c) return { model: 'customer', record: c };
+    if (r) return { model: 'restaurant', record: r };
+    if (s) return { model: 'shop', record: s };
+    if (rd) return { model: 'rider', record: rd };
+    if (emp) return { model: 'employee', record: emp };
+  }
+
+  // Parse prefix and code if present (e.g. "cust-1001", "CUST 1001", "cust1001", "1001")
+  const parsed = lookup.match(/^([a-zA-Z]+)?[-_ ]*0*([0-9a-zA-Z]+)$/);
+  const prefix = (parsed?.[1] || '').toLowerCase();
+  const code = (parsed?.[2] || lookup).trim();
+  const escapedCode = escapeRegex(code);
+
+  // 2. Account code exact / flexible regex queries
+  const buildIdQuery = (rolePrefix: string, fieldName: string) => {
+    const conditions: any[] = [
+      { [fieldName]: { $regex: `^${escaped}$`, $options: 'i' } },
+      { [fieldName]: { $regex: `^${rolePrefix}[-_ ]*0*${escapedCode}$`, $options: 'i' } },
+      { [fieldName]: { $regex: `^${escapedCode}$`, $options: 'i' } },
+    ];
+    return { $or: conditions };
+  };
+
+  // Check target collection directly if prefix is recognized
+  if (prefix === 'cust') {
+    const cust = await Customer.findOne(buildIdQuery('cust', 'customerId')).select(RECIPIENT_PROJECTION);
+    if (cust) return { model: 'customer', record: cust };
+  } else if (prefix === 'rest') {
+    const rest = await Restaurant.findOne(buildIdQuery('rest', 'restaurantId')).select(RECIPIENT_PROJECTION);
+    if (rest) return { model: 'restaurant', record: rest };
+  } else if (prefix === 'shop') {
+    const shop = await Shop.findOne(buildIdQuery('shop', 'shopId')).select(RECIPIENT_PROJECTION);
+    if (shop) return { model: 'shop', record: shop };
+  } else if (prefix === 'ride') {
+    const rider = await Rider.findOne(buildIdQuery('ride', 'riderId')).select(RECIPIENT_PROJECTION);
+    if (rider) return { model: 'rider', record: rider };
+  } else if (prefix === 'sub') {
+    const emp = await Employee.findOne({
+      $or: [
+        { subadminId: { $regex: `^${escaped}$`, $options: 'i' } },
+        { subadminId: { $regex: `^sub[-_ ]*0*${escapedCode}$`, $options: 'i' } },
+      ],
+    }).select(RECIPIENT_PROJECTION);
+    if (emp) return { model: 'employee', record: emp };
+  } else if (prefix === 'adm') {
+    const emp = await Employee.findOne({
+      $or: [
+        { adminId: { $regex: `^${escaped}$`, $options: 'i' } },
+        { adminId: { $regex: `^adm[-_ ]*0*${escapedCode}$`, $options: 'i' } },
+      ],
+    }).select(RECIPIENT_PROJECTION);
+    if (emp) return { model: 'employee', record: emp };
+  }
+
+  // Cross-collection account ID search
+  const [cById, rById, sById, rdById, empById] = await Promise.all([
+    Customer.findOne(buildIdQuery('cust', 'customerId')).select(RECIPIENT_PROJECTION),
+    Restaurant.findOne(buildIdQuery('rest', 'restaurantId')).select(RECIPIENT_PROJECTION),
+    Shop.findOne(buildIdQuery('shop', 'shopId')).select(RECIPIENT_PROJECTION),
+    Rider.findOne(buildIdQuery('ride', 'riderId')).select(RECIPIENT_PROJECTION),
+    Employee.findOne({
+      $or: [
+        { subadminId: { $regex: `^${escaped}$`, $options: 'i' } },
+        { adminId: { $regex: `^${escaped}$`, $options: 'i' } },
+      ],
+    }).select(RECIPIENT_PROJECTION),
+  ]);
+
+  const idMatches: Recipient[] = [
+    ...(cById ? [{ model: 'customer' as const, record: cById }] : []),
+    ...(rById ? [{ model: 'restaurant' as const, record: rById }] : []),
+    ...(sById ? [{ model: 'shop' as const, record: sById }] : []),
+    ...(rdById ? [{ model: 'rider' as const, record: rdById }] : []),
+    ...(empById ? [{ model: 'employee' as const, record: empById }] : []),
+  ];
+  if (idMatches.length === 1 && idMatches[0]) return idMatches[0];
+  if (idMatches.length > 1) {
+    if (prefix) {
+      const match = idMatches.find((m) =>
+        (prefix === 'cust' && m.model === 'customer') ||
+        (prefix === 'rest' && m.model === 'restaurant') ||
+        (prefix === 'shop' && m.model === 'shop') ||
+        (prefix === 'ride' && m.model === 'rider') ||
+        (prefix === 'sub' && m.model === 'employee'),
+      );
+      if (match) return match;
+    }
+    throw new WalletServiceError(
+      'Recipient ID matches multiple accounts; transfer cancelled',
+      409,
+    );
+  }
+
+  // 3. Email and Phone search
+  const isEmail = lookup.includes('@');
+  const isPhone = /^[+\d\s\-]{7,18}$/.test(lookup);
+  if (isEmail || isPhone) {
+    const contactOr: any[] = [];
+    if (isEmail) {
+      contactOr.push({ email: { $regex: `^${escaped}$`, $options: 'i' } });
+    }
+    if (isPhone) {
+      const digits = lookup.replace(/\D/g, '');
+      contactOr.push({ phone: lookup });
+      if (digits.length >= 10) {
+        contactOr.push({ phone: { $regex: `${digits.slice(-10)}$` } });
+      }
+    }
+    const [cByContact, rByContact, sByContact, rdByContact, empByContact] = await Promise.all([
+      Customer.findOne({ $or: contactOr }).select(RECIPIENT_PROJECTION),
+      Restaurant.findOne({ $or: contactOr }).select(RECIPIENT_PROJECTION),
+      Shop.findOne({ $or: contactOr }).select(RECIPIENT_PROJECTION),
+      Rider.findOne({ $or: contactOr }).select(RECIPIENT_PROJECTION),
+      Employee.findOne({ $or: contactOr }).select(RECIPIENT_PROJECTION),
+    ]);
+    const contactMatches: Recipient[] = [
+      ...(cByContact ? [{ model: 'customer' as const, record: cByContact }] : []),
+      ...(rByContact ? [{ model: 'restaurant' as const, record: rByContact }] : []),
+      ...(sByContact ? [{ model: 'shop' as const, record: sByContact }] : []),
+      ...(rdByContact ? [{ model: 'rider' as const, record: rdByContact }] : []),
+      ...(empByContact ? [{ model: 'employee' as const, record: empByContact }] : []),
+    ];
+    if (contactMatches.length === 1 && contactMatches[0]) return contactMatches[0];
+    if (contactMatches.length > 1) {
+      throw new WalletServiceError(
+        'Recipient contact matches multiple accounts; transfer cancelled',
+        409,
+      );
+    }
+  }
+
+  // 4. Synthetic ID fallback (matching end of _id)
+  // When a user has no explicit customerId/riderId/restaurantId/shopId,
+  // the frontend generates synthetic IDs like "cust-" + _id.slice(-4)
+  if (code && /^[0-9a-fA-F]{4,24}$/.test(code)) {
+    const exprMatch = {
+      $expr: {
+        $regexMatch: {
+          input: { $toString: '$_id' },
+          regex: `${escapedCode}$`,
+          options: 'i',
+        },
+      },
+    };
+
+    if (prefix === 'cust') {
+      const c = await Customer.findOne(exprMatch).select(RECIPIENT_PROJECTION);
+      if (c) {
+        if (!c.customerId) {
+          await Customer.updateOne({ _id: c._id }, { $set: { customerId: `cust-${code.toLowerCase()}` } }).catch(() => {});
+        }
+        return { model: 'customer', record: c };
+      }
+    } else if (prefix === 'rest') {
+      const r = await Restaurant.findOne(exprMatch).select(RECIPIENT_PROJECTION);
+      if (r) {
+        if (!r.restaurantId) {
+          await Restaurant.updateOne({ _id: r._id }, { $set: { restaurantId: `rest-${code.toLowerCase()}` } }).catch(() => {});
+        }
+        return { model: 'restaurant', record: r };
+      }
+    } else if (prefix === 'shop') {
+      const s = await Shop.findOne(exprMatch).select(RECIPIENT_PROJECTION);
+      if (s) {
+        if (!s.shopId) {
+          await Shop.updateOne({ _id: s._id }, { $set: { shopId: `shop-${code.toLowerCase()}` } }).catch(() => {});
+        }
+        return { model: 'shop', record: s };
+      }
+    } else if (prefix === 'ride') {
+      const rd = await Rider.findOne(exprMatch).select(RECIPIENT_PROJECTION);
+      if (rd) {
+        if (!rd.riderId) {
+          await Rider.updateOne({ _id: rd._id }, { $set: { riderId: `ride-${code.toLowerCase()}` } }).catch(() => {});
+        }
+        return { model: 'rider', record: rd };
+      }
+    } else if (prefix === 'sub') {
+      const emp = await Employee.findOne(exprMatch).select(RECIPIENT_PROJECTION);
+      if (emp) return { model: 'employee', record: emp };
+    }
+
+    const [cByExpr, rByExpr, sByExpr, rdByExpr, empByExpr] = await Promise.all([
+      Customer.findOne(exprMatch).select(RECIPIENT_PROJECTION),
+      Restaurant.findOne(exprMatch).select(RECIPIENT_PROJECTION),
+      Shop.findOne(exprMatch).select(RECIPIENT_PROJECTION),
+      Rider.findOne(exprMatch).select(RECIPIENT_PROJECTION),
+      Employee.findOne(exprMatch).select(RECIPIENT_PROJECTION),
+    ]);
+    const exprMatches: Recipient[] = [
+      ...(cByExpr ? [{ model: 'customer' as const, record: cByExpr }] : []),
+      ...(rByExpr ? [{ model: 'restaurant' as const, record: rByExpr }] : []),
+      ...(sByExpr ? [{ model: 'shop' as const, record: sByExpr }] : []),
+      ...(rdByExpr ? [{ model: 'rider' as const, record: rdByExpr }] : []),
+      ...(empByExpr ? [{ model: 'employee' as const, record: empByExpr }] : []),
+    ];
+    if (exprMatches.length === 1 && exprMatches[0]) return exprMatches[0];
+    if (exprMatches.length > 1) {
+      throw new WalletServiceError(
+        'Recipient ID matches multiple accounts; transfer cancelled',
+        409,
+      );
+    }
+  }
+
+  return null;
+};
 
 const adjustRecipientCredit = (
   recipient: Recipient,
   amount: number,
   projection = RECIPIENT_PROJECTION,
-): Promise<ICustomer | IRestaurant | IShop | IRider | null> => {
+): Promise<ICustomer | IRestaurant | IShop | IRider | IEmployee | null> => {
   const update = { $inc: { creditPoint: amount } };
   const options = { returnDocument: 'after' as const };
 
@@ -65,6 +294,12 @@ const adjustRecipientCredit = (
       ).select(projection);
     case 'rider':
       return Rider.findByIdAndUpdate(
+        recipient.record._id,
+        update,
+        options,
+      ).select(projection);
+    case 'employee':
+      return Employee.findByIdAndUpdate(
         recipient.record._id,
         update,
         options,
@@ -104,8 +339,8 @@ export const getWalletBalances = async (
     }).sort({ snapshotAt: -1, createdAt: -1 });
     if (snapshot) {
       return {
-        walletBalance: Number(snapshot.wallet_balance ?? 0),
-        creditPoint: Number(snapshot.credit_point ?? 0),
+        walletBalance: Math.max(0, Number(snapshot.wallet_balance ?? snapshot.walletBalance ?? 0)),
+        creditPoint: Math.max(0, Number(snapshot.credit_point ?? snapshot.creditPoint ?? 0)),
       };
     }
     account = await Employee.findById(userId).select('walletBalance creditPoint');
@@ -125,8 +360,8 @@ export const getWalletBalances = async (
   }
 
   return {
-    walletBalance: Number(account.walletBalance ?? 0),
-    creditPoint: Number(account.creditPoint ?? 0),
+    walletBalance: Math.max(0, Number(account.walletBalance ?? 0)),
+    creditPoint: Math.max(0, Number(account.creditPoint ?? 0)),
   };
 };
 
@@ -170,52 +405,24 @@ export const transferCreditPoints = async (
     );
   }
 
-  const byAccountId = (accountField: string) => ({
-    $or: [
-      ...(mongoose.isValidObjectId(lookupId)
-        ? [{ _id: new mongoose.Types.ObjectId(lookupId) }]
-        : []),
-      { [accountField]: lookupId },
-    ],
-  });
-  const [customer, restaurant, shop, rider, currentAdmin] = await Promise.all([
-    Customer.findOne(byAccountId('customerId')).select(RECIPIENT_PROJECTION),
-    Restaurant.findOne(byAccountId('restaurantId')).select(RECIPIENT_PROJECTION),
-    Shop.findOne(byAccountId('shopId')).select(RECIPIENT_PROJECTION),
-    Rider.findOne(byAccountId('riderId')).select(RECIPIENT_PROJECTION),
+  const [recipient, currentAdmin] = await Promise.all([
+    findRecipientAccount(lookupId),
     Employee.findOne({ _id: adminId, role: 'admin' }).select(
       'name role email phone',
     ),
   ]);
 
-  const recipients: Recipient[] = [
-    ...(customer ? [{ model: 'customer' as const, record: customer }] : []),
-    ...(restaurant
-      ? [{ model: 'restaurant' as const, record: restaurant }]
-      : []),
-    ...(shop ? [{ model: 'shop' as const, record: shop }] : []),
-    ...(rider ? [{ model: 'rider' as const, record: rider }] : []),
-  ];
-
-  if (recipients.length === 0) {
+  if (!recipient) {
     throw new WalletServiceError('Recipient user was not found', 404);
   }
-  if (recipients.length > 1) {
-    throw new WalletServiceError(
-      'Recipient ID matches multiple accounts; transfer cancelled',
-      409,
-    );
-  }
 
-  const recipient = recipients[0];
   if (
-    !recipient ||
-    !['customer', 'restaurant', 'shop', 'deliveryPartner'].includes(
+    !['customer', 'restaurant', 'shop', 'deliveryPartner', 'rider', 'subadmin'].includes(
       recipient.record.role,
     )
   ) {
     throw new WalletServiceError(
-      'Credits can only be transferred to customer, rider, shop, or restaurant wallets',
+      'Credits can only be transferred to customer, rider, shop, restaurant, or sub-admin wallets',
       400,
     );
   }
@@ -243,7 +450,7 @@ export const transferCreditPoints = async (
     );
   }
 
-  let updatedRecipient: ICustomer | IRestaurant | IShop | IRider | null = null;
+  let updatedRecipient: ICustomer | IRestaurant | IShop | IRider | IEmployee | null = null;
   try {
     updatedRecipient = await adjustRecipientCredit(recipient, creditPoints);
 
@@ -319,12 +526,12 @@ export const transferCreditPoints = async (
   }
 
   return {
-    adminCreditPoint: Number(updatedSnapshot.credit_point ?? 0),
+    adminCreditPoint: Math.max(0, Number(updatedSnapshot.credit_point ?? 0)),
     recipient: {
       id: String(updatedRecipient._id),
       name: updatedRecipient.name,
       role: updatedRecipient.role,
-      creditPoint: Number(updatedRecipient.creditPoint ?? 0),
+      creditPoint: Math.max(0, Number(updatedRecipient.creditPoint ?? 0)),
     },
   };
 };

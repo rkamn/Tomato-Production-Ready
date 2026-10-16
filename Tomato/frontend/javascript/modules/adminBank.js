@@ -1089,6 +1089,16 @@ function renderAdminBankSettlementsKpis(summary) {
       <div style="font-size:1.25rem; font-weight:800; color:#854d0e; margin-top:0.15rem;">₹${Number(summary.pendingRiderPayouts || 0).toLocaleString('en-IN')}</div>
       <div style="font-size:0.7rem; color:#a16207;">Settled: ₹${Number(summary.completedRiderPayouts || 0).toLocaleString('en-IN')}</div>
     </div>
+    <div title="Rider COD Collections (Cash + UPI) received into platform" style="background:#fefce8; border:1.5px solid #fef08a; border-radius:10px; padding:0.7rem 0.85rem;">
+      <div style="font-size:0.7rem; color:#854d0e; font-weight:700; text-transform:uppercase; display:flex; justify-content:space-between; align-items:center;">
+        <span>🛵 Rider COD Received</span>
+        <span class="badge" style="background:#fef08a; color:#713f12; font-size:0.65rem; padding:1px 5px;">${Number(summary.codOrdersCount || 0)} Orders</span>
+      </div>
+      <div style="font-size:1.25rem; font-weight:800; color:#713f12; margin-top:0.15rem;">₹${Number(summary.codReceivedAmount || 0).toLocaleString('en-IN')}</div>
+      <div style="font-size:0.68rem; color:#854d0e; margin-top:0.15rem; font-weight:600;">
+        💵 Cash: <strong>₹${Number(summary.codCashReceivedAmount || 0).toLocaleString('en-IN')}</strong> • 📱 UPI: <strong>₹${Number(summary.codUpiReceivedAmount || 0).toLocaleString('en-IN')}</strong>
+      </div>
+    </div>
   `;
 }
 

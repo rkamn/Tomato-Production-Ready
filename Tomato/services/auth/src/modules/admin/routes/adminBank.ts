@@ -554,11 +554,26 @@ const router = Router();
         let completedPartnerPayouts = 0;
         let pendingRiderPayouts = 0;
         let completedRiderPayouts = 0;
+        let codReceivedAmount = 0;
+        let codCashReceivedAmount = 0;
+        let codUpiReceivedAmount = 0;
+        let codOrdersCount = 0;
 
         filtered.forEach((p: any) => {
           const total = Number(p.totalAmount || p.amount || 0);
+          const isCod = p.paymentMethod === 'cod';
+
           if (p.tomatoAccountStatus === 'received') {
             tomatoTotalReceived += total;
+            if (isCod) {
+              codReceivedAmount += total;
+              codOrdersCount += 1;
+              if (p.codCollectedVia === 'upi') {
+                codUpiReceivedAmount += total;
+              } else {
+                codCashReceivedAmount += total;
+              }
+            }
           } else {
             pendingCodAmount += total;
           }
@@ -586,6 +601,10 @@ const router = Router();
               (tomatoTotalReceived - completedPartnerPayouts - completedRiderPayouts).toFixed(2),
             ),
             pendingCodAmount: Number(pendingCodAmount.toFixed(2)),
+            codReceivedAmount: Number(codReceivedAmount.toFixed(2)),
+            codCashReceivedAmount: Number(codCashReceivedAmount.toFixed(2)),
+            codUpiReceivedAmount: Number(codUpiReceivedAmount.toFixed(2)),
+            codOrdersCount,
             tomatoCommissionEarned: Number(tomatoCommissionEarned.toFixed(2)),
             totalTomatoCommission: Number(tomatoCommissionEarned.toFixed(2)),
             pendingPartnerPayouts: Number(pendingPartnerPayouts.toFixed(2)),

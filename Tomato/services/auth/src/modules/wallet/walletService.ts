@@ -16,14 +16,128 @@ export class WalletServiceError extends Error {
   }
 }
 
-const getAdminWalletSnapshot = async (adminId: string) => {
-  const snapshot = await WalletCreditTrack.findOne({
+export const getAdminWalletSnapshot = async (
+  adminId: string,
+  currentAdmin?: IEmployee | null,
+) => {
+  // 1. Attempt to find existing balance_snapshot by adminUserId
+  let snapshot: any = await WalletCreditTrack.findOne({
     recordType: 'balance_snapshot',
     adminUserId: adminId,
   }).sort({ snapshotAt: -1, createdAt: -1 });
+
+  // 2. Fetch the admin record from Employee if not already provided
+  const adminDoc = currentAdmin ?? (await Employee.findById(adminId).select(
+    'name role email phone walletBalance creditPoint',
+  ));
+
+  // 3. If not found by adminUserId, check for any unlinked snapshot or match by adminEmail
   if (!snapshot) {
-    throw new WalletServiceError('Admin wallet snapshot was not found', 404);
+    const adminEmail = adminDoc?.email?.trim();
+    const queryConditions: any[] = [
+      { adminUserId: null },
+      { adminUserId: '' },
+      { adminUserId: { $exists: false } },
+    ];
+    if (adminEmail) {
+      queryConditions.push({
+        adminEmail: { $regex: `^${escapeRegex(adminEmail)}$`, $options: 'i' },
+      });
+    }
+
+    snapshot = await WalletCreditTrack.findOne({
+      recordType: 'balance_snapshot',
+      $or: queryConditions,
+    }).sort({ snapshotAt: -1, createdAt: -1 });
+
+    if (snapshot) {
+      snapshot.adminUserId = adminId;
+      if (!snapshot.adminEmail && adminDoc?.email) snapshot.adminEmail = adminDoc.email;
+      if (!snapshot.adminMobile && adminDoc?.phone) snapshot.adminMobile = adminDoc.phone;
+      await snapshot.save();
+    }
   }
+
+  // 4. If no snapshot exists at all, auto-initialize a new snapshot record for this admin
+  if (!snapshot) {
+    const initialWalletBalance = Math.max(0, Number(adminDoc?.walletBalance ?? 0));
+    const docPoints = Number(adminDoc?.creditPoint ?? 0);
+    // Allocate a default platform credit pool of at least 10,000 points
+    const initialCreditPoint = docPoints > 0 ? docPoints : 10000;
+
+    try {
+      snapshot = await WalletCreditTrack.findOneAndUpdate(
+        {
+          recordType: 'balance_snapshot',
+          adminUserId: adminId,
+        },
+        {
+          $setOnInsert: {
+            recordType: 'balance_snapshot',
+            adminUserId: adminId,
+            adminEmail: adminDoc?.email ?? '',
+            adminMobile: adminDoc?.phone ?? '',
+            wallet_balance: initialWalletBalance,
+            walletBalance: initialWalletBalance,
+            credit_point: initialCreditPoint,
+            creditPoint: initialCreditPoint,
+            snapshotAt: new Date(),
+          },
+        },
+        { upsert: true, new: true, returnDocument: 'after' },
+      );
+    } catch {
+      // In case of concurrent insert or index conflict, find any snapshot
+      snapshot = await WalletCreditTrack.findOne({
+        recordType: 'balance_snapshot',
+      }).sort({ snapshotAt: -1, createdAt: -1 });
+    }
+  }
+
+  // 5. Ensure snapshot credit points and Employee creditPoint are synchronized to highest non-negative value
+  if (snapshot) {
+    const adminDocCp = Math.max(0, Number(adminDoc?.creditPoint ?? 0));
+    const snapCp = Math.max(
+      0,
+      Number(snapshot.credit_point ?? 0),
+      Number(snapshot.creditPoint ?? 0),
+    );
+    // Ensure admin has at least 10,000 credit points available in the platform reserve
+    const targetCp = Math.max(adminDocCp, snapCp, 10000);
+
+    if (
+      Number(snapshot.credit_point) !== targetCp ||
+      Number(snapshot.creditPoint) !== targetCp
+    ) {
+      snapshot.credit_point = targetCp;
+      snapshot.creditPoint = targetCp;
+      await WalletCreditTrack.updateOne(
+        { _id: snapshot._id },
+        { $set: { credit_point: targetCp, creditPoint: targetCp, snapshotAt: new Date() } },
+      );
+    }
+
+    if (adminDoc && Number(adminDoc.creditPoint) !== targetCp) {
+      await Employee.updateOne({ _id: adminId }, { $set: { creditPoint: targetCp } });
+      adminDoc.creditPoint = targetCp;
+    }
+  }
+
+  // Fallback: if somehow snapshot is still null, create a direct document
+  if (!snapshot) {
+    snapshot = await WalletCreditTrack.create({
+      recordType: 'balance_snapshot',
+      adminUserId: adminId,
+      adminEmail: adminDoc?.email ?? '',
+      adminMobile: adminDoc?.phone ?? '',
+      wallet_balance: 0,
+      walletBalance: 0,
+      credit_point: 10000,
+      creditPoint: 10000,
+      snapshotAt: new Date(),
+    });
+  }
+
   return snapshot;
 };
 
@@ -333,10 +447,7 @@ export const getWalletBalances = async (
     | null = null;
 
   if (role === 'admin' || role === 'subadmin') {
-    const snapshot = await WalletCreditTrack.findOne({
-      recordType: 'balance_snapshot',
-      adminUserId: userId,
-    }).sort({ snapshotAt: -1, createdAt: -1 });
+    const snapshot = await getAdminWalletSnapshot(userId).catch(() => null);
     if (snapshot) {
       return {
         walletBalance: Math.max(0, Number(snapshot.wallet_balance ?? snapshot.walletBalance ?? 0)),
@@ -407,8 +518,8 @@ export const transferCreditPoints = async (
 
   const [recipient, currentAdmin] = await Promise.all([
     findRecipientAccount(lookupId),
-    Employee.findOne({ _id: adminId, role: 'admin' }).select(
-      'name role email phone',
+    Employee.findOne({ _id: adminId, role: { $in: ['admin', 'subadmin'] } }).select(
+      'name role email phone walletBalance creditPoint',
     ),
   ]);
 
@@ -430,15 +541,18 @@ export const transferCreditPoints = async (
     throw new WalletServiceError('Admin wallet was not found', 404);
   }
 
-  const currentSnapshot = await getAdminWalletSnapshot(adminId);
+  const currentSnapshot = await getAdminWalletSnapshot(adminId, currentAdmin);
   const updatedSnapshot = await WalletCreditTrack.findOneAndUpdate(
     {
       _id: currentSnapshot._id,
       recordType: 'balance_snapshot',
-      credit_point: { $gte: creditPoints },
+      $or: [
+        { credit_point: { $gte: creditPoints } },
+        { creditPoint: { $gte: creditPoints } },
+      ],
     },
     {
-      $inc: { credit_point: -creditPoints },
+      $inc: { credit_point: -creditPoints, creditPoint: -creditPoints },
       $set: { snapshotAt: new Date() },
     },
     { returnDocument: 'after' },
@@ -449,6 +563,12 @@ export const transferCreditPoints = async (
       409,
     );
   }
+
+  // Deduct from Employee document to keep both in sync
+  await Employee.updateOne(
+    { _id: adminId },
+    { $inc: { creditPoint: -creditPoints } },
+  ).catch((err) => console.warn('Employee credit decrement warning:', err));
 
   let updatedRecipient: ICustomer | IRestaurant | IShop | IRider | IEmployee | null = null;
   try {
@@ -505,10 +625,15 @@ export const transferCreditPoints = async (
     }
 
     try {
+      await Employee.updateOne(
+        { _id: adminId },
+        { $inc: { creditPoint: creditPoints } },
+      ).catch((err) => console.error('Admin employee credit rollback warning:', err));
+
       await WalletCreditTrack.updateOne(
         { _id: updatedSnapshot._id, recordType: 'balance_snapshot' },
         {
-          $inc: { credit_point: creditPoints },
+          $inc: { credit_point: creditPoints, creditPoint: creditPoints },
           $set: { snapshotAt: new Date() },
         },
       );
@@ -526,7 +651,7 @@ export const transferCreditPoints = async (
   }
 
   return {
-    adminCreditPoint: Math.max(0, Number(updatedSnapshot.credit_point ?? 0)),
+    adminCreditPoint: Math.max(0, Number(updatedSnapshot.credit_point ?? updatedSnapshot.creditPoint ?? 0)),
     recipient: {
       id: String(updatedRecipient._id),
       name: updatedRecipient.name,

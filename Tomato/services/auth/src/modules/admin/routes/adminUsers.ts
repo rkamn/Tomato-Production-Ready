@@ -690,15 +690,17 @@ const router = Router();
       }
 
       try {
+        const rawPoints = req.body?.creditPoints;
+        const creditPoints = typeof rawPoints === 'string' ? parseInt(rawPoints, 10) : Number(rawPoints);
         const transfer = await transferCreditPoints(
           adminId,
           recipientId,
-          req.body?.creditPoints,
+          creditPoints,
           req.body?.purpose,
           req.body?.orderNumber,
         );
         return res.json({
-          message: `Transferred ${req.body.creditPoints} credit point(s) successfully`,
+          message: `Transferred ${creditPoints} credit point(s) successfully`,
           ...transfer,
         });
       } catch (error: any) {

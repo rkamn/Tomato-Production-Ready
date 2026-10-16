@@ -368,11 +368,26 @@ function renderAdminPartnerBillingKPIs() {
     ? `${adminPartnerBillingWeekStart} → ${adminPartnerBillingWeekEnd}`
     : 'Current Week';
 
+  const codTotal = Number(s.totalPlatformCodCollected || 0);
+  const codCash = Number(s.totalPlatformCodCash || 0);
+  const codUpi = Number(s.totalPlatformCodUpi || 0);
+  const codOrders = Number(s.totalPlatformCodOrders || 0);
+
   kpiEl.innerHTML = `
     <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:0.8rem 1rem;">
       <div style="font-size:0.72rem; color:#1d4ed8; font-weight:700; text-transform:uppercase;">📅 Week Period</div>
       <div style="font-size:1.15rem; font-weight:800; color:#1e3a8a; margin-top:0.2rem;">${escapeHtml(rangeStr)}</div>
       <div style="font-size:0.72rem; color:#1e40af; margin-top:0.15rem;">${s.trackedPartnersCount || 0} Registered Partners Tracked</div>
+    </div>
+    <div style="background:#fefce8; border:1.5px solid #fef08a; border-radius:10px; padding:0.8rem 1rem;">
+      <div style="font-size:0.72rem; color:#854d0e; font-weight:700; text-transform:uppercase; display:flex; justify-content:space-between; align-items:center;">
+        <span>🛵 Rider COD Received</span>
+        <span class="badge" style="background:#fef08a; color:#713f12; font-size:0.68rem; padding:1px 6px;">${codOrders} Orders</span>
+      </div>
+      <div style="font-size:1.45rem; font-weight:800; color:#713f12; margin-top:0.15rem;">₹${codTotal.toLocaleString('en-IN')}</div>
+      <div style="font-size:0.72rem; color:#854d0e; margin-top:0.15rem; font-weight:600;">
+        💵 Cash: <strong style="color:#0f172a;">₹${codCash.toLocaleString('en-IN')}</strong> • 📱 UPI: <strong style="color:#1d4ed8;">₹${codUpi.toLocaleString('en-IN')}</strong>
+      </div>
     </div>
     <div style="background:#fff7ed; border:1px solid #fed7aa; border-radius:10px; padding:0.8rem 1rem;">
       <div style="font-size:0.72rem; color:#c2410c; font-weight:700; text-transform:uppercase;">⏳ Total Amount Pending to Pay</div>
@@ -482,6 +497,15 @@ function renderAdminPartnerBillingTable() {
             <span style="font-family:monospace; font-weight:700; color:#1e40af; background:#dbeafe; padding:1px 5px; border-radius:4px; font-size:0.7rem;">🆔 ${escapeHtml(p.partnerCode)}</span>
             ${p.phone ? `<span>📞 ${escapeHtml(p.phone)}</span>` : ''}
           </div>
+          ${isRider ? `
+            <div style="margin-top:0.35rem; padding:0.25rem 0.5rem; background:#fefce8; border:1px solid #fef08a; border-radius:6px; font-size:0.72rem;">
+              <span style="font-weight:700; color:#854d0e;">🛵 COD Received:</span>
+              <strong style="color:#713f12; font-size:0.78rem;">₹${Number(p.codTotalCollected || 0).toLocaleString('en-IN')}</strong>
+              <div style="font-size:0.67rem; color:#854d0e; margin-top:1px;">
+                💵 Cash: <strong>₹${Number(p.codCashCollected || 0).toLocaleString('en-IN')}</strong> • 📱 UPI: <strong>₹${Number(p.codUpiCollected || 0).toLocaleString('en-IN')}</strong>
+              </div>
+            </div>
+          ` : ''}
         </td>
         <td>
           ${hasBank ? `

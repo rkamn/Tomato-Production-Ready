@@ -1441,6 +1441,12 @@ function renderAdminReportData() {
   let platformCommission = 0;
   let partnerPayouts = 0;
   let totalDiscounts = 0;
+  let codTotal = 0;
+  let codCashTotal = 0;
+  let codUpiTotal = 0;
+  let codOrdersCount = 0;
+  let prepaidTotal = 0;
+  let prepaidOrdersCount = 0;
   const itemMap = new Map();
 
   if (adminReportOrdersCache.length > 0) {
@@ -1469,6 +1475,25 @@ function renderAdminReportData() {
           });
         }
         partnerPayouts += Math.max(0, orderTotal - comm - storeDiscounts);
+
+        // Payment mode & Rider COD tracking
+        const pMethod = String(o.paymentMethod || '').toLowerCase().trim();
+        const isDeliveredOrPaid = st === 'delivered' || o.paymentStatus === 'paid' || Boolean(o.codCollectedAt);
+        if (pMethod === 'cod') {
+          if (isDeliveredOrPaid) {
+            codTotal += orderTotal;
+            codOrdersCount++;
+            const codVia = String(o.codCollectedVia || '').toLowerCase().trim();
+            if (codVia === 'upi') {
+              codUpiTotal += orderTotal;
+            } else {
+              codCashTotal += orderTotal;
+            }
+          }
+        } else {
+          prepaidTotal += orderTotal;
+          prepaidOrdersCount++;
+        }
       }
 
       const items = o.items || [];
@@ -1490,6 +1515,12 @@ function renderAdminReportData() {
     grossSales = period === 'today' ? Number(kpis.todayRevenue || 0) : Number(kpis.totalRevenue || an.totalGMV || 0);
     platformCommission = Number(an.platformCommission || grossSales * 0.15);
     partnerPayouts = Math.max(0, grossSales - platformCommission);
+    codTotal = Number(an.totalCodCollected || kpis.totalCodCollected || 0);
+    codCashTotal = Number(an.totalCodCash || kpis.totalCodCash || 0);
+    codUpiTotal = Number(an.totalCodUpi || kpis.totalCodUpi || 0);
+    codOrdersCount = Number(an.codOrdersCount || kpis.codOrdersCount || 0);
+    prepaidTotal = Math.max(0, grossSales - codTotal);
+    prepaidOrdersCount = Math.max(0, totalOrders - codOrdersCount);
   }
 
   const completionRate = totalOrders > 0 ? Math.round((deliveredCount / totalOrders) * 100) : 0;
@@ -1509,6 +1540,18 @@ function renderAdminReportData() {
         <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:700;">Platform Commission</div>
         <div style="font-size:1.6rem; font-weight:800; color:#1d4ed8; margin-top:0.2rem;">₹${platformCommission.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
         <div style="font-size:0.74rem; color:#1d4ed8; font-weight:600; margin-top:0.15rem;">Tomato Net Revenue (~15%)</div>
+      </div>
+      <div style="background:#fefce8; border:1.5px solid #fef08a; border-radius:10px; padding:0.9rem 1rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="font-size:0.75rem; color:#854d0e; text-transform:uppercase; font-weight:700;">🛵 Rider COD Received</div>
+          <span class="badge" style="background:#fef08a; color:#713f12; font-size:0.68rem; padding:1px 6px; font-weight:700;">${codOrdersCount} Orders</span>
+        </div>
+        <div style="font-size:1.6rem; font-weight:800; color:#713f12; margin-top:0.2rem;">₹${codTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+        <div style="font-size:0.75rem; color:#854d0e; margin-top:0.25rem; font-weight:600; display:flex; gap:0.4rem; flex-wrap:wrap;">
+          <span>💵 Cash: <strong style="color:#0f172a;">₹${codCashTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</strong></span>
+          <span>•</span>
+          <span>📱 UPI: <strong style="color:#1d4ed8;">₹${codUpiTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</strong></span>
+        </div>
       </div>
       <div style="background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:0.9rem 1rem;">
         <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:700;">Orders Volume</div>
@@ -1544,6 +1587,16 @@ function renderAdminReportData() {
         <div style="font-size:0.72rem; color:#1e40af; font-weight:700; text-transform:uppercase;">Platform Commission</div>
         <div style="font-size:1.15rem; font-weight:800; color:#1d4ed8; margin-top:0.15rem;">+₹${platformCommission.toFixed(2)}</div>
         <div style="font-size:0.7rem; color:#1e40af;">Tomato platform cut</div>
+      </div>
+      <div style="background:#fefce8; padding:0.75rem; border-radius:8px; border:1px solid #fef08a;">
+        <div style="font-size:0.72rem; color:#854d0e; font-weight:700; text-transform:uppercase;">🛵 Rider COD (Cash + UPI)</div>
+        <div style="font-size:1.15rem; font-weight:800; color:#713f12; margin-top:0.15rem;">₹${codTotal.toFixed(2)}</div>
+        <div style="font-size:0.7rem; color:#854d0e;">💵 ₹${codCashTotal.toFixed(0)} Cash • 📱 ₹${codUpiTotal.toFixed(0)} UPI</div>
+      </div>
+      <div style="background:#f0fdf4; padding:0.75rem; border-radius:8px; border:1px solid #bbf7d0;">
+        <div style="font-size:0.72rem; color:#15803d; font-weight:700; text-transform:uppercase;">⚡ Prepaid Online Inflow</div>
+        <div style="font-size:1.15rem; font-weight:800; color:#166534; margin-top:0.15rem;">₹${prepaidTotal.toFixed(2)}</div>
+        <div style="font-size:0.7rem; color:#15803d;">${prepaidOrdersCount} direct gateway settlements</div>
       </div>
       <div style="background:#f8fafc; padding:0.75rem; border-radius:8px; border:1px solid #e2e8f0;">
         <div style="font-size:0.72rem; color:var(--muted); font-weight:700; text-transform:uppercase;">Net Partner Payouts</div>
@@ -1628,19 +1681,26 @@ function exportAdminReportCsv() {
     alert('No order records to export for this view.');
     return;
   }
-  const headers = ['Order Number', 'Date', 'Channel', 'Store Name', 'Status', 'Customer', 'Items Count', 'Gross Total (INR)', 'Commission (INR)'];
+  const headers = ['Order Number', 'Date', 'Channel', 'Store Name', 'Status', 'Payment Method', 'COD Collection Mode', 'Customer', 'Items Count', 'Gross Total (INR)', 'Commission (INR)'];
   const rows = adminReportOrdersCache.map((o) => {
     const isShop = !!(o.shopId || o.shopName || o.storeType === 'shop');
     const channel = isShop ? 'Shop' : 'Restaurant';
     const store = o.shopName || o.restaurantName || 'Store';
     const gross = Number(o.totalAmount || o.billDetails?.grandTotal || 0);
     const comm = (gross * 0.15).toFixed(2);
+    const pMethod = String(o.paymentMethod || 'online').toUpperCase();
+    let codMode = 'N/A';
+    if (pMethod === 'COD') {
+      codMode = (o.codCollectedVia === 'upi') ? 'UPI (QR Code)' : 'Cash';
+    }
     return [
       o.orderNumber || o.orderId || o._id,
       new Date(o.createdAt || o.date).toLocaleDateString(),
       channel,
       store,
       o.status || 'N/A',
+      pMethod,
+      codMode,
       o.customerName || (o.customerId && o.customerId.name) || 'Customer',
       (o.items || []).length,
       gross.toFixed(2),

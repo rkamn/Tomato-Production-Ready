@@ -772,7 +772,7 @@ function renderPartnerManagementTable(usersList, targetRole, searchQuery = '', p
               <tr>
                 <td>
                   ${nameCellHtml}
-                  <div style="margin-top:4px; font-size:0.75rem; color:#92400e; font-weight:600;">💳 Credit Points: ${Number(u.creditPoint ?? 0)}</div>
+                  <div style="margin-top:4px; font-size:0.75rem; color:#2563eb; font-weight:700;">💳 Credit Points: ${Number(u.creditPoint ?? 0)}</div>
                 </td>
                 <td>
                   ${u.phone ? `<div>📞 <strong>${escapeHtml(u.phone)}</strong></div>` : '<div style="color:var(--muted); font-size:0.8rem;">No mobile</div>'}
@@ -927,7 +927,7 @@ function showCurrentAdminWalletTransfer({ recipient, creditPoints, purpose, orde
       <td><strong>${escapeHtml(recipient.name || 'Recipient')}</strong><br><small>${escapeHtml(recipient.role || '')} · ${escapeHtml(recipient.id || '')}</small></td>
       <td>${escapeHtml(purpose || '—')}${orderNumber ? `<br><small>Order: ${escapeHtml(orderNumber)}</small>` : ''}</td>
       <td>${escapeHtml(formatPoints(creditPoints))} points</td>
-      <td>₹${escapeHtml(formatBalance(user.walletBalance))} / ${escapeHtml(formatPoints(adminCreditPoint))}</td>
+      <td>₹${escapeHtml(formatBalance(window.currentWallet?.walletBalance ?? 0))} / ${escapeHtml(formatPoints(adminCreditPoint))}</td>
       <td>${escapeHtml(formatPoints(recipient.creditPoint))} points</td>
     </tr>
   `);
@@ -968,14 +968,20 @@ async function submitAdminCreditTransfer(event) {
         body: JSON.stringify({ creditPoints, purpose, orderNumber }),
       },
     );
-    user.creditPoint = result.adminCreditPoint;
-    localStorage.setItem('tomatoUser', JSON.stringify(user));
+    if (!window.currentWallet) {
+      window.currentWallet = { walletBalance: 0, creditPoint: 0 };
+    }
+    window.currentWallet.creditPoint = result.adminCreditPoint;
 
-    const walletText = document.getElementById('profile-wallet-text');
-    if (walletText) {
-      const wb = Math.max(0, Number(user.walletBalance ?? 0)).toFixed(2);
-      const cp = Math.max(0, Number(user.creditPoint ?? 0)).toFixed(0);
-      walletText.textContent = `${wb}/${cp}`;
+    if (typeof updateProfileWalletDisplay === 'function') {
+      updateProfileWalletDisplay(window.currentWallet.walletBalance, window.currentWallet.creditPoint);
+    } else {
+      const walletText = document.getElementById('profile-wallet-text');
+      if (walletText) {
+        const wb = Math.max(0, Number(window.currentWallet.walletBalance ?? 0)).toFixed(2);
+        const cp = Math.max(0, Number(window.currentWallet.creditPoint ?? 0)).toFixed(0);
+        walletText.innerHTML = `<span class="wallet-balance-val" style="color:#16a34a; font-weight:800;">${wb}</span>/<span class="credit-points-val" style="color:#2563eb; font-weight:800;">${cp}</span>`;
+      }
     }
 
     document.getElementById('admin-credit-transfer-form')?.reset();

@@ -9,6 +9,7 @@ import ShopOrder from '../../../model/ShopOrder.js';
 import Payment from '../../../model/Payment.js';
 import Notification from '../../../model/Notification.js';
 import WalletCreditTrack from '../../../model/WalletCreditTrack.js';
+import Wallet from '../../../model/Wallet.js';
 import { AuthenticatedRequest, requireRole } from '../../../middleware/authenticate.js';
 import { userResponse } from '../../auth/authController.js';
 import {
@@ -747,6 +748,11 @@ const router = Router();
                 ((partnerDoc.walletBalance || 0) + payoutAmt).toFixed(2),
               );
               await partnerDoc.save();
+              await Wallet.updateOne(
+                { userId: String(partnerDoc._id) },
+                { $set: { walletBalance: partnerDoc.walletBalance } },
+                { upsert: true },
+              ).catch(() => {});
               await adjustTomatoCentralBankBalance(-payoutAmt);
 
               payment.partnerBankSnapshot = {
@@ -824,6 +830,11 @@ const router = Router();
                 ((riderDoc.walletBalance || 0) + riderAmt).toFixed(2),
               );
               await riderDoc.save();
+              await Wallet.updateOne(
+                { userId: String(riderDoc._id) },
+                { $set: { walletBalance: riderDoc.walletBalance } },
+                { upsert: true },
+              ).catch(() => {});
               await adjustTomatoCentralBankBalance(-riderAmt);
 
               payment.riderBankSnapshot = {

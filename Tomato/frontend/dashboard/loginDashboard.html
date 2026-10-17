@@ -27,7 +27,7 @@
                 <span id="profile-wallet-chip" style="display:none; align-items:center; gap:0.35rem; flex:0 0 auto; white-space:nowrap; background:#fef3c7; border:1px solid #facc15; color:#92400e; border-radius:8px; padding:0.22rem 0.55rem; font-size:0.74rem; font-weight:700; line-height:1.2;">
                   <span aria-hidden="true">💳</span>
                   <span id="profile-wallet-label" style="text-transform:uppercase; letter-spacing:0.04em; font-size:0.68rem;">Wallet</span>
-                  <span id="profile-wallet-text">0.00/0</span>
+                  <span id="profile-wallet-text"><span class="wallet-balance-val" style="color:#16a34a; font-weight:800;">0.00</span>/<span class="credit-points-val" style="color:#2563eb; font-weight:800;">0</span></span>
                 </span>
                 <button
                   id="admin-credit-transfer-open"
@@ -1704,6 +1704,143 @@
         </section>
 
         <!-- =========================================================================
+             VIEW 17.2: ADMIN FINANCE & TRANSFER AUDIT LEDGER PANEL (AFTER BANK)
+             ========================================================================= -->
+        <section id="admin-finance-view" class="view-section">
+          <div class="panel-card" style="margin-bottom:1.25rem;">
+            <div class="panel-header" style="flex-wrap:wrap; gap:1rem; align-items:flex-start;">
+              <div>
+                <h2 class="panel-title" style="display:flex; align-items:center; gap:0.55rem; flex-wrap:wrap;">
+                  <span>💰 Finance &amp; Transfer Ledger</span>
+                  <span class="badge" style="background:#e0f2fe; color:#0369a1; font-size:0.74rem; padding:0.2rem 0.65rem; border:1px solid #bae6fd;">Audit Trail</span>
+                </h2>
+                <p style="font-size:0.84rem; color:var(--muted); margin-top:0.2rem;">
+                  Real-time tracking of all credit point and wallet balance transfers between users with exact timestamps, balance snapshots, and reference purposes.
+                </p>
+              </div>
+              <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
+                <button
+                  type="button"
+                  class="btn btn-outline btn-sm"
+                  onclick="fetchAdminFinanceTransfers()"
+                  title="Reload transfers ledger"
+                >
+                  ↻ Refresh
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-outline btn-sm"
+                  onclick="exportAdminFinanceTransfersCSV()"
+                  title="Export transfers as CSV"
+                >
+                  📥 Export CSV
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-primary btn-sm"
+                  onclick="openAdminFinanceTransferModal()"
+                  style="display:inline-flex; align-items:center; gap:0.35rem;"
+                >
+                  <span>💸 Transfer Funds / Points</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- KPI Summary Cards -->
+            <div id="admin-finance-kpis" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:0.85rem; margin-bottom:1.25rem;">
+              <!-- Rendered via JS -->
+            </div>
+
+            <!-- Filter Pills Row -->
+            <div id="admin-finance-type-pills" style="margin-bottom:0.85rem;">
+              <!-- Rendered via JS -->
+            </div>
+
+            <!-- Toolbar & Filter Controls -->
+            <div style="display:flex; align-items:center; gap:0.45rem; flex-wrap:wrap; margin-bottom:1rem; background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:0.55rem 0.75rem;">
+              <!-- Role Filter -->
+              <div style="display:inline-flex; align-items:center; gap:0.3rem;">
+                <label for="admin-finance-role-filter" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0;">Role:</label>
+                <select
+                  id="admin-finance-role-filter"
+                  style="padding:0.22rem 0.45rem; border:1px solid #cbd5e1; border-radius:6px; font-size:0.78rem; height:28px; background:#fff;"
+                  onchange="handleFinanceRoleChange(this.value)"
+                >
+                  <option value="all">All Roles</option>
+                  <option value="admin">Platform Admin</option>
+                  <option value="restaurant">Restaurants</option>
+                  <option value="shop">Shops</option>
+                  <option value="deliveryPartner">Riders</option>
+                  <option value="customer">Customers</option>
+                  <option value="subadmin">Sub-Admins</option>
+                </select>
+              </div>
+
+              <!-- Date From -->
+              <div style="display:inline-flex; align-items:center; gap:0.3rem;">
+                <label for="admin-finance-from-date" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0;">From:</label>
+                <input
+                  type="date"
+                  id="admin-finance-from-date"
+                  style="padding:0.2rem 0.4rem; border:1px solid #cbd5e1; border-radius:6px; font-size:0.78rem; height:28px; background:#fff;"
+                  onchange="handleFinanceDateChange()"
+                />
+              </div>
+
+              <!-- Date To -->
+              <div style="display:inline-flex; align-items:center; gap:0.3rem;">
+                <label for="admin-finance-to-date" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0;">To:</label>
+                <input
+                  type="date"
+                  id="admin-finance-to-date"
+                  style="padding:0.2rem 0.4rem; border:1px solid #cbd5e1; border-radius:6px; font-size:0.78rem; height:28px; background:#fff;"
+                  onchange="handleFinanceDateChange()"
+                />
+              </div>
+
+              <!-- Quick Presets -->
+              <div id="admin-finance-preset-buttons" style="display:inline-flex; align-items:center; gap:0.25rem;">
+                <button type="button" class="btn btn-sm btn-outline finance-preset-btn" data-preset="today" style="padding:0.18rem 0.45rem; font-size:0.73rem; height:28px;" onclick="setFinanceDatePreset('today')">Today</button>
+                <button type="button" class="btn btn-sm btn-outline finance-preset-btn" data-preset="7days" style="padding:0.18rem 0.45rem; font-size:0.73rem; height:28px;" onclick="setFinanceDatePreset('7days')">7 Days</button>
+                <button type="button" class="btn btn-sm btn-outline finance-preset-btn" data-preset="30days" style="padding:0.18rem 0.45rem; font-size:0.73rem; height:28px;" onclick="setFinanceDatePreset('30days')">30 Days</button>
+                <button type="button" class="btn btn-sm btn-primary finance-preset-btn" data-preset="all" style="padding:0.18rem 0.45rem; font-size:0.73rem; height:28px; background:var(--tomato, #e23744); color:#fff; border-color:var(--tomato, #e23744);" onclick="setFinanceDatePreset('all')">All Time</button>
+              </div>
+
+              <!-- Search -->
+              <div style="display:inline-flex; align-items:center; gap:0.3rem; margin-left:auto;">
+                <label for="admin-finance-search" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0;">Search:</label>
+                <input
+                  type="text"
+                  id="admin-finance-search"
+                  placeholder="ID, Name, Order #, Purpose..."
+                  style="padding:0.22rem 0.5rem; border:1px solid #cbd5e1; border-radius:6px; font-size:0.78rem; height:28px; width:180px; background:#fff;"
+                  oninput="handleFinanceSearchInput(this.value)"
+                />
+                <button
+                  type="button"
+                  class="btn btn-sm"
+                  style="padding:0.15rem 0.4rem; font-size:0.72rem; border:none; background:transparent; color:var(--muted); cursor:pointer;"
+                  onclick="clearFinanceSearch()"
+                  title="Clear search"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <!-- Transfers Table Container -->
+            <div id="admin-finance-table-container">
+              <!-- Rendered via JS -->
+            </div>
+
+            <!-- Pagination Bar -->
+            <div id="admin-finance-pagination-bar" style="margin-top:1rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+              <!-- Rendered via JS -->
+            </div>
+          </div>
+        </section>
+
+        <!-- =========================================================================
              VIEW 17.5: ADMIN PARTNERS BILLING (WEEKLY SETTLEMENTS & PAYOUT REPORT)
              ========================================================================= -->
         <section id="admin-partner-billing-view" class="view-section">
@@ -2902,6 +3039,30 @@
               <span style="background:#eff6ff; padding:0.25rem 0.6rem; border-radius:6px;">✓ PhonePe</span>
               <span style="background:#eff6ff; padding:0.25rem 0.6rem; border-radius:6px;">✓ Paytm</span>
               <span style="background:#eff6ff; padding:0.25rem 0.6rem; border-radius:6px;">✓ RuPay / Visa / MC</span>
+            </div>
+          </div>
+
+          <!-- SELECT CURRENCY TO PAY (DEFAULT: INR) -->
+          <div style="margin-top:0.85rem; text-align:left; background:#f8fafc; border:1.5px solid #e2e8f0; border-radius:9px; padding:0.85rem 1rem;">
+            <label for="razorpay-currency-select" style="display:flex; justify-content:space-between; align-items:center; font-size:0.78rem; font-weight:700; color:#1e293b; margin-bottom:0.45rem; text-transform:uppercase; letter-spacing:0.04em;">
+              <span>Select currency to pay</span>
+              <span style="font-size:0.7rem; background:#dcfce7; color:#15803d; border:1px solid #bbf7d0; padding:0.1rem 0.45rem; border-radius:4px; font-weight:700; text-transform:none;">Default: INR (₹)</span>
+            </label>
+            <select
+              id="razorpay-currency-select"
+              style="width:100%; padding:0.5rem 0.75rem; border:1.5px solid #3b82f6; border-radius:7px; font-size:0.88rem; font-weight:700; color:#1e3a8a; background:#eff6ff; cursor:pointer;"
+              onchange="handleRazorpayCurrencyChange(this.value)"
+            >
+              <option value="INR" selected>🇮🇳 INR (₹) - Indian Rupee (Default)</option>
+              <option value="USD">🇺🇸 USD ($) - US Dollar</option>
+              <option value="EUR">🇪🇺 EUR (€) - Euro</option>
+              <option value="GBP">🇬🇧 GBP (£) - British Pound</option>
+              <option value="AED">🇦🇪 AED (د.إ) - UAE Dirham</option>
+              <option value="SGD">🇸🇬 SGD (S$) - Singapore Dollar</option>
+            </select>
+            <div style="font-size:0.73rem; color:#64748b; margin-top:0.4rem; display:flex; align-items:center; gap:0.35rem;">
+              <span style="color:#16a34a; font-weight:700;">✓</span>
+              <span>Transactions are settled directly into Tomato's verified HDFC Treasury in Indian Rupees (INR).</span>
             </div>
           </div>
         </div>
@@ -4575,6 +4736,95 @@
       </div>
     </div>
 
+    <!-- =========================================================================
+         ADMIN: FINANCE TRANSFER MODAL (CREDIT POINTS OR WALLET BALANCE)
+         ========================================================================= -->
+    <div id="admin-finance-transfer-modal" class="modal-overlay">
+      <div class="modal-card" style="max-width:520px; width:92%;">
+        <div class="modal-header">
+          <div>
+            <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--tomato); font-weight:700;">💸 Platform Treasury &amp; Points</span>
+            <h2 style="font-size:1.25rem; margin-top:0.2rem;">Transfer Funds / Credit Points</h2>
+          </div>
+          <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('admin-finance-transfer-modal')">&times;</button>
+        </div>
+
+        <form id="admin-finance-transfer-form" onsubmit="submitAdminFinanceTransfer(event)">
+          <div class="form-group" style="margin-bottom:0.85rem;">
+            <label style="font-size:0.82rem; font-weight:600; margin-bottom:0.35rem; display:block;">Transfer Type *</label>
+            <div style="display:flex; gap:0.6rem;">
+              <label style="flex:1; display:flex; align-items:center; gap:0.45rem; padding:0.55rem 0.75rem; border:1px solid #cbd5e1; border-radius:8px; cursor:pointer; background:#f8fafc;" id="finance-type-label-credit">
+                <input type="radio" name="financeTransferType" value="credit_point" checked onchange="handleFinanceModalTypeChange()" />
+                <span style="font-size:0.84rem; font-weight:600;">💳 Credit Points</span>
+              </label>
+              <label style="flex:1; display:flex; align-items:center; gap:0.45rem; padding:0.55rem 0.75rem; border:1px solid #cbd5e1; border-radius:8px; cursor:pointer; background:#fff;" id="finance-type-label-wallet">
+                <input type="radio" name="financeTransferType" value="wallet_balance" onchange="handleFinanceModalTypeChange()" />
+                <span style="font-size:0.84rem; font-weight:600;">💵 Wallet Balance (₹)</span>
+              </label>
+            </div>
+          </div>
+
+          <div id="admin-finance-available-balance-badge" style="background:#fef3c7; border:1px solid #facc15; border-radius:8px; padding:0.5rem 0.8rem; margin-bottom:0.85rem; font-size:0.82rem; color:#92400e; font-weight:600; display:flex; justify-content:space-between; align-items:center;">
+            <span>Admin Available:</span>
+            <span id="admin-finance-available-display">Loading...</span>
+          </div>
+
+          <div class="form-group" style="margin-bottom:0.85rem;">
+            <label for="admin-finance-recipient-id">Recipient Account ID / User ID / Mobile *</label>
+            <input
+              type="text"
+              id="admin-finance-recipient-id"
+              class="form-control"
+              placeholder="e.g. cust-1001, rest-1002, ride-1003, or user ID"
+              required
+            />
+            <small style="display:block; color:var(--muted); font-size:0.75rem; margin-top:0.25rem;">
+              Accepts prefixed Account ID, MongoDB ID, registered phone number, or email.
+            </small>
+          </div>
+
+          <div class="form-group" style="margin-bottom:0.85rem;">
+            <label id="admin-finance-amount-label" for="admin-finance-amount">Amount (Points) *</label>
+            <input
+              type="number"
+              id="admin-finance-amount"
+              class="form-control"
+              min="1"
+              step="1"
+              placeholder="e.g. 500"
+              required
+            />
+          </div>
+
+          <div class="form-group" style="margin-bottom:0.85rem;">
+            <label for="admin-finance-purpose">Transfer Purpose / Reason *</label>
+            <textarea
+              id="admin-finance-purpose"
+              class="form-control"
+              rows="2"
+              placeholder="e.g. Promotional credits, Order resolution, Performance incentive"
+              required
+            ></textarea>
+          </div>
+
+          <div class="form-group" style="margin-bottom:1.25rem;">
+            <label for="admin-finance-order-number">Linked Order Number (Optional)</label>
+            <input
+              type="text"
+              id="admin-finance-order-number"
+              class="form-control"
+              placeholder="e.g. 1005"
+            />
+          </div>
+
+          <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:0.6rem;">
+            <button type="button" class="btn btn-outline" onclick="closeModal('admin-finance-transfer-modal')">Cancel</button>
+            <button type="submit" id="admin-finance-submit-btn" class="btn btn-primary">💸 Process Transfer</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
     <!-- WEBSOCKET LIVE RIDER TRACKING -->
     <script src="../javascript/websocket.js"></script>
@@ -4589,6 +4839,7 @@
     <script src="../javascript/modules/adminComplaints.js"></script>
     <script src="../javascript/modules/adminCoupons.js"></script>
     <script src="../javascript/modules/adminBank.js"></script>
+    <script src="../javascript/modules/adminFinance.js"></script>
     <script src="../javascript/modules/partnerBilling.js"></script>
     <!-- APPLICATION BOOTSTRAP -->
     <script>

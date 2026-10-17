@@ -338,6 +338,10 @@
           }
 
           localStorage.setItem('tomatoToken', data.token);
+          if (data.user) {
+            delete data.user.walletBalance;
+            delete data.user.creditPoint;
+          }
           localStorage.setItem('tomatoUser', JSON.stringify(data.user));
           try {
             sessionStorage.removeItem('tomato_active_view');

@@ -1462,6 +1462,10 @@ const createCustomerRouter = () => {
           amount: amountPaise,
           currency: 'INR',
           receipt: receipt || `rcpt_${Date.now()}`,
+          notes: {
+            preferred_currency: 'INR',
+            currency: 'INR',
+          },
         },
         {
           headers: {

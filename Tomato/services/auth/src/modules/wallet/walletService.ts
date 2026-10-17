@@ -5,6 +5,7 @@ import Shop, { IShop } from '../../model/Shop.js';
 import Rider, { IRider } from '../../model/Rider.js';
 import Employee, { IEmployee } from '../../model/Employee.js';
 import WalletCreditTrack from '../../model/WalletCreditTrack.js';
+import Wallet, { IWallet } from '../../model/Wallet.js';
 
 export class WalletServiceError extends Error {
   constructor(
@@ -16,22 +17,83 @@ export class WalletServiceError extends Error {
   }
 }
 
+export const getOrCreateUserWallet = async (
+  userId: string,
+  role?: string,
+  defaultName?: string,
+): Promise<IWallet> => {
+  let walletDoc = await Wallet.findOne({ userId });
+  if (walletDoc) {
+    return walletDoc;
+  }
+
+  let userRecord: any = null;
+  const userRole = role || 'customer';
+
+  if (userRole === 'admin' || userRole === 'subadmin') {
+    userRecord = await Employee.findById(userId).select('name role email phone walletBalance creditPoint');
+  } else if (userRole === 'customer') {
+    userRecord = await Customer.findById(userId).select('name role email phone walletBalance creditPoint');
+  } else if (userRole === 'restaurant') {
+    userRecord = await Restaurant.findById(userId).select('name role email phone walletBalance creditPoint');
+  } else if (userRole === 'shop') {
+    userRecord = await Shop.findById(userId).select('name role email phone walletBalance creditPoint');
+  } else if (userRole === 'deliveryPartner' || userRole === 'rider') {
+    userRecord = await Rider.findById(userId).select('name role email phone walletBalance creditPoint');
+  }
+
+  if (!userRecord && mongoose.isValidObjectId(userId)) {
+    userRecord = (await Employee.findById(userId)) ||
+                 (await Customer.findById(userId)) ||
+                 (await Restaurant.findById(userId)) ||
+                 (await Shop.findById(userId)) ||
+                 (await Rider.findById(userId));
+  }
+
+  const effectiveRole = userRecord?.role || userRole || 'customer';
+  const name = (userRecord?.name || defaultName || (effectiveRole === 'admin' ? 'Platform Administrator' : 'Tomato User')).trim();
+  const walletBalance = Math.max(0, Number(userRecord?.walletBalance ?? 0));
+  let creditPoint = Math.max(0, Number(userRecord?.creditPoint ?? 0));
+  if (effectiveRole === 'admin' && creditPoint < 10000) {
+    creditPoint = 10000;
+  }
+
+  walletDoc = await Wallet.findOneAndUpdate(
+    { userId },
+    {
+      $setOnInsert: {
+        userId,
+        name,
+        role: effectiveRole,
+        walletBalance,
+        creditPoint,
+        email: userRecord?.email || '',
+        phone: userRecord?.phone || '',
+      },
+    },
+    { upsert: true, new: true, returnDocument: 'after' },
+  );
+
+  return walletDoc!;
+};
+
 export const getAdminWalletSnapshot = async (
   adminId: string,
   currentAdmin?: IEmployee | null,
 ) => {
-  // 1. Attempt to find existing balance_snapshot by adminUserId
+  // Ensure the admin's central record exists in 'wallet' collection
+  const adminDoc = currentAdmin ?? (await Employee.findById(adminId).select(
+    'name role email phone walletBalance creditPoint',
+  ));
+  const adminWallet = await getOrCreateUserWallet(adminId, 'admin', adminDoc?.name);
+
+  // 1. Attempt to find existing balance_snapshot by adminUserId in wallet_transfers
   let snapshot: any = await WalletCreditTrack.findOne({
     recordType: 'balance_snapshot',
     adminUserId: adminId,
   }).sort({ snapshotAt: -1, createdAt: -1 });
 
-  // 2. Fetch the admin record from Employee if not already provided
-  const adminDoc = currentAdmin ?? (await Employee.findById(adminId).select(
-    'name role email phone walletBalance creditPoint',
-  ));
-
-  // 3. If not found by adminUserId, check for any unlinked snapshot or match by adminEmail
+  // 2. If not found by adminUserId, check for unlinked snapshot or match by adminEmail
   if (!snapshot) {
     const adminEmail = adminDoc?.email?.trim();
     const queryConditions: any[] = [
@@ -58,13 +120,30 @@ export const getAdminWalletSnapshot = async (
     }
   }
 
-  // 4. If no snapshot exists at all, auto-initialize a new snapshot record for this admin
-  if (!snapshot) {
-    const initialWalletBalance = Math.max(0, Number(adminDoc?.walletBalance ?? 0));
-    const docPoints = Number(adminDoc?.creditPoint ?? 0);
-    // Allocate a default platform credit pool of at least 10,000 points
-    const initialCreditPoint = docPoints > 0 ? docPoints : 10000;
+  const effectiveCreditPoints =
+    typeof adminWallet?.creditPoint === 'number'
+      ? Math.max(0, adminWallet.creditPoint)
+      : typeof snapshot?.creditPoint === 'number'
+        ? Math.max(0, snapshot.creditPoint)
+        : typeof snapshot?.credit_point === 'number'
+          ? Math.max(0, snapshot.credit_point)
+          : typeof adminDoc?.creditPoint === 'number'
+            ? Math.max(0, adminDoc.creditPoint)
+            : 10000;
 
+  const effectiveWalletBalance =
+    typeof adminWallet?.walletBalance === 'number'
+      ? Math.max(0, adminWallet.walletBalance)
+      : typeof snapshot?.walletBalance === 'number'
+        ? Math.max(0, snapshot.walletBalance)
+        : typeof snapshot?.wallet_balance === 'number'
+          ? Math.max(0, snapshot.wallet_balance)
+          : typeof adminDoc?.walletBalance === 'number'
+            ? Math.max(0, adminDoc.walletBalance)
+            : 0;
+
+  // If no snapshot exists at all, auto-initialize
+  if (!snapshot) {
     try {
       snapshot = await WalletCreditTrack.findOneAndUpdate(
         {
@@ -77,68 +156,78 @@ export const getAdminWalletSnapshot = async (
             adminUserId: adminId,
             adminEmail: adminDoc?.email ?? '',
             adminMobile: adminDoc?.phone ?? '',
-            wallet_balance: initialWalletBalance,
-            walletBalance: initialWalletBalance,
-            credit_point: initialCreditPoint,
-            creditPoint: initialCreditPoint,
+            wallet_balance: effectiveWalletBalance,
+            walletBalance: effectiveWalletBalance,
+            credit_point: effectiveCreditPoints,
+            creditPoint: effectiveCreditPoints,
             snapshotAt: new Date(),
           },
         },
         { upsert: true, new: true, returnDocument: 'after' },
       );
     } catch {
-      // In case of concurrent insert or index conflict, find any snapshot
       snapshot = await WalletCreditTrack.findOne({
         recordType: 'balance_snapshot',
       }).sort({ snapshotAt: -1, createdAt: -1 });
     }
   }
 
-  // 5. Ensure snapshot credit points and Employee creditPoint are synchronized to highest non-negative value
+  // Ensure snapshot, Employee, and Wallet table are strictly in sync
   if (snapshot) {
-    const adminDocCp = Math.max(0, Number(adminDoc?.creditPoint ?? 0));
-    const snapCp = Math.max(
-      0,
-      Number(snapshot.credit_point ?? 0),
-      Number(snapshot.creditPoint ?? 0),
-    );
-    // Ensure admin has at least 10,000 credit points available in the platform reserve
-    const targetCp = Math.max(adminDocCp, snapCp, 10000);
-
     if (
-      Number(snapshot.credit_point) !== targetCp ||
-      Number(snapshot.creditPoint) !== targetCp
+      Number(snapshot.credit_point) !== effectiveCreditPoints ||
+      Number(snapshot.creditPoint) !== effectiveCreditPoints ||
+      Number(snapshot.wallet_balance) !== effectiveWalletBalance ||
+      Number(snapshot.walletBalance) !== effectiveWalletBalance
     ) {
-      snapshot.credit_point = targetCp;
-      snapshot.creditPoint = targetCp;
+      snapshot.credit_point = effectiveCreditPoints;
+      snapshot.creditPoint = effectiveCreditPoints;
+      snapshot.wallet_balance = effectiveWalletBalance;
+      snapshot.walletBalance = effectiveWalletBalance;
       await WalletCreditTrack.updateOne(
         { _id: snapshot._id },
-        { $set: { credit_point: targetCp, creditPoint: targetCp, snapshotAt: new Date() } },
+        {
+          $set: {
+            credit_point: effectiveCreditPoints,
+            creditPoint: effectiveCreditPoints,
+            wallet_balance: effectiveWalletBalance,
+            walletBalance: effectiveWalletBalance,
+            snapshotAt: new Date(),
+          },
+        },
       );
     }
-
-    if (adminDoc && Number(adminDoc.creditPoint) !== targetCp) {
-      await Employee.updateOne({ _id: adminId }, { $set: { creditPoint: targetCp } });
-      adminDoc.creditPoint = targetCp;
-    }
   }
 
-  // Fallback: if somehow snapshot is still null, create a direct document
-  if (!snapshot) {
-    snapshot = await WalletCreditTrack.create({
-      recordType: 'balance_snapshot',
-      adminUserId: adminId,
-      adminEmail: adminDoc?.email ?? '',
-      adminMobile: adminDoc?.phone ?? '',
-      wallet_balance: 0,
-      walletBalance: 0,
-      credit_point: 10000,
-      creditPoint: 10000,
-      snapshotAt: new Date(),
-    });
+  if (
+    adminWallet &&
+    (Number(adminWallet.creditPoint) !== effectiveCreditPoints ||
+      Number(adminWallet.walletBalance) !== effectiveWalletBalance)
+  ) {
+    adminWallet.creditPoint = effectiveCreditPoints;
+    adminWallet.walletBalance = effectiveWalletBalance;
+    await adminWallet.save();
   }
 
-  return snapshot;
+  if (
+    adminDoc &&
+    (Number(adminDoc.creditPoint) !== effectiveCreditPoints ||
+      Number(adminDoc.walletBalance) !== effectiveWalletBalance)
+  ) {
+    await Employee.updateOne(
+      { _id: adminId },
+      { $set: { creditPoint: effectiveCreditPoints, walletBalance: effectiveWalletBalance } },
+    );
+    adminDoc.creditPoint = effectiveCreditPoints;
+    adminDoc.walletBalance = effectiveWalletBalance;
+  }
+
+  return snapshot || {
+    wallet_balance: effectiveWalletBalance,
+    walletBalance: effectiveWalletBalance,
+    credit_point: effectiveCreditPoints,
+    creditPoint: effectiveCreditPoints,
+  };
 };
 
 type Recipient =
@@ -435,44 +524,14 @@ export const getWalletBalances = async (
   userId: string,
   role: string,
 ): Promise<{ walletBalance: number; creditPoint: number }> => {
-  if (!mongoose.isValidObjectId(userId)) {
+  if (!userId || !mongoose.isValidObjectId(userId)) {
     throw new WalletServiceError('Valid user ID is required', 401);
   }
 
-  let account:
-    | ICustomer
-    | IRestaurant
-    | IRider
-    | IEmployee
-    | null = null;
-
-  if (role === 'admin' || role === 'subadmin') {
-    const snapshot = await getAdminWalletSnapshot(userId).catch(() => null);
-    if (snapshot) {
-      return {
-        walletBalance: Math.max(0, Number(snapshot.wallet_balance ?? snapshot.walletBalance ?? 0)),
-        creditPoint: Math.max(0, Number(snapshot.credit_point ?? snapshot.creditPoint ?? 0)),
-      };
-    }
-    account = await Employee.findById(userId).select('walletBalance creditPoint');
-  } else if (role === 'customer') {
-    account = await Customer.findById(userId).select('walletBalance creditPoint');
-  } else if (role === 'restaurant') {
-    account = await Restaurant.findById(userId).select('walletBalance creditPoint');
-  } else if (role === 'deliveryPartner' || role === 'rider') {
-    account = await Rider.findById(userId).select('walletBalance creditPoint');
-  }
-
-  if (!account) {
-    account = await Employee.findById(userId).select('walletBalance creditPoint');
-  }
-  if (!account) {
-    throw new WalletServiceError('User wallet was not found', 404);
-  }
-
+  const walletDoc = await getOrCreateUserWallet(userId, role);
   return {
-    walletBalance: Math.max(0, Number(account.walletBalance ?? 0)),
-    creditPoint: Math.max(0, Number(account.creditPoint ?? 0)),
+    walletBalance: Math.max(0, Number(walletDoc.walletBalance ?? 0)),
+    creditPoint: Math.max(0, Number(walletDoc.creditPoint ?? 0)),
   };
 };
 
@@ -541,15 +600,33 @@ export const transferCreditPoints = async (
     throw new WalletServiceError('Admin wallet was not found', 404);
   }
 
+  // Ensure admin's central Wallet document is initialized
+  const adminWallet = await getOrCreateUserWallet(adminId, 'admin', currentAdmin.name);
   const currentSnapshot = await getAdminWalletSnapshot(adminId, currentAdmin);
+
+  // Atomically debit admin wallet in both Wallet collection and snapshot
+  const updatedAdminWallet = await Wallet.findOneAndUpdate(
+    {
+      userId: adminId,
+      creditPoint: { $gte: creditPoints },
+    },
+    {
+      $inc: { creditPoint: -creditPoints },
+    },
+    { returnDocument: 'after' },
+  );
+
+  if (!updatedAdminWallet) {
+    throw new WalletServiceError(
+      'Insufficient credit points in the admin wallet',
+      409,
+    );
+  }
+
   const updatedSnapshot = await WalletCreditTrack.findOneAndUpdate(
     {
       _id: currentSnapshot._id,
       recordType: 'balance_snapshot',
-      $or: [
-        { credit_point: { $gte: creditPoints } },
-        { creditPoint: { $gte: creditPoints } },
-      ],
     },
     {
       $inc: { credit_point: -creditPoints, creditPoint: -creditPoints },
@@ -557,23 +634,20 @@ export const transferCreditPoints = async (
     },
     { returnDocument: 'after' },
   );
-  if (!updatedSnapshot) {
-    throw new WalletServiceError(
-      'Insufficient credit points in the admin wallet',
-      409,
-    );
-  }
 
-  // Deduct from Employee document to keep both in sync
+  // Sync Employee document as well
   await Employee.updateOne(
     { _id: adminId },
     { $inc: { creditPoint: -creditPoints } },
   ).catch((err) => console.warn('Employee credit decrement warning:', err));
 
+  const recipientUserId = String(recipient.record._id);
   let updatedRecipient: ICustomer | IRestaurant | IShop | IRider | IEmployee | null = null;
-  try {
-    updatedRecipient = await adjustRecipientCredit(recipient, creditPoints);
+  let updatedRecipientWallet: IWallet | null = null;
 
+  try {
+    // 1. Update recipient in their respective collection
+    updatedRecipient = await adjustRecipientCredit(recipient, creditPoints);
     if (!updatedRecipient) {
       throw new WalletServiceError(
         'Recipient wallet could not be updated; transfer cancelled',
@@ -581,37 +655,55 @@ export const transferCreditPoints = async (
       );
     }
 
+    // 2. Update recipient in the central 'wallet' collection
+    updatedRecipientWallet = await Wallet.findOneAndUpdate(
+      { userId: recipientUserId },
+      {
+        $inc: { creditPoint: creditPoints },
+        $setOnInsert: {
+          userId: recipientUserId,
+          name: updatedRecipient.name || recipient.record.name || 'Tomato User',
+          role: updatedRecipient.role || recipient.record.role,
+          walletBalance: Math.max(0, Number(updatedRecipient.walletBalance ?? 0)),
+          email: updatedRecipient.email || recipient.record.email || '',
+          phone: updatedRecipient.phone || recipient.record.phone || '',
+        },
+      },
+      { upsert: true, new: true, returnDocument: 'after' },
+    );
+
+    // 3. Log transfer record in 'wallet_transfers' collection
     await WalletCreditTrack.create({
       recordType: 'transfer',
+      transferType: 'credit_point',
       senderUserId: adminId,
+      senderName: currentAdmin.name || 'Platform Administrator',
+      senderRole: currentAdmin.role || 'admin',
       senderEmail: currentAdmin.email ?? '',
       senderMobile: currentAdmin.phone ?? '',
-      receiverUserId: String(updatedRecipient._id),
-      receiverEmail: updatedRecipient.email ?? '',
-      receiverMobile: updatedRecipient.phone ?? '',
-      senderCurrentWalletBalance: Number(updatedSnapshot.wallet_balance ?? 0),
-      senderCurrentCreditBalance: Number(updatedSnapshot.credit_point ?? 0),
+      receiverUserId: recipientUserId,
+      receiverName: updatedRecipientWallet?.name || updatedRecipient.name || 'User',
+      receiverRole: updatedRecipientWallet?.role || updatedRecipient.role || 'customer',
+      receiverEmail: updatedRecipientWallet?.email || updatedRecipient.email || '',
+      receiverMobile: updatedRecipientWallet?.phone || updatedRecipient.phone || '',
+      senderCurrentWalletBalance: Number(updatedAdminWallet.walletBalance ?? 0),
+      senderCurrentCreditBalance: Number(updatedAdminWallet.creditPoint ?? 0),
       receiverCurrentWalletBalance: Number(
-        updatedRecipient.walletBalance ?? 0,
+        updatedRecipientWallet?.walletBalance ?? updatedRecipient.walletBalance ?? 0,
       ),
       receiverCurrentCreditBalance: Number(
-        updatedRecipient.creditPoint ?? 0,
+        updatedRecipientWallet?.creditPoint ?? updatedRecipient.creditPoint ?? 0,
       ),
       creditTransferred: creditPoints,
+      amount: creditPoints,
       purpose,
       orderNumber,
     });
   } catch (transferError) {
     if (updatedRecipient) {
       try {
-        const rollback = await adjustRecipientCredit(
-          recipient,
-          -creditPoints,
-          '_id',
-        );
-        if (!rollback) {
-          throw new Error('Recipient record was not found during rollback');
-        }
+        await adjustRecipientCredit(recipient, -creditPoints, '_id');
+        await Wallet.updateOne({ userId: recipientUserId }, { $inc: { creditPoint: -creditPoints } });
       } catch (rollbackError) {
         console.error('Recipient credit rollback failed:', {
           transferError,
@@ -625,18 +717,24 @@ export const transferCreditPoints = async (
     }
 
     try {
+      await Wallet.updateOne(
+        { userId: adminId },
+        { $inc: { creditPoint: creditPoints } },
+      );
       await Employee.updateOne(
         { _id: adminId },
         { $inc: { creditPoint: creditPoints } },
       ).catch((err) => console.error('Admin employee credit rollback warning:', err));
 
-      await WalletCreditTrack.updateOne(
-        { _id: updatedSnapshot._id, recordType: 'balance_snapshot' },
-        {
-          $inc: { credit_point: creditPoints, creditPoint: creditPoints },
-          $set: { snapshotAt: new Date() },
-        },
-      );
+      if (updatedSnapshot?._id) {
+        await WalletCreditTrack.updateOne(
+          { _id: updatedSnapshot._id, recordType: 'balance_snapshot' },
+          {
+            $inc: { credit_point: creditPoints, creditPoint: creditPoints },
+            $set: { snapshotAt: new Date() },
+          },
+        );
+      }
     } catch (rollbackError) {
       console.error('Admin credit rollback failed:', {
         transferError,
@@ -651,12 +749,173 @@ export const transferCreditPoints = async (
   }
 
   return {
-    adminCreditPoint: Math.max(0, Number(updatedSnapshot.credit_point ?? updatedSnapshot.creditPoint ?? 0)),
+    adminCreditPoint: Math.max(0, Number(updatedAdminWallet.creditPoint ?? 0)),
     recipient: {
-      id: String(updatedRecipient._id),
-      name: updatedRecipient.name,
-      role: updatedRecipient.role,
-      creditPoint: Math.max(0, Number(updatedRecipient.creditPoint ?? 0)),
+      id: recipientUserId,
+      name: updatedRecipientWallet?.name || updatedRecipient.name,
+      role: updatedRecipientWallet?.role || updatedRecipient.role,
+      creditPoint: Math.max(0, Number(updatedRecipientWallet?.creditPoint ?? updatedRecipient.creditPoint ?? 0)),
+    },
+  };
+};
+
+export interface WalletBalanceTransferResult {
+  senderWalletBalance: number;
+  recipient: {
+    id: string;
+    name: string;
+    role: string;
+    walletBalance: number;
+  };
+}
+
+export const transferWalletBalance = async (
+  senderId: string,
+  recipientId: string,
+  amountValue: unknown,
+  purposeValue: unknown,
+  orderNumberValue: unknown,
+): Promise<WalletBalanceTransferResult> => {
+  if (!mongoose.isValidObjectId(senderId)) {
+    throw new WalletServiceError('Valid sender ID is required', 401);
+  }
+  const lookupId = recipientId.trim();
+  if (!lookupId || lookupId.length > 128) {
+    throw new WalletServiceError('Recipient user ID is required', 400);
+  }
+  const amount = Number(amountValue);
+  if (typeof amount !== 'number' || isNaN(amount) || amount <= 0) {
+    throw new WalletServiceError('Amount must be a positive number', 400);
+  }
+  const roundedAmount = Number(amount.toFixed(2));
+  const purpose = typeof purposeValue === 'string' ? purposeValue.trim() : '';
+  const orderNumber = typeof orderNumberValue === 'string' ? orderNumberValue.trim() : '';
+  if (!purpose || purpose.length > 500) {
+    throw new WalletServiceError('Transfer purpose is required and must be 500 characters or fewer', 400);
+  }
+  if (orderNumber.length > 100) {
+    throw new WalletServiceError('Order number must be 100 characters or fewer', 400);
+  }
+
+  const [recipient, senderAdmin] = await Promise.all([
+    findRecipientAccount(lookupId),
+    Employee.findById(senderId).select('name role email phone walletBalance creditPoint'),
+  ]);
+
+  if (!recipient) {
+    throw new WalletServiceError('Recipient user was not found', 404);
+  }
+
+  // Get or create sender wallet in central 'wallet' table
+  const senderWallet = await getOrCreateUserWallet(senderId, senderAdmin?.role || 'admin', senderAdmin?.name);
+  if (Number(senderWallet.walletBalance || 0) < roundedAmount) {
+    throw new WalletServiceError(
+      `Insufficient wallet balance. Available: ₹${Number(senderWallet.walletBalance || 0).toFixed(2)}, Requested: ₹${roundedAmount.toFixed(2)}`,
+      409,
+    );
+  }
+
+  // Atomically debit sender wallet
+  const updatedSenderWallet = await Wallet.findOneAndUpdate(
+    {
+      userId: senderId,
+      walletBalance: { $gte: roundedAmount },
+    },
+    {
+      $inc: { walletBalance: -roundedAmount },
+    },
+    { returnDocument: 'after' },
+  );
+
+  if (!updatedSenderWallet) {
+    throw new WalletServiceError('Insufficient wallet balance in sender account', 409);
+  }
+
+  // Also sync Employee or sender model
+  if (senderAdmin) {
+    await Employee.updateOne({ _id: senderId }, { $inc: { walletBalance: -roundedAmount } }).catch(() => {});
+  }
+
+  const recipientUserId = String(recipient.record._id);
+  let updatedRecipientWallet: IWallet | null = null;
+
+  try {
+    // 1. Credit recipient in their specific model
+    const incObj = { $inc: { walletBalance: roundedAmount } };
+    if (recipient.model === 'customer') await Customer.findByIdAndUpdate(recipientUserId, incObj);
+    else if (recipient.model === 'restaurant') await Restaurant.findByIdAndUpdate(recipientUserId, incObj);
+    else if (recipient.model === 'shop') await Shop.findByIdAndUpdate(recipientUserId, incObj);
+    else if (recipient.model === 'rider') await Rider.findByIdAndUpdate(recipientUserId, incObj);
+    else if (recipient.model === 'employee') await Employee.findByIdAndUpdate(recipientUserId, incObj);
+
+    // 2. Credit recipient in central Wallet collection
+    updatedRecipientWallet = await Wallet.findOneAndUpdate(
+      { userId: recipientUserId },
+      {
+        $inc: { walletBalance: roundedAmount },
+        $setOnInsert: {
+          userId: recipientUserId,
+          name: recipient.record.name || 'Tomato User',
+          role: recipient.record.role,
+          creditPoint: Math.max(0, Number(recipient.record.creditPoint ?? 0)),
+          email: recipient.record.email || '',
+          phone: recipient.record.phone || '',
+        },
+      },
+      { upsert: true, new: true, returnDocument: 'after' },
+    );
+
+    // 3. Log transfer record in wallet_transfers
+    await WalletCreditTrack.create({
+      recordType: 'transfer',
+      transferType: 'wallet_balance',
+      senderUserId: senderId,
+      senderName: senderAdmin?.name || updatedSenderWallet.name || 'Platform Administrator',
+      senderRole: senderAdmin?.role || updatedSenderWallet.role || 'admin',
+      senderEmail: senderAdmin?.email ?? updatedSenderWallet.email ?? '',
+      senderMobile: senderAdmin?.phone ?? updatedSenderWallet.phone ?? '',
+      receiverUserId: recipientUserId,
+      receiverName: updatedRecipientWallet?.name || recipient.record.name || 'User',
+      receiverRole: updatedRecipientWallet?.role || recipient.record.role || 'customer',
+      receiverEmail: updatedRecipientWallet?.email || recipient.record.email || '',
+      receiverMobile: updatedRecipientWallet?.phone || recipient.record.phone || '',
+      senderCurrentWalletBalance: Number(updatedSenderWallet.walletBalance ?? 0),
+      senderCurrentCreditBalance: Number(updatedSenderWallet.creditPoint ?? 0),
+      receiverCurrentWalletBalance: Number(updatedRecipientWallet?.walletBalance ?? 0),
+      receiverCurrentCreditBalance: Number(updatedRecipientWallet?.creditPoint ?? 0),
+      creditTransferred: roundedAmount,
+      walletBalanceTransferred: roundedAmount,
+      amount: roundedAmount,
+      purpose,
+      orderNumber,
+    });
+  } catch (transferError) {
+    // Rollback recipient
+    const decObj = { $inc: { walletBalance: -roundedAmount } };
+    if (recipient.model === 'customer') await Customer.findByIdAndUpdate(recipientUserId, decObj).catch(() => {});
+    else if (recipient.model === 'restaurant') await Restaurant.findByIdAndUpdate(recipientUserId, decObj).catch(() => {});
+    else if (recipient.model === 'shop') await Shop.findByIdAndUpdate(recipientUserId, decObj).catch(() => {});
+    else if (recipient.model === 'rider') await Rider.findByIdAndUpdate(recipientUserId, decObj).catch(() => {});
+    else if (recipient.model === 'employee') await Employee.findByIdAndUpdate(recipientUserId, decObj).catch(() => {});
+
+    await Wallet.updateOne({ userId: recipientUserId }, { $inc: { walletBalance: -roundedAmount } }).catch(() => {});
+
+    // Rollback sender
+    await Wallet.updateOne({ userId: senderId }, { $inc: { walletBalance: roundedAmount } }).catch(() => {});
+    if (senderAdmin) {
+      await Employee.updateOne({ _id: senderId }, { $inc: { walletBalance: roundedAmount } }).catch(() => {});
+    }
+
+    throw transferError;
+  }
+
+  return {
+    senderWalletBalance: Math.max(0, Number(updatedSenderWallet.walletBalance ?? 0)),
+    recipient: {
+      id: recipientUserId,
+      name: updatedRecipientWallet?.name || recipient.record.name,
+      role: updatedRecipientWallet?.role || recipient.record.role,
+      walletBalance: Math.max(0, Number(updatedRecipientWallet?.walletBalance ?? 0)),
     },
   };
 };

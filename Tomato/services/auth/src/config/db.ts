@@ -8,6 +8,7 @@ import Counter from "../model/Counter.js";
 import Shop from "../model/Shop.js";
 import ShopOrder from "../model/ShopOrder.js";
 import WalletCreditTrack from "../model/WalletCreditTrack.js";
+import Wallet from "../model/Wallet.js";
 import { hashPassword } from "../modules/auth/authController.js";
 
 try {
@@ -351,10 +352,97 @@ export const sanitizeAllUserWalletBalancesAndCreditPoints = async () => {
                 { recordType: 'balance_snapshot', $or: [{ credit_point: { $lt: 0 } }, { creditPoint: { $lt: 0 } }] },
                 { $set: { credit_point: 0, creditPoint: 0 } },
             ),
+            Wallet.updateMany({ walletBalance: { $lt: 0 } }, { $set: { walletBalance: 0 } }),
+            Wallet.updateMany({ creditPoint: { $lt: 0 } }, { $set: { creditPoint: 0 } }),
         ]);
         console.log("[DB Setup] All user wallet balances and credit points sanitized (non-negative floor enforced).");
     } catch (err: any) {
         console.warn("[DB Setup Warning - Wallet Balance Sanitization]:", err?.message);
+    }
+};
+
+export const setupAndMigrateWalletTable = async () => {
+    try {
+        if (!mongoose.connection.db) return;
+        const db = mongoose.connection.db;
+        const collections = await db.listCollections().toArray();
+        const hasWalletCol = collections.some((c) => c.name === 'wallet');
+
+        if (hasWalletCol) {
+            const rawWalletCol = db.collection('wallet');
+            const rawWalletTransfersCol = db.collection('wallet_transfers');
+
+            // 1. Migrate any historical transfer records from 'wallet' into 'wallet_transfers'
+            const transferRecords = await rawWalletCol.find({ recordType: 'transfer' }).toArray();
+            if (transferRecords.length > 0) {
+                console.log(`[DB Migration] Migrating ${transferRecords.length} transfer logs to 'wallet_transfers'...`);
+                await rawWalletTransfersCol.insertMany(transferRecords).catch(() => {});
+                await rawWalletCol.deleteMany({ recordType: 'transfer' });
+            }
+
+            // 2. Drop legacy index 'admin_balance_snapshot_unique' on 'wallet' if present
+            try {
+                await rawWalletCol.dropIndex('admin_balance_snapshot_unique');
+            } catch (_) {}
+
+            // 3. Remove any lingering legacy balance_snapshot documents from 'wallet'
+            await rawWalletCol.deleteMany({ recordType: 'balance_snapshot' });
+        }
+
+        // 4. Ensure every existing user across all collections has a record in the 'wallet' table
+        const [employees, customers, restaurants, shops, riders] = await Promise.all([
+            Employee.find().select('_id name role email phone walletBalance creditPoint').lean(),
+            Customer.find().select('_id name role email phone walletBalance creditPoint').lean(),
+            Restaurant.find().select('_id name role email phone walletBalance creditPoint').lean(),
+            Shop.find().select('_id name role email phone walletBalance creditPoint').lean(),
+            Rider.find().select('_id name role email phone walletBalance creditPoint').lean(),
+        ]);
+
+        const allUsers: any[] = [
+            ...employees.map((u: any) => ({ ...u, role: u.role || 'admin' })),
+            ...customers.map((u: any) => ({ ...u, role: 'customer' })),
+            ...restaurants.map((u: any) => ({ ...u, role: 'restaurant' })),
+            ...shops.map((u: any) => ({ ...u, role: 'shop' })),
+            ...riders.map((u: any) => ({ ...u, role: 'deliveryPartner' })),
+        ];
+
+        console.log(`[DB Setup] Synchronizing ${allUsers.length} platform users into 'wallet' table...`);
+
+        for (const u of allUsers) {
+            const userId = String(u._id);
+            const role = u.role || 'customer';
+            const name = (u.name || (role === 'admin' ? 'Platform Administrator' : 'Tomato User')).trim();
+            const walletBalance = Math.max(0, Number(u.walletBalance || 0));
+            // For admin, ensure at least 10,000 credit points pool
+            let creditPoint = Math.max(0, Number(u.creditPoint || 0));
+            if (role === 'admin' && creditPoint < 10000) {
+                creditPoint = 10000;
+            }
+
+            await Wallet.updateOne(
+                { userId },
+                {
+                    $setOnInsert: {
+                        userId,
+                        name,
+                        role,
+                        walletBalance,
+                        creditPoint,
+                        email: u.email || '',
+                        phone: u.phone || '',
+                    },
+                },
+                { upsert: true },
+            );
+        }
+
+        // Enforce non-negative floor on wallet table
+        await Wallet.updateMany({ walletBalance: { $lt: 0 } }, { $set: { walletBalance: 0 } });
+        await Wallet.updateMany({ creditPoint: { $lt: 0 } }, { $set: { creditPoint: 0 } });
+
+        console.log("[DB Setup] 'wallet' table is ready and synchronized for all users.");
+    } catch (err: any) {
+        console.error('[DB Wallet Table Setup Error]:', err?.message || err);
     }
 };
 
@@ -421,6 +509,7 @@ export const connectDB = async (attempts = 3) => {
             }
 
             await sanitizeAllUserWalletBalancesAndCreditPoints();
+            await setupAndMigrateWalletTable();
             console.log("Connected to MongoDB (Tomato_clone database ready)");
             return;
         } catch (error) {

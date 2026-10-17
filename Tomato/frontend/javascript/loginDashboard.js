@@ -15,9 +15,26 @@ function formatCleanName(str) {
 
 const user = storedUser;
 if (user) {
+  delete user.walletBalance;
+  delete user.creditPoint;
+  try {
+    const rawSaved = localStorage.getItem('tomatoUser');
+    if (rawSaved && (rawSaved.includes('"walletBalance"') || rawSaved.includes('"creditPoint"'))) {
+      const parsed = JSON.parse(rawSaved);
+      delete parsed.walletBalance;
+      delete parsed.creditPoint;
+      localStorage.setItem('tomatoUser', JSON.stringify(parsed));
+    }
+  } catch (_) {}
   if (user.name) user.name = formatCleanName(user.name);
   if (user.displayName) user.displayName = formatCleanName(user.displayName);
 }
+
+// In-memory wallet state (never saved to localStorage or sessionStorage)
+window.currentWallet = {
+  walletBalance: 0,
+  creditPoint: 0,
+};
 const normalizeRole = (r) => {
   const val = String(r || 'customer').trim().toLowerCase();
   if (['deliverypartner', 'delivery_partner', 'delivery partner', 'rider'].includes(val)) return 'deliveryPartner';
@@ -1095,16 +1112,25 @@ async function toggleDutyStatus() {
   }
 }
 
+function updateProfileWalletDisplay(walletBalance, creditPoint) {
+  const walletText = document.getElementById('profile-wallet-text');
+  if (!walletText) return;
+  const wb = Math.max(0, Number(walletBalance ?? 0)).toFixed(2);
+  const cp = Math.max(0, Number(creditPoint ?? 0)).toFixed(0);
+  walletText.innerHTML = `<span class="wallet-balance-val" style="color:#16a34a; font-weight:800;">${wb}</span>/<span class="credit-points-val" style="color:#2563eb; font-weight:800;">${cp}</span>`;
+}
+window.updateProfileWalletDisplay = updateProfileWalletDisplay;
+
 async function refreshProfileWallet() {
   try {
     const wallet = await apiFetch('/api/auth/wallet');
-    user.walletBalance = Math.max(0, Number(wallet.walletBalance ?? 0));
-    user.creditPoint = Math.max(0, Number(wallet.creditPoint ?? 0));
-    localStorage.setItem('tomatoUser', JSON.stringify(user));
-
-    const walletText = document.getElementById('profile-wallet-text');
-    if (walletText) {
-      walletText.textContent = `${user.walletBalance.toFixed(2)}/${user.creditPoint.toFixed(0)}`;
+    window.currentWallet = {
+      walletBalance: Math.max(0, Number(wallet?.walletBalance ?? 0)),
+      creditPoint: Math.max(0, Number(wallet?.creditPoint ?? 0)),
+    };
+    updateProfileWalletDisplay(window.currentWallet.walletBalance, window.currentWallet.creditPoint);
+    if (typeof syncFinanceWithCurrentWallet === 'function') {
+      syncFinanceWithCurrentWallet();
     }
   } catch (error) {
     console.error('Wallet refresh failed:', error);
@@ -1280,11 +1306,7 @@ function initDashboard() {
   const walletText = document.getElementById('profile-wallet-text');
   const walletLabel = document.getElementById('profile-wallet-label');
   if (walletChip) walletChip.style.display = 'inline-flex';
-  if (walletText) {
-    const wb = Math.max(0, Number(user.walletBalance ?? 0)).toFixed(2);
-    const cp = Math.max(0, Number(user.creditPoint ?? 0)).toFixed(0);
-    walletText.textContent = `${wb}/${cp}`;
-  }
+  updateProfileWalletDisplay(window.currentWallet?.walletBalance, window.currentWallet?.creditPoint);
   if (walletLabel) walletLabel.textContent = role === 'admin' || role === 'subadmin' ? 'W' : 'Wallet';
   const creditTransferButton = document.getElementById('admin-credit-transfer-open');
   if (creditTransferButton) {
@@ -1564,6 +1586,7 @@ function buildNav() {
     ...(hasPerm('riders_manage') ? [{ id: 'admin-riders', icon: '🚴', label: 'Riders' }] : []),
     ...(hasPerm('customers_manage') ? [{ id: 'admin-customers', icon: '👥', label: 'Customers' }] : []),
     { id: 'admin-bank', icon: '🏦', label: 'Bank' },
+    { id: 'admin-finance', icon: '💰', label: 'Finance' },
     { id: 'admin-partner-billing', icon: '📑', label: 'Partners Billing' },
     { id: 'admin-coupons', icon: '🎟️', label: 'Coupon & Discount' },
     ...(hasPerm('dashboard_view') ? [{ id: 'admin-analytics', icon: '📈', label: 'Analytics' }] : []),
@@ -1910,6 +1933,10 @@ function switchView(viewId, filter = null, force = false) {
       } else {
         fetchAdminPartnerBilling();
       }
+    } else if (viewId === 'admin-finance') {
+      if (typeof fetchAdminFinanceTransfers === 'function') {
+        fetchAdminFinanceTransfers();
+      }
     }
     return;
   }
@@ -2011,6 +2038,10 @@ function switchView(viewId, filter = null, force = false) {
     fetchAdminComplaints();
   } else if (viewId === 'admin-bank') {
     loadAdminBankPanel();
+  } else if (viewId === 'admin-finance') {
+    if (typeof loadAdminFinancePanel === 'function') {
+      loadAdminFinancePanel();
+    }
   } else if (viewId === 'admin-partner-billing') {
     if (typeof refreshAdminPartnerBillingCurrentTab === 'function') {
       refreshAdminPartnerBillingCurrentTab();

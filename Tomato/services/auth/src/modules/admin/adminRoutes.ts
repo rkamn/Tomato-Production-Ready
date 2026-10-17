@@ -11,6 +11,7 @@ import adminUserRoutes from './routes/adminUsers.js';
 import adminComplaintRoutes from './routes/adminComplaints.js';
 import adminBankRoutes from './routes/adminBank.js';
 import adminBillingRoutes from './routes/adminBilling.js';
+import adminFinanceRoutes from './routes/adminFinance.js';
 
 const createAdminRouter = () => {
   const router = express.Router();
@@ -23,6 +24,7 @@ const createAdminRouter = () => {
   router.use('/', adminUserRoutes);
   router.use('/', adminComplaintRoutes);
   router.use('/', adminBankRoutes);
+  router.use('/', adminFinanceRoutes);
   router.use('/', adminBillingRoutes);
 
   return router;

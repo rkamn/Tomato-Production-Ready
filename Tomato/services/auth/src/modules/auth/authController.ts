@@ -15,6 +15,7 @@ import {
 	resolvePartnerPincode,
 	getServiceablePincodes,
 } from '../../utils/bankHelpers.js';
+import { getOrCreateUserWallet } from '../wallet/walletService.js';
 
 const getPublicBaseUrl = () => process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 5050}`;
 
@@ -197,8 +198,6 @@ export const userResponse = (user: {
 		image: user.image || '',
 		role: user.role,
 		isApproved: user.isApproved ?? true,
-		walletBalance: Math.max(0, Number(user.walletBalance ?? 0)),
-		creditPoint: Math.max(0, Number(user.creditPoint ?? 0)),
 		restaurantId,
 		shopId,
 		riderId,
@@ -325,6 +324,7 @@ export const registerUser = async (req: Request, res: Response) => {
 			if (phone) shopPayload.phone = phone;
 
 			const shop = await Shop.create(shopPayload) as unknown as IShop;
+			await getOrCreateUserWallet(String(shop._id), 'shop', shop.name).catch(() => {});
 
 			await Notification.create({
 				userId: String(shop._id),
@@ -364,6 +364,7 @@ export const registerUser = async (req: Request, res: Response) => {
 			if (phone) restaurantPayload.phone = phone;
 
 			const restaurant = await Restaurant.create(restaurantPayload) as unknown as IRestaurant;
+			await getOrCreateUserWallet(String(restaurant._id), 'restaurant', restaurant.name).catch(() => {});
 
 			await Notification.create({
 				userId: String(restaurant._id),
@@ -394,6 +395,7 @@ export const registerUser = async (req: Request, res: Response) => {
 			if (phone) customerPayload.phone = phone;
 
 			const customer = await Customer.create(customerPayload) as unknown as ICustomer;
+			await getOrCreateUserWallet(String(customer._id), 'customer', customer.name).catch(() => {});
 
 			await Notification.create({
 				userId: String(customer._id),
@@ -434,6 +436,7 @@ export const registerUser = async (req: Request, res: Response) => {
 			if (phone) riderPayload.phone = phone;
 
 			const rider = await Rider.create(riderPayload) as unknown as IRider;
+			await getOrCreateUserWallet(String(rider._id), 'deliveryPartner', rider.name).catch(() => {});
 
 			await Notification.create({
 				userId: String(rider._id),
@@ -467,6 +470,7 @@ export const registerUser = async (req: Request, res: Response) => {
 		};
 
 		const employee = await Employee.create(employeePayload);
+		await getOrCreateUserWallet(String(employee._id), employee.role, employee.name).catch(() => {});
 
 		await Notification.create({
 			userId: String(employee._id),

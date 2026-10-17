@@ -13,6 +13,7 @@ import MenuItem, { IMenuItem, FoodItem, IFoodItem } from './MenuItem.js';
 import Notification, { INotification } from './Notification.js';
 import Address, { IAddress } from './Address.js';
 import WalletCreditTrack, { IWalletCreditTrack } from './WalletCreditTrack.js';
+import Wallet, { IWallet } from './Wallet.js';
 import Counter, { ICounter, getNextCounterValue, generateIdFromCounter } from './Counter.js';
 import Shop, { IShop } from './Shop.js';
 import ShopOrder, { IShopOrder } from './ShopOrder.js';
@@ -50,6 +51,8 @@ export {
   IAddress,
   WalletCreditTrack,
   IWalletCreditTrack,
+  Wallet,
+  IWallet,
   Counter,
   ICounter,
   getNextCounterValue,
@@ -78,6 +81,7 @@ export default {
   Notification,
   Address,
   WalletCreditTrack,
+  Wallet,
   Counter,
   Shop,
   ShopOrder,

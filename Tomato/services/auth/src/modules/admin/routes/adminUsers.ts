@@ -22,6 +22,7 @@ import {
 } from '../../auth/authController.js';
 import {
   transferCreditPoints,
+  getOrCreateUserWallet,
   WalletServiceError,
 } from '../../wallet/walletService.js';
 import {
@@ -480,6 +481,7 @@ const router = Router();
               }
             : {}),
         });
+        await getOrCreateUserWallet(String(restaurant._id), 'restaurant', restaurant.name).catch(() => {});
 
         return res.status(201).json({
           message: canAutoApprove
@@ -561,6 +563,7 @@ const router = Router();
               }
             : {}),
         });
+        await getOrCreateUserWallet(String(shop._id), 'shop', shop.name).catch(() => {});
 
         return res.status(201).json({
           message: canAutoApprove
@@ -584,6 +587,7 @@ const router = Router();
           isBlocked: false,
           customerId,
         } as unknown as ICustomer);
+        await getOrCreateUserWallet(String(customer._id), 'customer', customer.name).catch(() => {});
 
         return res.status(201).json({
           message: 'Customer created successfully',
@@ -634,6 +638,7 @@ const router = Router();
               }
             : {}),
         } as unknown as IRider);
+        await getOrCreateUserWallet(String(rider._id), 'deliveryPartner', rider.name).catch(() => {});
 
         return res.status(201).json({
           message: riderBankCheck.valid
@@ -663,6 +668,7 @@ const router = Router();
       };
 
       const employee = await Employee.create(employeeData);
+      await getOrCreateUserWallet(String(employee._id), employee.role, employee.name).catch(() => {});
 
       return res.status(201).json({
         message: 'Account created successfully in Employees table',

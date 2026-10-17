@@ -1,13 +1,19 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
 export type WalletRecordType = 'transfer' | 'balance_snapshot';
+export type TransferType = 'credit_point' | 'wallet_balance';
 
 export interface IWalletCreditTrack extends Document {
   recordType: WalletRecordType;
+  transferType?: TransferType;
   senderUserId?: string;
+  senderName?: string;
+  senderRole?: string;
   senderEmail?: string;
   senderMobile?: string;
   receiverUserId?: string;
+  receiverName?: string;
+  receiverRole?: string;
   receiverEmail?: string;
   receiverMobile?: string;
   senderCurrentWalletBalance?: number;
@@ -15,6 +21,8 @@ export interface IWalletCreditTrack extends Document {
   receiverCurrentWalletBalance?: number;
   receiverCurrentCreditBalance?: number;
   creditTransferred?: number;
+  walletBalanceTransferred?: number;
+  amount?: number;
   purpose?: string;
   orderNumber?: string;
   adminUserId?: string;
@@ -35,11 +43,22 @@ const schema: Schema<IWalletCreditTrack> = new Schema(
       enum: ['transfer', 'balance_snapshot'],
       default: 'transfer',
       required: true,
+      index: true,
+    },
+    transferType: {
+      type: String,
+      enum: ['credit_point', 'wallet_balance'],
+      default: 'credit_point',
+      index: true,
     },
     senderUserId: { type: String, index: true },
+    senderName: { type: String, default: '', trim: true },
+    senderRole: { type: String, default: '', trim: true },
     senderEmail: { type: String, default: '', trim: true },
     senderMobile: { type: String, default: '', trim: true },
     receiverUserId: { type: String, index: true },
+    receiverName: { type: String, default: '', trim: true },
+    receiverRole: { type: String, default: '', trim: true },
     receiverEmail: { type: String, default: '', trim: true },
     receiverMobile: { type: String, default: '', trim: true },
     senderCurrentWalletBalance: { type: Number, min: 0 },
@@ -47,6 +66,8 @@ const schema: Schema<IWalletCreditTrack> = new Schema(
     receiverCurrentWalletBalance: { type: Number, min: 0 },
     receiverCurrentCreditBalance: { type: Number, min: 0 },
     creditTransferred: { type: Number, min: 0 },
+    walletBalanceTransferred: { type: Number, min: 0 },
+    amount: { type: Number, min: 0 },
     purpose: { type: String, trim: true, maxlength: 500 },
     orderNumber: { type: String, default: '', trim: true, maxlength: 100 },
     adminUserId: { type: String },
@@ -61,9 +82,11 @@ const schema: Schema<IWalletCreditTrack> = new Schema(
   {
     timestamps: { createdAt: true, updatedAt: false },
     versionKey: false,
-    collection: 'wallet',
+    collection: 'wallet_transfers',
   },
 );
+
+schema.index({ createdAt: -1 });
 
 schema.index(
   { adminUserId: 1 },

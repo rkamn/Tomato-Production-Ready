@@ -4,6 +4,7 @@ import Shop from '../model/Shop.js';
 import Rider from '../model/Rider.js';
 import Employee from '../model/Employee.js';
 import WalletCreditTrack from '../model/WalletCreditTrack.js';
+import Wallet from '../model/Wallet.js';
 import Notification from '../model/Notification.js';
 import { Counter } from '../model/Counter.js';
 
@@ -16,6 +17,7 @@ export async function adjustTomatoCentralBankBalance(deltaAmount: number) {
       const current = Math.max(0, Number(admin.walletBalance || 0));
       const updated = Math.max(0, Number((current + numDelta).toFixed(2)));
       await Employee.updateOne({ _id: admin._id }, { $set: { walletBalance: updated } });
+      await Wallet.updateOne({ userId: String(admin._id) }, { $set: { walletBalance: updated } });
     }
     const snapshots = await WalletCreditTrack.find({ recordType: 'balance_snapshot' });
     for (const snap of snapshots) {

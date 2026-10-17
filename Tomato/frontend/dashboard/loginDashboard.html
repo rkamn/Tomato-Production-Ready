@@ -1799,11 +1799,11 @@
               </div>
 
               <!-- Quick Presets -->
-              <div style="display:inline-flex; align-items:center; gap:0.25rem;">
-                <button type="button" class="btn btn-sm btn-outline" style="padding:0.18rem 0.45rem; font-size:0.73rem; height:28px;" onclick="setFinanceDatePreset('today')">Today</button>
-                <button type="button" class="btn btn-sm btn-outline" style="padding:0.18rem 0.45rem; font-size:0.73rem; height:28px;" onclick="setFinanceDatePreset('7days')">7 Days</button>
-                <button type="button" class="btn btn-sm btn-outline" style="padding:0.18rem 0.45rem; font-size:0.73rem; height:28px;" onclick="setFinanceDatePreset('30days')">30 Days</button>
-                <button type="button" class="btn btn-sm btn-outline" style="padding:0.18rem 0.45rem; font-size:0.73rem; height:28px;" onclick="setFinanceDatePreset('all')">All Time</button>
+              <div id="admin-finance-preset-buttons" style="display:inline-flex; align-items:center; gap:0.25rem;">
+                <button type="button" class="btn btn-sm btn-outline finance-preset-btn" data-preset="today" style="padding:0.18rem 0.45rem; font-size:0.73rem; height:28px;" onclick="setFinanceDatePreset('today')">Today</button>
+                <button type="button" class="btn btn-sm btn-outline finance-preset-btn" data-preset="7days" style="padding:0.18rem 0.45rem; font-size:0.73rem; height:28px;" onclick="setFinanceDatePreset('7days')">7 Days</button>
+                <button type="button" class="btn btn-sm btn-outline finance-preset-btn" data-preset="30days" style="padding:0.18rem 0.45rem; font-size:0.73rem; height:28px;" onclick="setFinanceDatePreset('30days')">30 Days</button>
+                <button type="button" class="btn btn-sm btn-primary finance-preset-btn" data-preset="all" style="padding:0.18rem 0.45rem; font-size:0.73rem; height:28px; background:var(--tomato, #e23744); color:#fff; border-color:var(--tomato, #e23744);" onclick="setFinanceDatePreset('all')">All Time</button>
               </div>
 
               <!-- Search -->
@@ -3039,6 +3039,30 @@
               <span style="background:#eff6ff; padding:0.25rem 0.6rem; border-radius:6px;">✓ PhonePe</span>
               <span style="background:#eff6ff; padding:0.25rem 0.6rem; border-radius:6px;">✓ Paytm</span>
               <span style="background:#eff6ff; padding:0.25rem 0.6rem; border-radius:6px;">✓ RuPay / Visa / MC</span>
+            </div>
+          </div>
+
+          <!-- SELECT CURRENCY TO PAY (DEFAULT: INR) -->
+          <div style="margin-top:0.85rem; text-align:left; background:#f8fafc; border:1.5px solid #e2e8f0; border-radius:9px; padding:0.85rem 1rem;">
+            <label for="razorpay-currency-select" style="display:flex; justify-content:space-between; align-items:center; font-size:0.78rem; font-weight:700; color:#1e293b; margin-bottom:0.45rem; text-transform:uppercase; letter-spacing:0.04em;">
+              <span>Select currency to pay</span>
+              <span style="font-size:0.7rem; background:#dcfce7; color:#15803d; border:1px solid #bbf7d0; padding:0.1rem 0.45rem; border-radius:4px; font-weight:700; text-transform:none;">Default: INR (₹)</span>
+            </label>
+            <select
+              id="razorpay-currency-select"
+              style="width:100%; padding:0.5rem 0.75rem; border:1.5px solid #3b82f6; border-radius:7px; font-size:0.88rem; font-weight:700; color:#1e3a8a; background:#eff6ff; cursor:pointer;"
+              onchange="handleRazorpayCurrencyChange(this.value)"
+            >
+              <option value="INR" selected>🇮🇳 INR (₹) - Indian Rupee (Default)</option>
+              <option value="USD">🇺🇸 USD ($) - US Dollar</option>
+              <option value="EUR">🇪🇺 EUR (€) - Euro</option>
+              <option value="GBP">🇬🇧 GBP (£) - British Pound</option>
+              <option value="AED">🇦🇪 AED (د.إ) - UAE Dirham</option>
+              <option value="SGD">🇸🇬 SGD (S$) - Singapore Dollar</option>
+            </select>
+            <div style="font-size:0.73rem; color:#64748b; margin-top:0.4rem; display:flex; align-items:center; gap:0.35rem;">
+              <span style="color:#16a34a; font-weight:700;">✓</span>
+              <span>Transactions are settled directly into Tomato's verified HDFC Treasury in Indian Rupees (INR).</span>
             </div>
           </div>
         </div>

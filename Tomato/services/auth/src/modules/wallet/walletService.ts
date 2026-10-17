@@ -24,11 +24,6 @@ export const getOrCreateUserWallet = async (
 ): Promise<IWallet> => {
   let walletDoc = await Wallet.findOne({ userId });
   if (walletDoc) {
-    // If admin has 0 points, ensure default pool of 10,000 points
-    if (walletDoc.role === 'admin' && Number(walletDoc.creditPoint || 0) < 10000) {
-      walletDoc.creditPoint = 10000;
-      await walletDoc.save();
-    }
     return walletDoc;
   }
 
@@ -125,20 +120,27 @@ export const getAdminWalletSnapshot = async (
     }
   }
 
-  const effectiveCreditPoints = Math.max(
-    10000,
-    Number(adminWallet.creditPoint || 0),
-    Number(snapshot?.creditPoint || 0),
-    Number(snapshot?.credit_point || 0),
-    Number(adminDoc?.creditPoint || 0),
-  );
-  const effectiveWalletBalance = Math.max(
-    0,
-    Number(adminWallet.walletBalance || 0),
-    Number(snapshot?.walletBalance || 0),
-    Number(snapshot?.wallet_balance || 0),
-    Number(adminDoc?.walletBalance || 0),
-  );
+  const effectiveCreditPoints =
+    typeof adminWallet?.creditPoint === 'number'
+      ? Math.max(0, adminWallet.creditPoint)
+      : typeof snapshot?.creditPoint === 'number'
+        ? Math.max(0, snapshot.creditPoint)
+        : typeof snapshot?.credit_point === 'number'
+          ? Math.max(0, snapshot.credit_point)
+          : typeof adminDoc?.creditPoint === 'number'
+            ? Math.max(0, adminDoc.creditPoint)
+            : 10000;
+
+  const effectiveWalletBalance =
+    typeof adminWallet?.walletBalance === 'number'
+      ? Math.max(0, adminWallet.walletBalance)
+      : typeof snapshot?.walletBalance === 'number'
+        ? Math.max(0, snapshot.walletBalance)
+        : typeof snapshot?.wallet_balance === 'number'
+          ? Math.max(0, snapshot.wallet_balance)
+          : typeof adminDoc?.walletBalance === 'number'
+            ? Math.max(0, adminDoc.walletBalance)
+            : 0;
 
   // If no snapshot exists at all, auto-initialize
   if (!snapshot) {
@@ -174,25 +176,50 @@ export const getAdminWalletSnapshot = async (
   if (snapshot) {
     if (
       Number(snapshot.credit_point) !== effectiveCreditPoints ||
-      Number(snapshot.creditPoint) !== effectiveCreditPoints
+      Number(snapshot.creditPoint) !== effectiveCreditPoints ||
+      Number(snapshot.wallet_balance) !== effectiveWalletBalance ||
+      Number(snapshot.walletBalance) !== effectiveWalletBalance
     ) {
       snapshot.credit_point = effectiveCreditPoints;
       snapshot.creditPoint = effectiveCreditPoints;
+      snapshot.wallet_balance = effectiveWalletBalance;
+      snapshot.walletBalance = effectiveWalletBalance;
       await WalletCreditTrack.updateOne(
         { _id: snapshot._id },
-        { $set: { credit_point: effectiveCreditPoints, creditPoint: effectiveCreditPoints, snapshotAt: new Date() } },
+        {
+          $set: {
+            credit_point: effectiveCreditPoints,
+            creditPoint: effectiveCreditPoints,
+            wallet_balance: effectiveWalletBalance,
+            walletBalance: effectiveWalletBalance,
+            snapshotAt: new Date(),
+          },
+        },
       );
     }
   }
 
-  if (adminWallet && Number(adminWallet.creditPoint) !== effectiveCreditPoints) {
+  if (
+    adminWallet &&
+    (Number(adminWallet.creditPoint) !== effectiveCreditPoints ||
+      Number(adminWallet.walletBalance) !== effectiveWalletBalance)
+  ) {
     adminWallet.creditPoint = effectiveCreditPoints;
+    adminWallet.walletBalance = effectiveWalletBalance;
     await adminWallet.save();
   }
 
-  if (adminDoc && Number(adminDoc.creditPoint) !== effectiveCreditPoints) {
-    await Employee.updateOne({ _id: adminId }, { $set: { creditPoint: effectiveCreditPoints } });
+  if (
+    adminDoc &&
+    (Number(adminDoc.creditPoint) !== effectiveCreditPoints ||
+      Number(adminDoc.walletBalance) !== effectiveWalletBalance)
+  ) {
+    await Employee.updateOne(
+      { _id: adminId },
+      { $set: { creditPoint: effectiveCreditPoints, walletBalance: effectiveWalletBalance } },
+    );
     adminDoc.creditPoint = effectiveCreditPoints;
+    adminDoc.walletBalance = effectiveWalletBalance;
   }
 
   return snapshot || {

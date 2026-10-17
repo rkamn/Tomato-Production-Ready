@@ -21,7 +21,14 @@ function escapeHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+}
+
+function formatLocalInputDate(d) {
+  if (!d || isNaN(d.getTime())) return '';
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function formatFinanceTimestamp(dateVal) {
@@ -79,6 +86,8 @@ async function fetchAdminFinanceTransfers() {
       limit: String(currentFinanceLimit),
       transferType: currentFinanceType,
       role: currentFinanceRole,
+      today: formatLocalInputDate(new Date()),
+      timezoneOffset: String(new Date().getTimezoneOffset()),
     });
 
     if (currentFinanceSearch) params.append('search', currentFinanceSearch);
@@ -113,6 +122,25 @@ function renderFinanceKPIs(summary) {
   const kpiContainer = document.getElementById('admin-finance-kpis');
   if (!kpiContainer) return;
 
+  const adminWbNum = typeof summary.adminWalletBalance === 'number'
+    ? summary.adminWalletBalance
+    : Number(window.currentWallet?.walletBalance ?? 0);
+  const adminCpNum = typeof summary.adminCreditPoints === 'number'
+    ? summary.adminCreditPoints
+    : Number(window.currentWallet?.creditPoint ?? 10000);
+
+  const adminWb = adminWbNum.toFixed(2);
+  const adminCp = Math.round(adminCpNum).toLocaleString();
+
+  // Keep window.currentWallet and header display in continuous sync with the backend wallet
+  if (window.currentWallet) {
+    window.currentWallet.walletBalance = adminWbNum;
+    window.currentWallet.creditPoint = adminCpNum;
+    if (typeof updateProfileWalletDisplay === 'function') {
+      updateProfileWalletDisplay(adminWbNum, adminCpNum);
+    }
+  }
+
   const totalCredits = summary.totalCreditPointsTransferred ? Number(summary.totalCreditPointsTransferred).toLocaleString() : '0';
   const totalWallet = Number(summary.totalWalletBalanceTransferred || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const totalTrans = Number(summary.totalTransfers || 0).toLocaleString();
@@ -121,55 +149,82 @@ function renderFinanceKPIs(summary) {
   const todayCredits = Number(summary.todayCreditsTransferred || 0).toLocaleString();
 
   kpiContainer.innerHTML = `
-    <div class="stat-card" style="background:#fff; border:1px solid #bfdbfe; border-left:4px solid #3b82f6; padding:1rem; border-radius:10px;">
-      <span class="stat-label" style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; color:#1e40af; font-weight:700;">
-        💳 Total Credit Points Transferred
+    <!-- 1. LIVE ADMIN WALLET BALANCE -->
+    <div class="stat-card" style="background:#fff; border:1px solid #86efac; border-left:4px solid #16a34a; padding:1rem; border-radius:10px;">
+      <span class="stat-label" style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; color:#166534; font-weight:700;">
+        🏛️ Admin Live Wallet Balance
       </span>
-      <div class="stat-value" style="font-size:1.5rem; font-weight:800; color:#2563eb; margin:0.3rem 0;">
-        ${totalCredits} <span style="font-size:0.9rem; font-weight:600;">pts</span>
+      <div class="stat-value" style="font-size:1.55rem; font-weight:800; color:#16a34a; margin:0.3rem 0;">
+        ₹${adminWb}
       </div>
-      <span class="stat-note" style="font-size:0.76rem; color:#1d4ed8;">
-        Today: +${todayCredits} pts transferred
+      <span class="stat-note" style="font-size:0.76rem; color:#15803d; font-weight:600;">
+        🟢 Live synced with 'wallet' table
       </span>
     </div>
 
-    <div class="stat-card" style="background:#fff; border:1px solid #86efac; border-left:4px solid #22c55e; padding:1rem; border-radius:10px;">
-      <span class="stat-label" style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; color:#166534; font-weight:700;">
-        💵 Total Wallet Balance Transferred
+    <!-- 2. LIVE ADMIN CREDIT POINTS POOL -->
+    <div class="stat-card" style="background:#fff; border:1px solid #bfdbfe; border-left:4px solid #2563eb; padding:1rem; border-radius:10px;">
+      <span class="stat-label" style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; color:#1e40af; font-weight:700;">
+        💳 Admin Live Credit Points
       </span>
-      <div class="stat-value" style="font-size:1.5rem; font-weight:800; color:#16a34a; margin:0.3rem 0;">
+      <div class="stat-value" style="font-size:1.55rem; font-weight:800; color:#2563eb; margin:0.3rem 0;">
+        ${adminCp} <span style="font-size:0.9rem; font-weight:600;">pts</span>
+      </div>
+      <span class="stat-note" style="font-size:0.76rem; color:#1d4ed8; font-weight:600;">
+        🔵 Live synced with 'wallet' table
+      </span>
+    </div>
+
+    <!-- 3. TOTAL CREDIT POINTS DISBURSED -->
+    <div class="stat-card" style="background:#fff; border:1px solid #e0e7ff; border-left:4px solid #6366f1; padding:1rem; border-radius:10px;">
+      <span class="stat-label" style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; color:#3730a3; font-weight:700;">
+        📤 Total Points Disbursed
+      </span>
+      <div class="stat-value" style="font-size:1.5rem; font-weight:800; color:#4f46e5; margin:0.3rem 0;">
+        ${totalCredits} <span style="font-size:0.9rem; font-weight:600;">pts</span>
+      </div>
+      <span class="stat-note" style="font-size:0.76rem; color:#4338ca;">
+        Today: +${todayCredits} pts disbursed
+      </span>
+    </div>
+
+    <!-- 4. TOTAL WALLET BALANCE TRANSFERRED -->
+    <div class="stat-card" style="background:#fff; border:1px solid #fed7aa; border-left:4px solid #f97316; padding:1rem; border-radius:10px;">
+      <span class="stat-label" style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; color:#9a3412; font-weight:700;">
+        💸 Total Wallet Settled
+      </span>
+      <div class="stat-value" style="font-size:1.5rem; font-weight:800; color:#ea580c; margin:0.3rem 0;">
         ₹${totalWallet}
       </div>
-      <span class="stat-note" style="font-size:0.76rem; color:#15803d;">
+      <span class="stat-note" style="font-size:0.76rem; color:#c2410c;">
         Today: ₹${todayWallet} settled
       </span>
     </div>
 
-    <div class="stat-card" style="background:#fff; border:1px solid #bae6fd; border-left:4px solid #0284c7; padding:1rem; border-radius:10px;">
-      <span class="stat-label" style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; color:#075985; font-weight:700;">
-        🔄 Total Transactions Logged
-      </span>
-      <div class="stat-value" style="font-size:1.5rem; font-weight:800; color:#0284c7; margin:0.3rem 0;">
-        ${totalTrans}
-      </div>
-      <span class="stat-note" style="font-size:0.76rem; color:#0369a1;">
-        ${todayTrans} transfers recorded today
-      </span>
-    </div>
-
+    <!-- 5. TOTAL TRANSACTIONS AUDITED -->
     <div class="stat-card" style="background:#fff; border:1px solid #e2e8f0; border-left:4px solid #64748b; padding:1rem; border-radius:10px;">
       <span class="stat-label" style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; color:#475569; font-weight:700;">
-        🛡️ Transfer Engine Status
+        🔄 Transfers Audited
       </span>
-      <div class="stat-value" style="font-size:1.15rem; font-weight:800; color:#0f172a; margin:0.4rem 0;">
-        Live Audit Verified
+      <div class="stat-value" style="font-size:1.5rem; font-weight:800; color:#334155; margin:0.3rem 0;">
+        ${totalTrans}
       </div>
       <span class="stat-note" style="font-size:0.76rem; color:#64748b;">
-        Synchronized with 'wallet' table
+        ${todayTrans} transfers recorded today
       </span>
     </div>
   `;
 }
+
+function syncFinanceWithCurrentWallet() {
+  if (window.currentWallet) {
+    if (!financeSummary) financeSummary = {};
+    financeSummary.adminWalletBalance = window.currentWallet.walletBalance;
+    financeSummary.adminCreditPoints = window.currentWallet.creditPoint;
+    renderFinanceKPIs(financeSummary);
+  }
+}
+window.syncFinanceWithCurrentWallet = syncFinanceWithCurrentWallet;
 
 function renderFinanceTypePills() {
   const pillsContainer = document.getElementById('admin-finance-type-pills');
@@ -214,9 +269,30 @@ function handleFinanceRoleChange(role) {
   fetchAdminFinanceTransfers();
 }
 
+function updateFinancePresetButtons(activePreset) {
+  const buttons = document.querySelectorAll('.finance-preset-btn');
+  buttons.forEach((btn) => {
+    const p = btn.getAttribute('data-preset');
+    if (p === activePreset) {
+      btn.classList.remove('btn-outline');
+      btn.classList.add('btn-primary');
+      btn.style.background = 'var(--tomato, #e23744)';
+      btn.style.color = '#fff';
+      btn.style.borderColor = 'var(--tomato, #e23744)';
+    } else {
+      btn.classList.remove('btn-primary');
+      btn.classList.add('btn-outline');
+      btn.style.background = '#fff';
+      btn.style.color = '#475569';
+      btn.style.borderColor = '#cbd5e1';
+    }
+  });
+}
+
 function handleFinanceDateChange() {
   currentFinanceStartDate = document.getElementById('admin-finance-from-date')?.value || '';
   currentFinanceEndDate = document.getElementById('admin-finance-to-date')?.value || '';
+  updateFinancePresetButtons('');
   currentFinancePage = 1;
   fetchAdminFinanceTransfers();
 }
@@ -226,22 +302,21 @@ function setFinanceDatePreset(preset) {
   const toInput = document.getElementById('admin-finance-to-date');
 
   const today = new Date();
-  const formatInputDate = (d) => d.toISOString().split('T')[0];
 
   if (preset === 'today') {
-    const todayStr = formatInputDate(today);
+    const todayStr = formatLocalInputDate(today);
     currentFinanceStartDate = todayStr;
     currentFinanceEndDate = todayStr;
   } else if (preset === '7days') {
     const d = new Date();
     d.setDate(d.getDate() - 7);
-    currentFinanceStartDate = formatInputDate(d);
-    currentFinanceEndDate = formatInputDate(today);
+    currentFinanceStartDate = formatLocalInputDate(d);
+    currentFinanceEndDate = formatLocalInputDate(today);
   } else if (preset === '30days') {
     const d = new Date();
     d.setDate(d.getDate() - 30);
-    currentFinanceStartDate = formatInputDate(d);
-    currentFinanceEndDate = formatInputDate(today);
+    currentFinanceStartDate = formatLocalInputDate(d);
+    currentFinanceEndDate = formatLocalInputDate(today);
   } else if (preset === 'all') {
     currentFinanceStartDate = '';
     currentFinanceEndDate = '';
@@ -249,6 +324,9 @@ function setFinanceDatePreset(preset) {
 
   if (fromInput) fromInput.value = currentFinanceStartDate;
   if (toInput) toInput.value = currentFinanceEndDate;
+
+  updateFinancePresetButtons(preset);
+
   currentFinancePage = 1;
   fetchAdminFinanceTransfers();
 }
@@ -388,13 +466,13 @@ function renderFinanceTable(records) {
         <thead>
           <tr style="background:#f8fafc; border-bottom:2px solid #e2e8f0; color:#475569; font-size:0.74rem; text-transform:uppercase; letter-spacing:0.04em;">
             <th style="padding:0.65rem; font-weight:700;">Timestamp</th>
-            <th style="padding:0.65rem; font-weight:700;">Transfer Type</th>
+            <th style="padding:0.65rem; font-weight:700;">Transfer</th>
             <th style="padding:0.65rem; font-weight:700;">Sender</th>
-            <th style="padding:0.65rem; font-weight:700;">Beneficiary (Receiver)</th>
-            <th style="padding:0.65rem; font-weight:700; text-align:right;">Amount Transferred</th>
-            <th style="padding:0.65rem; font-weight:700;">Sender Balance Snapshot</th>
-            <th style="padding:0.65rem; font-weight:700;">Receiver Balance Snapshot</th>
-            <th style="padding:0.65rem; font-weight:700;">Purpose / Reference</th>
+            <th style="padding:0.65rem; font-weight:700;">Receiver</th>
+            <th style="padding:0.65rem; font-weight:700; text-align:right;">Amt trnsfrd</th>
+            <th style="padding:0.65rem; font-weight:700;" title="Point-in-time balance when this transaction occurred">Sender Bal</th>
+            <th style="padding:0.65rem; font-weight:700;" title="Point-in-time balance when this transaction occurred">Receiver Bal</th>
+            <th style="padding:0.65rem; font-weight:700;">Purpose</th>
           </tr>
         </thead>
         <tbody>
@@ -468,6 +546,8 @@ function resetFinanceFilters() {
   if (toInput) toInput.value = '';
   const searchInput = document.getElementById('admin-finance-search');
   if (searchInput) searchInput.value = '';
+
+  updateFinancePresetButtons('all');
 
   fetchAdminFinanceTransfers();
 }
@@ -604,7 +684,7 @@ function exportAdminFinanceTransfersCSV() {
 
   const headers = [
     'Timestamp',
-    'Transfer Type',
+    'Transfer',
     'Sender Name',
     'Sender User ID',
     'Sender Role',
@@ -649,7 +729,7 @@ function exportAdminFinanceTransfersCSV() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `tomato_finance_transfers_${new Date().toISOString().split('T')[0]}.csv`;
+  a.download = `tomato_finance_transfers_${formatLocalInputDate(new Date())}.csv`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

@@ -2727,10 +2727,21 @@ async function openPaymentGatewayModal() {
     handleUpiInputChange();
   }
 
+  // Ensure INR is always default selected for payment when user is paying via Razorpay
+  const curSelect = document.getElementById('razorpay-currency-select');
+  if (curSelect) {
+    curSelect.value = 'INR';
+  }
+
   switchGatewayTab(selectedPaymentMethod || 'razorpay');
   openModal('payment-gateway-modal');
 }
 window.openPaymentGatewayModal = openPaymentGatewayModal;
+
+function handleRazorpayCurrencyChange(curr) {
+  updateGatewayPayButtonText();
+}
+window.handleRazorpayCurrencyChange = handleRazorpayCurrencyChange;
 
 function switchGatewayTab(tab) {
   selectedPaymentMethod = tab;
@@ -2873,14 +2884,22 @@ async function executePaymentAndOrder() {
         throw new Error(rzpOrderRes.message || 'Unable to initiate Razorpay order');
       }
 
+      const selectedCurrency = document.getElementById('razorpay-currency-select')?.value || 'INR';
+
       const options = {
         key: rzpOrderRes.keyId || 'rzp_test_TjUFioCQLtVxJn',
         amount: rzpOrderRes.amount,
-        currency: rzpOrderRes.currency || 'INR',
+        currency: 'INR',
+        display_currency: selectedCurrency,
+        display_amount: selectedCurrency === 'INR' ? totalAmount : undefined,
         name: 'Tomato Technologies Treasury',
-        description: `Order Payment (₹${totalAmount.toFixed(2)})`,
+        description: `Order Payment (${selectedCurrency === 'INR' ? '₹' : ''}${totalAmount.toFixed(2)}${selectedCurrency !== 'INR' ? ' ' + selectedCurrency : ''})`,
         image: 'https://cdn-icons-png.flaticon.com/512/3075/3075977.png',
         order_id: rzpOrderRes.orderId,
+        notes: {
+          preferred_currency: selectedCurrency,
+          default_currency: 'INR',
+        },
         handler: async function (response) {
           try {
             loadingEl.style.display = 'block';

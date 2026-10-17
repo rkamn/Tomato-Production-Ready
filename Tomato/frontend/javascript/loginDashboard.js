@@ -1129,6 +1129,9 @@ async function refreshProfileWallet() {
       creditPoint: Math.max(0, Number(wallet?.creditPoint ?? 0)),
     };
     updateProfileWalletDisplay(window.currentWallet.walletBalance, window.currentWallet.creditPoint);
+    if (typeof syncFinanceWithCurrentWallet === 'function') {
+      syncFinanceWithCurrentWallet();
+    }
   } catch (error) {
     console.error('Wallet refresh failed:', error);
     showToastNotification({

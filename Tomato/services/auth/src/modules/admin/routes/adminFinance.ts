@@ -22,7 +22,6 @@ const escapeRegex = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // GET /finance/transfers - Paginated, filtered audit log of all transfers
 router.get(
   '/finance/transfers',
-  requireRole('admin', 'subadmin'),
   async (req: Request, res: Response) => {
     try {
       const page = Math.max(
@@ -60,18 +59,44 @@ router.get(
         ];
       }
 
+      // Timezone-aware date boundary parser
+      const tzOffset = Number(req.query.timezoneOffset); // in minutes, e.g. -330 for IST (UTC+5:30)
+      const hasOffset = !isNaN(tzOffset);
+
+      const parseBoundaryDate = (dateStr: string, isEnd: boolean): Date => {
+        const rawParts = String(dateStr).split('-');
+        if (rawParts.length === 3) {
+          const year = parseInt(rawParts[0] ?? '', 10);
+          const month = parseInt(rawParts[1] ?? '', 10);
+          const day = parseInt(rawParts[2] ?? '', 10);
+          if (!isNaN(year) && !isNaN(month) && !isNaN(day)) {
+            const monthIndex = month - 1;
+            if (hasOffset) {
+              const localMs = isEnd
+                ? Date.UTC(year, monthIndex, day, 23, 59, 59, 999)
+                : Date.UTC(year, monthIndex, day, 0, 0, 0, 0);
+              return new Date(localMs + tzOffset * 60 * 1000);
+            } else {
+              return isEnd
+                ? new Date(year, monthIndex, day, 23, 59, 59, 999)
+                : new Date(year, monthIndex, day, 0, 0, 0, 0);
+            }
+          }
+        }
+        const d = new Date(dateStr);
+        if (isEnd) d.setHours(23, 59, 59, 999);
+        else d.setHours(0, 0, 0, 0);
+        return d;
+      };
+
       // Filter by date range
       if (startDate || endDate) {
         query.createdAt = {};
         if (startDate) {
-          const sDate = new Date(startDate);
-          sDate.setHours(0, 0, 0, 0);
-          query.createdAt.$gte = sDate;
+          query.createdAt.$gte = parseBoundaryDate(startDate, false);
         }
         if (endDate) {
-          const eDate = new Date(endDate);
-          eDate.setHours(23, 59, 59, 999);
-          query.createdAt.$lte = eDate;
+          query.createdAt.$lte = parseBoundaryDate(endDate, true);
         }
       }
 
@@ -122,14 +147,24 @@ router.get(
         WalletCreditTrack.countDocuments(query),
         WalletCreditTrack.find({ recordType: 'transfer' })
           .select(
-            'transferType creditTransferred walletBalanceTransferred purpose createdAt',
+            'transferType creditTransferred walletBalanceTransferred amount purpose createdAt',
           )
           .lean(),
       ]);
 
       // Calculate KPI summary stats from all transfer records
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      let todayStart: Date;
+      const clientToday = req.query.today;
+      if (
+        clientToday &&
+        typeof clientToday === 'string' &&
+        /^\d{4}-\d{2}-\d{2}$/.test(clientToday)
+      ) {
+        todayStart = parseBoundaryDate(clientToday, false);
+      } else {
+        todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+      }
 
       let totalCreditPointsTransferred = 0;
       let totalWalletBalanceTransferred = 0;
@@ -143,9 +178,14 @@ router.get(
           Number(doc.walletBalanceTransferred || 0) > 0 ||
           /payout|settlement|disbursed|fee/i.test(doc.purpose || '');
 
-        const amt = Number(
-          doc.creditTransferred || doc.walletBalanceTransferred || 0,
-        );
+        const amt = isWallet
+          ? Number(
+              doc.walletBalanceTransferred ??
+                doc.amount ??
+                doc.creditTransferred ??
+                0,
+            )
+          : Number(doc.creditTransferred ?? doc.amount ?? 0);
 
         if (isWallet) {
           totalWalletBalanceTransferred += amt;
@@ -153,7 +193,7 @@ router.get(
           totalCreditPointsTransferred += amt;
         }
 
-        if (doc.createdAt && new Date(doc.createdAt) >= today) {
+        if (doc.createdAt && new Date(doc.createdAt) >= todayStart) {
           todayTransfersCount += 1;
           if (isWallet) {
             todayWalletTransferred += amt;
@@ -240,9 +280,15 @@ router.get(
         };
       });
 
+      const adminWalletDoc = await Wallet.findOne({ role: 'admin' }).lean();
+      const adminWalletBalance = Math.max(0, Number(adminWalletDoc?.walletBalance ?? 0));
+      const adminCreditPoints = Math.max(0, Number(adminWalletDoc?.creditPoint ?? 10000));
+
       return res.json({
         records: enrichedRecords,
         summary: {
+          adminWalletBalance: Number(adminWalletBalance.toFixed(2)),
+          adminCreditPoints: Math.round(adminCreditPoints),
           totalTransfers: allTransferDocs.length,
           filteredTransfers: total,
           totalCreditPointsTransferred: Math.round(

@@ -25,10 +25,12 @@ import Coupon, {
   CouponType,
   SponsorType,
 } from '../../model/Coupon.js';
+import partnerFinanceRoutes from '../partner/partnerFinanceRoutes.js';
 
 const createShopRouter = () => {
   const router = express.Router();
   router.use(authenticate, requireRole('shop'));
+  router.use('/finance', partnerFinanceRoutes);
 
   // 1. Overview
   router.get('/overview', (req: Request, res: Response) => {

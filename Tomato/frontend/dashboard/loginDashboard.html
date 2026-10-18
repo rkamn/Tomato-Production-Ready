@@ -33,10 +33,10 @@
                   id="admin-credit-transfer-open"
                   type="button"
                   class="btn btn-outline btn-sm"
-                  style="display:none; align-items:center; justify-content:center; flex:0 0 auto; padding:0.25rem; color:#92400e;"
-                  title="Transfer credit points to a user"
-                  aria-label="Transfer credit points to a user"
-                  onclick="openAdminCreditTransferModal()"
+                  style="display:none; align-items:center; justify-content:center; flex:0 0 auto; padding:0.25rem; color:#92400e; cursor:pointer;"
+                  title="Transfer Funds / Points"
+                  aria-label="Transfer Funds / Points"
+                  onclick="if (typeof handleSidebarTransferClick === 'function') { handleSidebarTransferClick(); } else if (typeof openAdminFinanceTransferModal === 'function') { openAdminFinanceTransferModal(); }"
                 >
                   <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M14 3h7v7"></path>
@@ -1737,6 +1737,15 @@
                 </button>
                 <button
                   type="button"
+                  class="btn btn-outline btn-sm"
+                  onclick="openAdminFinanceReportModal()"
+                  style="display:inline-flex; align-items:center; gap:0.35rem;"
+                  title="View and print financial settlement report"
+                >
+                  <span>📊 Report</span>
+                </button>
+                <button
+                  type="button"
                   class="btn btn-primary btn-sm"
                   onclick="openAdminFinanceTransferModal()"
                   style="display:inline-flex; align-items:center; gap:0.35rem;"
@@ -2608,6 +2617,143 @@
                 </button>
               </div>
             </form>
+          </div>
+        </section>
+
+        <!-- =========================================================================
+             VIEW 18.5: PARTNER FINANCE & TRANSFER AUDIT LEDGER PANEL (SHOP / RESTAURANT)
+             ========================================================================= -->
+        <section id="partner-finance-view" class="view-section">
+          <div class="panel-card" style="margin-bottom:1.25rem;">
+            <div class="panel-header" style="flex-wrap:wrap; gap:1rem; align-items:flex-start;">
+              <div>
+                <h2 class="panel-title" style="display:flex; align-items:center; gap:0.55rem; flex-wrap:wrap;">
+                  <span>💰 Finance &amp; Transfer Ledger</span>
+                  <span class="badge" style="background:#e0f2fe; color:#0369a1; font-size:0.74rem; padding:0.2rem 0.65rem; border:1px solid #bae6fd;">Store Audit Trail</span>
+                </h2>
+                <p style="font-size:0.84rem; color:var(--muted); margin-top:0.2rem;">
+                  Real-time tracking of store credit points and wallet balance transfers with exact timestamps, balance snapshots, and reference purposes.
+                </p>
+              </div>
+              <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
+                <button
+                  type="button"
+                  class="btn btn-outline btn-sm"
+                  onclick="fetchPartnerFinanceTransfers()"
+                  title="Reload transfers ledger"
+                >
+                  ↻ Refresh
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-outline btn-sm"
+                  onclick="exportPartnerFinanceTransfersCSV()"
+                  title="Export transfers as CSV"
+                >
+                  📥 Export CSV
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-primary btn-sm"
+                  onclick="openPartnerFinanceTransferModal()"
+                  style="display:inline-flex; align-items:center; gap:0.35rem;"
+                >
+                  <span>💸 Transfer Funds / Points</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- KPI Summary Cards -->
+            <div id="partner-finance-kpis" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:0.85rem; margin-bottom:1.25rem;">
+              <!-- Rendered via JS -->
+            </div>
+
+            <!-- Filter Pills Row -->
+            <div id="partner-finance-type-pills" style="margin-bottom:0.85rem;">
+              <!-- Rendered via JS -->
+            </div>
+
+            <!-- Toolbar & Filter Controls -->
+            <div style="display:flex; align-items:center; gap:0.45rem; flex-wrap:wrap; margin-bottom:1rem; background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:0.55rem 0.75rem;">
+              <!-- Role Filter -->
+              <div style="display:inline-flex; align-items:center; gap:0.3rem;">
+                <label for="partner-finance-role-filter" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0;">Role:</label>
+                <select
+                  id="partner-finance-role-filter"
+                  style="padding:0.22rem 0.45rem; border:1px solid #cbd5e1; border-radius:6px; font-size:0.78rem; height:28px; background:#fff;"
+                  onchange="handlePartnerFinanceRoleChange(this.value)"
+                >
+                  <option value="all">All Roles</option>
+                  <option value="admin">Platform Admin</option>
+                  <option value="restaurant">Restaurants</option>
+                  <option value="shop">Shops</option>
+                  <option value="deliveryPartner">Riders</option>
+                  <option value="customer">Customers</option>
+                  <option value="subadmin">Sub-Admins</option>
+                </select>
+              </div>
+
+              <!-- Date From -->
+              <div style="display:inline-flex; align-items:center; gap:0.3rem;">
+                <label for="partner-finance-from-date" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0;">From:</label>
+                <input
+                  type="date"
+                  id="partner-finance-from-date"
+                  style="padding:0.2rem 0.4rem; border:1px solid #cbd5e1; border-radius:6px; font-size:0.78rem; height:28px; background:#fff;"
+                  onchange="handlePartnerFinanceDateChange()"
+                />
+              </div>
+
+              <!-- Date To -->
+              <div style="display:inline-flex; align-items:center; gap:0.3rem;">
+                <label for="partner-finance-to-date" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0;">To:</label>
+                <input
+                  type="date"
+                  id="partner-finance-to-date"
+                  style="padding:0.2rem 0.4rem; border:1px solid #cbd5e1; border-radius:6px; font-size:0.78rem; height:28px; background:#fff;"
+                  onchange="handlePartnerFinanceDateChange()"
+                />
+              </div>
+
+              <!-- Quick Presets -->
+              <div id="partner-finance-preset-buttons" style="display:inline-flex; align-items:center; gap:0.25rem;">
+                <button type="button" class="btn btn-sm btn-outline partner-finance-preset-btn" data-preset="today" style="padding:0.18rem 0.45rem; font-size:0.73rem; height:28px;" onclick="setPartnerFinanceDatePreset('today')">Today</button>
+                <button type="button" class="btn btn-sm btn-outline partner-finance-preset-btn" data-preset="7days" style="padding:0.18rem 0.45rem; font-size:0.73rem; height:28px;" onclick="setPartnerFinanceDatePreset('7days')">7 Days</button>
+                <button type="button" class="btn btn-sm btn-outline partner-finance-preset-btn" data-preset="30days" style="padding:0.18rem 0.45rem; font-size:0.73rem; height:28px;" onclick="setPartnerFinanceDatePreset('30days')">30 Days</button>
+                <button type="button" class="btn btn-sm btn-primary partner-finance-preset-btn" data-preset="all" style="padding:0.18rem 0.45rem; font-size:0.73rem; height:28px; background:var(--tomato, #e23744); color:#fff; border-color:var(--tomato, #e23744);" onclick="setPartnerFinanceDatePreset('all')">All Time</button>
+              </div>
+
+              <!-- Search -->
+              <div style="display:inline-flex; align-items:center; gap:0.3rem; margin-left:auto;">
+                <label for="partner-finance-search" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0;">Search:</label>
+                <input
+                  type="text"
+                  id="partner-finance-search"
+                  placeholder="ID, Name, Order #, Purpose..."
+                  style="padding:0.22rem 0.5rem; border:1px solid #cbd5e1; border-radius:6px; font-size:0.78rem; height:28px; width:180px; background:#fff;"
+                  oninput="handlePartnerFinanceSearchInput(this.value)"
+                />
+                <button
+                  type="button"
+                  class="btn btn-sm"
+                  style="padding:0.15rem 0.4rem; font-size:0.72rem; border:none; background:transparent; color:var(--muted); cursor:pointer;"
+                  onclick="clearPartnerFinanceSearch()"
+                  title="Clear search"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <!-- Transfers Table Container -->
+            <div id="partner-finance-table-container">
+              <!-- Rendered via JS -->
+            </div>
+
+            <!-- Pagination Bar -->
+            <div id="partner-finance-pagination-bar" style="margin-top:1rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+              <!-- Rendered via JS -->
+            </div>
           </div>
         </section>
 
@@ -4740,11 +4886,11 @@
          ADMIN: FINANCE TRANSFER MODAL (CREDIT POINTS OR WALLET BALANCE)
          ========================================================================= -->
     <div id="admin-finance-transfer-modal" class="modal-overlay">
-      <div class="modal-card" style="max-width:520px; width:92%;">
-        <div class="modal-header">
+      <div class="modal-box" style="max-width:540px; width:92%; background:#ffffff; border:1px solid #e2e8f0; border-radius:14px; box-shadow:0 25px 65px rgba(0,0,0,0.25); padding:1.6rem; color:#0f172a;">
+        <div class="modal-header" style="border-bottom:1px solid #e2e8f0; margin-bottom:1.2rem; padding-bottom:0.8rem;">
           <div>
             <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--tomato); font-weight:700;">💸 Platform Treasury &amp; Points</span>
-            <h2 style="font-size:1.25rem; margin-top:0.2rem;">Transfer Funds / Credit Points</h2>
+            <h2 style="font-size:1.25rem; margin-top:0.2rem; color:#0f172a; font-weight:800;">Transfer Funds / Credit Points</h2>
           </div>
           <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('admin-finance-transfer-modal')">&times;</button>
         </div>
@@ -4753,18 +4899,18 @@
           <div class="form-group" style="margin-bottom:0.85rem;">
             <label style="font-size:0.82rem; font-weight:600; margin-bottom:0.35rem; display:block;">Transfer Type *</label>
             <div style="display:flex; gap:0.6rem;">
-              <label style="flex:1; display:flex; align-items:center; gap:0.45rem; padding:0.55rem 0.75rem; border:1px solid #cbd5e1; border-radius:8px; cursor:pointer; background:#f8fafc;" id="finance-type-label-credit">
+              <label style="flex:1; display:flex; align-items:center; gap:0.45rem; padding:0.55rem 0.75rem; border:1px solid #93c5fd; border-radius:8px; cursor:pointer; background:#eff6ff; color:#1e40af; font-weight:600; transition:all 0.15s ease;" id="finance-type-label-credit">
                 <input type="radio" name="financeTransferType" value="credit_point" checked onchange="handleFinanceModalTypeChange()" />
-                <span style="font-size:0.84rem; font-weight:600;">💳 Credit Points</span>
+                <span style="font-size:0.84rem; font-weight:700;">💳 Credit Points</span>
               </label>
-              <label style="flex:1; display:flex; align-items:center; gap:0.45rem; padding:0.55rem 0.75rem; border:1px solid #cbd5e1; border-radius:8px; cursor:pointer; background:#fff;" id="finance-type-label-wallet">
+              <label style="flex:1; display:flex; align-items:center; gap:0.45rem; padding:0.55rem 0.75rem; border:1px solid #cbd5e1; border-radius:8px; cursor:pointer; background:#fff; color:#475569; font-weight:600; transition:all 0.15s ease;" id="finance-type-label-wallet">
                 <input type="radio" name="financeTransferType" value="wallet_balance" onchange="handleFinanceModalTypeChange()" />
-                <span style="font-size:0.84rem; font-weight:600;">💵 Wallet Balance (₹)</span>
+                <span style="font-size:0.84rem; font-weight:700;">💵 Wallet Balance (₹)</span>
               </label>
             </div>
           </div>
 
-          <div id="admin-finance-available-balance-badge" style="background:#fef3c7; border:1px solid #facc15; border-radius:8px; padding:0.5rem 0.8rem; margin-bottom:0.85rem; font-size:0.82rem; color:#92400e; font-weight:600; display:flex; justify-content:space-between; align-items:center;">
+          <div id="admin-finance-available-balance-badge" style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:0.5rem 0.8rem; margin-bottom:0.85rem; font-size:0.82rem; color:#1e40af; font-weight:600; display:flex; justify-content:space-between; align-items:center; transition:all 0.15s ease;">
             <span>Admin Available:</span>
             <span id="admin-finance-available-display">Loading...</span>
           </div>
@@ -4778,9 +4924,6 @@
               placeholder="e.g. cust-1001, rest-1002, ride-1003, or user ID"
               required
             />
-            <small style="display:block; color:var(--muted); font-size:0.75rem; margin-top:0.25rem;">
-              Accepts prefixed Account ID, MongoDB ID, registered phone number, or email.
-            </small>
           </div>
 
           <div class="form-group" style="margin-bottom:0.85rem;">
@@ -4825,6 +4968,136 @@
       </div>
     </div>
 
+    <!-- =========================================================================
+         ADMIN: FINANCE AUDIT & SETTLEMENT REPORT MODAL
+         ========================================================================= -->
+    <div id="admin-finance-report-modal" class="modal-overlay">
+      <div class="modal-card" style="max-width:900px; width:95%; max-height:92vh; display:flex; flex-direction:column; padding:0; overflow:hidden; background:#fff; border-radius:12px; box-shadow:0 20px 45px rgba(0,0,0,0.2);">
+        <!-- Modal Top Bar -->
+        <div class="modal-header" style="padding:1rem 1.4rem; border-bottom:1px solid #e2e8f0; background:#f8fafc; display:flex; justify-content:space-between; align-items:center;">
+          <div style="display:flex; align-items:center; gap:0.65rem;">
+            <div style="width:38px; height:38px; border-radius:8px; background:linear-gradient(135deg, #e23744, #f97316); display:flex; align-items:center; justify-content:center; color:#fff; font-size:1.25rem;">
+              📊
+            </div>
+            <div>
+              <h2 style="font-size:1.15rem; margin:0; color:#0f172a; font-weight:800;">Treasury Finance &amp; Settlement Audit Report</h2>
+              <span style="font-size:0.75rem; color:#64748b;">Official platform financial statement, fund settlements, and credit disbursements.</span>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:0.5rem;">
+            <button type="button" class="btn btn-outline btn-sm" onclick="printAdminFinanceReport()" style="display:inline-flex; align-items:center; gap:0.3rem;">
+              🖨️ Print / PDF
+            </button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="exportAdminFinanceTransfersCSV()" style="display:inline-flex; align-items:center; gap:0.3rem;">
+              📥 Export CSV
+            </button>
+            <button type="button" class="modal-close" aria-label="Close" onclick="closeAdminFinanceReportModal()" style="position:static; margin-left:0.4rem;">&times;</button>
+          </div>
+        </div>
+
+        <!-- Scrollable Report Content Area -->
+        <div id="admin-finance-report-printable" style="padding:1.4rem; overflow-y:auto; flex:1; background:#fff;">
+          <div id="admin-finance-report-content">
+            <!-- Dynamically populated via renderAdminFinanceReportContent() -->
+          </div>
+        </div>
+
+        <!-- Modal Footer -->
+        <div style="padding:0.75rem 1.4rem; border-top:1px solid #e2e8f0; background:#f8fafc; display:flex; justify-content:space-between; align-items:center;">
+          <span style="font-size:0.75rem; color:#64748b;">
+            🔒 Verified by Tomato Central Financial Ledger System
+          </span>
+          <button type="button" class="btn btn-outline btn-sm" onclick="closeAdminFinanceReportModal()">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- =========================================================================
+         PARTNER: FINANCE TRANSFER MODAL (CREDIT POINTS OR WALLET BALANCE)
+         ========================================================================= -->
+    <div id="partner-finance-transfer-modal" class="modal-overlay">
+      <div class="modal-box" style="max-width:540px; width:92%; background:#ffffff; border:1px solid #e2e8f0; border-radius:14px; box-shadow:0 25px 65px rgba(0,0,0,0.25); padding:1.6rem; color:#0f172a;">
+        <div class="modal-header" style="border-bottom:1px solid #e2e8f0; margin-bottom:1.2rem; padding-bottom:0.8rem;">
+          <div>
+            <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--tomato); font-weight:700;">💸 Store Treasury &amp; Points</span>
+            <h2 style="font-size:1.25rem; margin-top:0.2rem; color:#0f172a; font-weight:800;">Transfer Funds / Credit Points</h2>
+          </div>
+          <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('partner-finance-transfer-modal')">&times;</button>
+        </div>
+
+        <form id="partner-finance-transfer-form" onsubmit="submitPartnerFinanceTransfer(event)">
+          <div class="form-group" style="margin-bottom:0.85rem;">
+            <label style="font-size:0.82rem; font-weight:600; margin-bottom:0.35rem; display:block;">Transfer Type *</label>
+            <div style="display:flex; gap:0.6rem;">
+              <label style="flex:1; display:flex; align-items:center; gap:0.45rem; padding:0.55rem 0.75rem; border:1px solid #93c5fd; border-radius:8px; cursor:pointer; background:#eff6ff; color:#1e40af; font-weight:600; transition:all 0.15s ease;" id="partner-finance-type-label-credit">
+                <input type="radio" name="partnerFinanceTransferType" value="credit_point" checked onchange="handlePartnerFinanceModalTypeChange()" />
+                <span style="font-size:0.84rem; font-weight:700;">💳 Credit Points</span>
+              </label>
+              <label style="flex:1; display:flex; align-items:center; gap:0.45rem; padding:0.55rem 0.75rem; border:1px solid #cbd5e1; border-radius:8px; cursor:pointer; background:#fff; color:#475569; font-weight:600; transition:all 0.15s ease;" id="partner-finance-type-label-wallet">
+                <input type="radio" name="partnerFinanceTransferType" value="wallet_balance" onchange="handlePartnerFinanceModalTypeChange()" />
+                <span style="font-size:0.84rem; font-weight:700;">💵 Wallet Balance (₹)</span>
+              </label>
+            </div>
+          </div>
+
+          <div id="partner-finance-available-balance-badge" style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:0.5rem 0.8rem; margin-bottom:0.85rem; font-size:0.82rem; color:#1e40af; font-weight:600; display:flex; justify-content:space-between; align-items:center; transition:all 0.15s ease;">
+            <span>Store Available:</span>
+            <span id="partner-finance-available-display">Loading...</span>
+          </div>
+
+          <div class="form-group" style="margin-bottom:0.85rem;">
+            <label for="partner-finance-recipient-id">Recipient Account ID / User ID / Mobile *</label>
+            <input
+              type="text"
+              id="partner-finance-recipient-id"
+              class="form-control"
+              placeholder="e.g. cust-1001, rest-1002, ride-1003, or user ID"
+              required
+            />
+          </div>
+
+          <div class="form-group" style="margin-bottom:0.85rem;">
+            <label id="partner-finance-amount-label" for="partner-finance-amount">Amount (Points) *</label>
+            <input
+              type="number"
+              id="partner-finance-amount"
+              class="form-control"
+              min="1"
+              step="1"
+              placeholder="e.g. 500"
+              required
+            />
+          </div>
+
+          <div class="form-group" style="margin-bottom:0.85rem;">
+            <label for="partner-finance-purpose">Transfer Purpose / Reason *</label>
+            <textarea
+              id="partner-finance-purpose"
+              class="form-control"
+              rows="2"
+              placeholder="e.g. Promotional credits, Order resolution, Performance incentive"
+              required
+            ></textarea>
+          </div>
+
+          <div class="form-group" style="margin-bottom:1.25rem;">
+            <label for="partner-finance-order-number">Linked Order Number (Optional)</label>
+            <input
+              type="text"
+              id="partner-finance-order-number"
+              class="form-control"
+              placeholder="e.g. 1005"
+            />
+          </div>
+
+          <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:0.6rem;">
+            <button type="button" class="btn btn-outline" onclick="closeModal('partner-finance-transfer-modal')">Cancel</button>
+            <button type="submit" id="partner-finance-submit-btn" class="btn btn-primary">💸 Process Transfer</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
     <!-- WEBSOCKET LIVE RIDER TRACKING -->
     <script src="../javascript/websocket.js"></script>
@@ -4840,6 +5113,7 @@
     <script src="../javascript/modules/adminCoupons.js"></script>
     <script src="../javascript/modules/adminBank.js"></script>
     <script src="../javascript/modules/adminFinance.js"></script>
+    <script src="../javascript/modules/partnerFinance.js"></script>
     <script src="../javascript/modules/partnerBilling.js"></script>
     <!-- APPLICATION BOOTSTRAP -->
     <script>

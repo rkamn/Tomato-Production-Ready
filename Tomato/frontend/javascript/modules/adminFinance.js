@@ -31,6 +31,15 @@ function formatLocalInputDate(d) {
   return `${year}-${month}-${day}`;
 }
 
+function formatNumber(val, decimals = 2) {
+  const n = Number(val || 0);
+  if (isNaN(n)) return '0';
+  return n.toLocaleString('en-IN', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
+
 function formatFinanceTimestamp(dateVal) {
   if (!dateVal) return '—';
   const d = new Date(dateVal);
@@ -183,9 +192,17 @@ function renderFinanceKPIs(summary) {
       <div class="stat-value" style="font-size:1.5rem; font-weight:800; color:#4f46e5; margin:0.3rem 0;">
         ${totalCredits} <span style="font-size:0.9rem; font-weight:600;">pts</span>
       </div>
-      <span class="stat-note" style="font-size:0.76rem; color:#4338ca;">
-        Today: +${todayCredits} pts disbursed
-      </span>
+      <div
+        class="stat-note stat-today-clickable"
+        onclick="filterFinanceByToday('credit_point')"
+        title="Click to view today's disbursed credit points in ledger"
+        style="font-size:0.76rem; color:#4338ca; cursor:pointer; display:inline-flex; align-items:center; gap:0.25rem; padding:0.2rem 0.5rem; border-radius:6px; background:#eef2ff; border:1px solid #c7d2fe; font-weight:600; margin-top:0.2rem; transition:all 0.15s ease;"
+        onmouseover="this.style.background='#e0e7ff'; this.style.borderColor='#818cf8';"
+        onmouseout="this.style.background='#eef2ff'; this.style.borderColor='#c7d2fe';"
+      >
+        <span>Today: +${todayCredits} pts disbursed</span>
+        <span style="font-size:0.75rem; font-weight:bold;">↗</span>
+      </div>
     </div>
 
     <!-- 4. TOTAL WALLET BALANCE TRANSFERRED -->
@@ -196,9 +213,17 @@ function renderFinanceKPIs(summary) {
       <div class="stat-value" style="font-size:1.5rem; font-weight:800; color:#ea580c; margin:0.3rem 0;">
         ₹${totalWallet}
       </div>
-      <span class="stat-note" style="font-size:0.76rem; color:#c2410c;">
-        Today: ₹${todayWallet} settled
-      </span>
+      <div
+        class="stat-note stat-today-clickable"
+        onclick="filterFinanceByToday('wallet_balance')"
+        title="Click to view today's settled wallet transfers in ledger"
+        style="font-size:0.76rem; color:#c2410c; cursor:pointer; display:inline-flex; align-items:center; gap:0.25rem; padding:0.2rem 0.5rem; border-radius:6px; background:#fff7ed; border:1px solid #fed7aa; font-weight:600; margin-top:0.2rem; transition:all 0.15s ease;"
+        onmouseover="this.style.background='#ffedd5'; this.style.borderColor='#fb923c';"
+        onmouseout="this.style.background='#fff7ed'; this.style.borderColor='#fed7aa';"
+      >
+        <span>Today: ₹${todayWallet} settled</span>
+        <span style="font-size:0.75rem; font-weight:bold;">↗</span>
+      </div>
     </div>
 
     <!-- 5. TOTAL TRANSACTIONS AUDITED -->
@@ -209,9 +234,17 @@ function renderFinanceKPIs(summary) {
       <div class="stat-value" style="font-size:1.5rem; font-weight:800; color:#334155; margin:0.3rem 0;">
         ${totalTrans}
       </div>
-      <span class="stat-note" style="font-size:0.76rem; color:#64748b;">
-        ${todayTrans} transfers recorded today
-      </span>
+      <div
+        class="stat-note stat-today-clickable"
+        onclick="filterFinanceByToday('all')"
+        title="Click to view all transfers recorded today in ledger"
+        style="font-size:0.76rem; color:#475569; cursor:pointer; display:inline-flex; align-items:center; gap:0.25rem; padding:0.2rem 0.5rem; border-radius:6px; background:#f8fafc; border:1px solid #e2e8f0; font-weight:600; margin-top:0.2rem; transition:all 0.15s ease;"
+        onmouseover="this.style.background='#f1f5f9'; this.style.borderColor='#94a3b8';"
+        onmouseout="this.style.background='#f8fafc'; this.style.borderColor='#e2e8f0';"
+      >
+        <span>${todayTrans} transfers recorded today</span>
+        <span style="font-size:0.75rem; font-weight:bold;">↗</span>
+      </div>
     </div>
   `;
 }
@@ -325,10 +358,41 @@ function setFinanceDatePreset(preset) {
   if (fromInput) fromInput.value = currentFinanceStartDate;
   if (toInput) toInput.value = currentFinanceEndDate;
 
-  updateFinancePresetButtons(preset);
-
   currentFinancePage = 1;
   fetchAdminFinanceTransfers();
+}
+
+function filterFinanceByToday(type = 'all') {
+  currentFinanceType = type;
+  const todayStr = formatLocalInputDate(new Date());
+  currentFinanceStartDate = todayStr;
+  currentFinanceEndDate = todayStr;
+
+  const fromInput = document.getElementById('admin-finance-from-date');
+  const toInput = document.getElementById('admin-finance-to-date');
+  if (fromInput) fromInput.value = todayStr;
+  if (toInput) toInput.value = todayStr;
+
+  updateFinancePresetButtons('today');
+
+  currentFinanceRole = 'all';
+  const roleSelect = document.getElementById('admin-finance-role-filter');
+  if (roleSelect) roleSelect.value = 'all';
+
+  currentFinanceSearch = '';
+  const searchInput = document.getElementById('admin-finance-search');
+  if (searchInput) searchInput.value = '';
+
+  currentFinancePage = 1;
+
+  fetchAdminFinanceTransfers();
+
+  setTimeout(() => {
+    const tableEl = document.getElementById('admin-finance-table-container');
+    if (tableEl) {
+      tableEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, 120);
 }
 
 function handleFinanceSearchInput(val) {
@@ -552,15 +616,41 @@ function resetFinanceFilters() {
   fetchAdminFinanceTransfers();
 }
 
-function openAdminFinanceTransferModal() {
+function openAdminFinanceTransferModal(recipientId = '', transferType = 'credit_point') {
   const modal = document.getElementById('admin-finance-transfer-modal');
   if (!modal) return;
 
   const form = document.getElementById('admin-finance-transfer-form');
   if (form) form.reset();
 
+  if (transferType === 'wallet_balance') {
+    const radio = document.querySelector('input[name="financeTransferType"][value="wallet_balance"]');
+    if (radio) radio.checked = true;
+  } else {
+    const radio = document.querySelector('input[name="financeTransferType"][value="credit_point"]');
+    if (radio) radio.checked = true;
+  }
+
+  if (recipientId) {
+    const recInput = document.getElementById('admin-finance-recipient-id');
+    if (recInput) recInput.value = recipientId;
+  }
+
   handleFinanceModalTypeChange();
-  modal.classList.add('active');
+
+  if (typeof openModal === 'function') {
+    openModal('admin-finance-transfer-modal');
+  }
+  modal.classList.add('visible');
+  modal.style.display = 'grid';
+
+  setTimeout(() => {
+    if (recipientId) {
+      document.getElementById('admin-finance-amount')?.focus();
+    } else {
+      document.getElementById('admin-finance-recipient-id')?.focus();
+    }
+  }, 100);
 }
 
 function handleFinanceModalTypeChange() {
@@ -568,6 +658,7 @@ function handleFinanceModalTypeChange() {
   const amountLabel = document.getElementById('admin-finance-amount-label');
   const amountInput = document.getElementById('admin-finance-amount');
   const availableDisplay = document.getElementById('admin-finance-available-display');
+  const availableBadge = document.getElementById('admin-finance-available-balance-badge');
   const creditLabel = document.getElementById('finance-type-label-credit');
   const walletLabel = document.getElementById('finance-type-label-wallet');
 
@@ -580,8 +671,25 @@ function handleFinanceModalTypeChange() {
     }
     const currentWb = Number(window.currentWallet?.walletBalance ?? 0).toFixed(2);
     if (availableDisplay) availableDisplay.textContent = `₹${currentWb}`;
-    if (creditLabel) creditLabel.style.background = '#fff';
-    if (walletLabel) walletLabel.style.background = '#f0fdf4';
+
+    // WALLET BALANCE selected -> light green background
+    if (walletLabel) {
+      walletLabel.style.background = '#f0fdf4';
+      walletLabel.style.borderColor = '#86efac';
+      walletLabel.style.color = '#166534';
+      walletLabel.style.boxShadow = '0 0 0 1px #86efac';
+    }
+    if (creditLabel) {
+      creditLabel.style.background = '#ffffff';
+      creditLabel.style.borderColor = '#cbd5e1';
+      creditLabel.style.color = '#475569';
+      creditLabel.style.boxShadow = 'none';
+    }
+    if (availableBadge) {
+      availableBadge.style.background = '#f0fdf4';
+      availableBadge.style.borderColor = '#bbf7d0';
+      availableBadge.style.color = '#166534';
+    }
   } else {
     if (amountLabel) amountLabel.textContent = 'Transfer Amount (Credit Points) *';
     if (amountInput) {
@@ -591,8 +699,25 @@ function handleFinanceModalTypeChange() {
     }
     const currentCp = Math.round(Number(window.currentWallet?.creditPoint ?? 0)).toLocaleString();
     if (availableDisplay) availableDisplay.textContent = `${currentCp} points`;
-    if (creditLabel) creditLabel.style.background = '#fef3c7';
-    if (walletLabel) walletLabel.style.background = '#fff';
+
+    // CREDIT POINTS selected -> light blue background
+    if (creditLabel) {
+      creditLabel.style.background = '#eff6ff';
+      creditLabel.style.borderColor = '#93c5fd';
+      creditLabel.style.color = '#1e40af';
+      creditLabel.style.boxShadow = '0 0 0 1px #93c5fd';
+    }
+    if (walletLabel) {
+      walletLabel.style.background = '#ffffff';
+      walletLabel.style.borderColor = '#cbd5e1';
+      walletLabel.style.color = '#475569';
+      walletLabel.style.boxShadow = 'none';
+    }
+    if (availableBadge) {
+      availableBadge.style.background = '#eff6ff';
+      availableBadge.style.borderColor = '#bfdbfe';
+      availableBadge.style.color = '#1e40af';
+    }
   }
 }
 
@@ -736,6 +861,308 @@ function exportAdminFinanceTransfersCSV() {
   URL.revokeObjectURL(url);
 }
 
+function openAdminFinanceReportModal() {
+  const modal = document.getElementById('admin-finance-report-modal');
+  if (!modal) {
+    console.warn('[AdminFinance] Report modal not found: admin-finance-report-modal');
+    return;
+  }
+
+  try {
+    renderAdminFinanceReportContent();
+  } catch (err) {
+    console.error('[AdminFinance] Error rendering report content:', err);
+  }
+
+  if (typeof openModal === 'function') {
+    openModal('admin-finance-report-modal');
+  }
+  modal.classList.add('visible');
+  modal.style.display = 'grid';
+}
+
+function closeAdminFinanceReportModal() {
+  const modal = document.getElementById('admin-finance-report-modal');
+  if (modal) {
+    modal.classList.remove('visible');
+    modal.style.display = 'none';
+  }
+  if (typeof closeModal === 'function') {
+    closeModal('admin-finance-report-modal');
+  }
+}
+
+function printAdminFinanceReport() {
+  const content = document.getElementById('admin-finance-report-content');
+  if (!content) {
+    window.print();
+    return;
+  }
+
+  // Ensure latest figures and calculations are populated
+  try {
+    renderAdminFinanceReportContent();
+  } catch (err) {
+    console.error('[AdminFinance] Error updating report content before print:', err);
+  }
+
+  try {
+    let iframe = document.getElementById('admin-finance-print-iframe');
+    if (!iframe) {
+      iframe = document.createElement('iframe');
+      iframe.id = 'admin-finance-print-iframe';
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      iframe.style.visibility = 'hidden';
+      document.body.appendChild(iframe);
+    }
+
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Treasury Finance &amp; Settlement Audit Report - Lightbits Infotech</title>
+          <style>
+            * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+            body { margin: 0; padding: 24px; color: #0f172a; background: #ffffff; font-size: 12px; }
+            table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 8px; }
+            th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; }
+            th { background: #f8fafc; font-weight: 700; }
+            .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-weight: 600; font-size: 10px; }
+            @page {
+              margin: 12mm;
+              size: auto;
+            }
+            @media print {
+              body { padding: 0; }
+              table { page-break-inside: auto; }
+              tr { page-break-inside: avoid; page-break-after: auto; }
+              thead { display: table-header-group; }
+            }
+          </style>
+        </head>
+        <body>
+          ${content.innerHTML}
+        </body>
+      </html>
+    `);
+    doc.close();
+
+    setTimeout(() => {
+      try {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+      } catch (err) {
+        console.warn('[AdminFinance] Iframe print failed, falling back to window.print():', err);
+        window.print();
+      }
+    }, 250);
+  } catch (err) {
+    console.warn('[AdminFinance] Print handler error, falling back to window.print():', err);
+    window.print();
+  }
+}
+
+function renderAdminFinanceReportContent() {
+  const container = document.getElementById('admin-finance-report-content');
+  if (!container) return;
+
+  const s = financeSummary || {};
+  const transfers = cachedFinanceTransfers || [];
+
+  const adminWallet = formatNumber(s.adminWalletBalance || 0, 2);
+  const adminCredits = formatNumber(s.adminCreditPoints || 0, 0);
+  const totalSettled = formatNumber(s.totalWalletBalanceTransferred || 0, 2);
+  const totalCredits = formatNumber(s.totalCreditPointsTransferred || 0, 0);
+  const todayWallet = formatNumber(s.todayWalletTransferred || 0, 2);
+  const todayCredits = formatNumber(s.todayCreditsTransferred || 0, 0);
+
+  const genDate = new Date().toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  });
+
+  const periodLabel = currentFinanceStartDate || currentFinanceEndDate
+    ? `From ${currentFinanceStartDate || 'Earliest'} to ${currentFinanceEndDate || 'Latest'}`
+    : 'All Time Historical';
+
+  // Calculate Breakdown by Beneficiary Role
+  const roleBreakdown = {
+    customer: { count: 0, wallet: 0, credits: 0, label: 'Customers' },
+    restaurant: { count: 0, wallet: 0, credits: 0, label: 'Restaurants' },
+    shop: { count: 0, wallet: 0, credits: 0, label: 'Shops' },
+    rider: { count: 0, wallet: 0, credits: 0, label: 'Delivery Riders' },
+    admin: { count: 0, wallet: 0, credits: 0, label: 'Platform Admins' },
+    other: { count: 0, wallet: 0, credits: 0, label: 'Other Accounts' },
+  };
+
+  transfers.forEach((t) => {
+    const rawRole = String(t.receiverRole || '').toLowerCase();
+    const isW = t.transferType === 'wallet_balance';
+    const amt = Number(t.amount || 0);
+    let key = 'other';
+    if (rawRole.includes('rest')) key = 'restaurant';
+    else if (rawRole.includes('shop')) key = 'shop';
+    else if (rawRole.includes('ride') || rawRole.includes('deliver')) key = 'rider';
+    else if (rawRole.includes('cust')) key = 'customer';
+    else if (rawRole.includes('admin')) key = 'admin';
+
+    roleBreakdown[key].count += 1;
+    if (isW) roleBreakdown[key].wallet += amt;
+    else roleBreakdown[key].credits += amt;
+  });
+
+  container.innerHTML = `
+    <!-- Report Statement Header -->
+    <div style="border-bottom:2px solid #e2e8f0; padding-bottom:1rem; margin-bottom:1.25rem;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:0.75rem;">
+        <div>
+          <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.25rem;">
+            <span style="font-size:1.4rem;">🍅</span>
+            <span style="font-size:1.2rem; font-weight:800; color:#0f172a; letter-spacing:-0.02em;">Lightbits Infotech</span>
+          </div>
+          <span style="font-size:0.85rem; font-weight:700; color:#e23744; text-transform:uppercase; letter-spacing:0.04em;">Central Treasury &amp; Financial Audit Statement</span>
+        </div>
+        <div style="text-align:right; font-size:0.78rem; color:#64748b;">
+          <div><strong>Generated On:</strong> ${genDate}</div>
+          <div><strong>Scope / Period:</strong> ${escapeHtml(periodLabel)}</div>
+          <div><strong>Role Filter:</strong> ${escapeHtml((currentFinanceRole || 'all').toUpperCase())} | <strong>Type:</strong> ${escapeHtml((currentFinanceType || 'all').toUpperCase())}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Executive KPI Grid -->
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(185px, 1fr)); gap:0.75rem; margin-bottom:1.25rem;">
+      <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:0.85rem 1rem;">
+        <span style="font-size:0.72rem; text-transform:uppercase; font-weight:700; color:#15803d;">Admin Live Wallet Balance</span>
+        <div style="font-size:1.35rem; font-weight:800; color:#16a34a; margin:0.25rem 0;">₹${adminWallet}</div>
+        <span style="font-size:0.7rem; color:#166534;">Verified Treasury Funds</span>
+      </div>
+
+      <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:0.85rem 1rem;">
+        <span style="font-size:0.72rem; text-transform:uppercase; font-weight:700; color:#1d4ed8;">Admin Credit Points Pool</span>
+        <div style="font-size:1.35rem; font-weight:800; color:#2563eb; margin:0.25rem 0;">${adminCredits} pts</div>
+        <span style="font-size:0.7rem; color:#1e40af;">Reward / Incentive Pool</span>
+      </div>
+
+      <div style="background:#fff7ed; border:1px solid #fed7aa; border-radius:8px; padding:0.85rem 1rem;">
+        <span style="font-size:0.72rem; text-transform:uppercase; font-weight:700; color:#c2410c;">Total Settled Funds</span>
+        <div style="font-size:1.35rem; font-weight:800; color:#ea580c; margin:0.25rem 0;">₹${totalSettled}</div>
+        <div
+          onclick="closeAdminFinanceReportModal(); filterFinanceByToday('wallet_balance');"
+          title="Click to view today's wallet settlements in finance ledger"
+          style="font-size:0.72rem; color:#9a3412; cursor:pointer; font-weight:600; text-decoration:underline; display:inline-block;"
+        >
+          Today: ₹${todayWallet} settled ↗
+        </div>
+      </div>
+
+      <div style="background:#eef2ff; border:1px solid #c7d2fe; border-radius:8px; padding:0.85rem 1rem;">
+        <span style="font-size:0.72rem; text-transform:uppercase; font-weight:700; color:#4338ca;">Total Points Disbursed</span>
+        <div style="font-size:1.35rem; font-weight:800; color:#4f46e5; margin:0.25rem 0;">${totalCredits} pts</div>
+        <div
+          onclick="closeAdminFinanceReportModal(); filterFinanceByToday('credit_point');"
+          title="Click to view today's disbursed credit points in finance ledger"
+          style="font-size:0.72rem; color:#3730a3; cursor:pointer; font-weight:600; text-decoration:underline; display:inline-block;"
+        >
+          Today: +${todayCredits} pts disbursed ↗
+        </div>
+      </div>
+    </div>
+
+    <!-- Role-Wise Disbursement Breakdown -->
+    <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:9px; padding:1rem; margin-bottom:1.25rem;">
+      <h3 style="font-size:0.86rem; font-weight:800; color:#1e293b; margin:0 0 0.75rem 0; text-transform:uppercase; letter-spacing:0.04em;">
+        👥 Disbursement &amp; Settlement Distribution by Role
+      </h3>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:0.65rem;">
+        ${Object.values(roleBreakdown).map((rb) => `
+          <div style="background:#fff; border:1px solid #e2e8f0; border-radius:7px; padding:0.65rem 0.8rem;">
+            <strong style="font-size:0.8rem; color:#334155; display:block; margin-bottom:0.2rem;">${escapeHtml(rb.label)}</strong>
+            <div style="font-size:0.74rem; color:#64748b;">
+              <div>₹${formatNumber(rb.wallet, 2)} settled</div>
+              <div>${formatNumber(rb.credits, 0)} pts disbursed</div>
+              <span style="font-size:0.68rem; color:#94a3b8;">${rb.count} transfers</span>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+
+    <!-- Detailed Ledger Audit Table -->
+    <div style="margin-bottom:1rem;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.6rem;">
+        <h3 style="font-size:0.86rem; font-weight:800; color:#1e293b; margin:0; text-transform:uppercase; letter-spacing:0.04em;">
+          📋 Audited Transfer Ledger Records (${transfers.length} loaded)
+        </h3>
+        <span style="font-size:0.73rem; color:#64748b;">Live Ledger Verification</span>
+      </div>
+      <div style="overflow-x:auto; border:1px solid #e2e8f0; border-radius:8px;">
+        <table style="width:100%; border-collapse:collapse; font-size:0.76rem; text-align:left;">
+          <thead>
+            <tr style="background:#f1f5f9; border-bottom:1.5px solid #cbd5e1; color:#475569; font-weight:700; text-transform:uppercase; font-size:0.71rem;">
+              <th style="padding:0.55rem 0.7rem;">Timestamp</th>
+              <th style="padding:0.55rem 0.7rem;">Transfer</th>
+              <th style="padding:0.55rem 0.7rem;">Sender</th>
+              <th style="padding:0.55rem 0.7rem;">Receiver</th>
+              <th style="padding:0.55rem 0.7rem; text-align:right;">Amt trnsfrd</th>
+              <th style="padding:0.55rem 0.7rem;">Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${transfers.length === 0 ? `
+              <tr>
+                <td colspan="6" style="padding:2rem; text-align:center; color:#94a3b8;">No transfers recorded for the selected filter range.</td>
+              </tr>
+            ` : transfers.map((r) => {
+              const ts = formatFinanceTimestamp(r.createdAt || r.snapshotAt);
+              const isW = r.transferType === 'wallet_balance';
+              const amtStr = isW ? `₹${formatNumber(r.amount || 0, 2)}` : `${formatNumber(r.amount || 0, 0)} pts`;
+              const amtColor = isW ? '#ea580c' : '#4f46e5';
+              return `
+                <tr style="border-bottom:1px solid #f1f5f9;">
+                  <td style="padding:0.5rem 0.7rem; font-family:monospace; color:#64748b; white-space:nowrap;">${escapeHtml(ts.full || ts)}</td>
+                  <td style="padding:0.5rem 0.7rem;">
+                    <span class="badge" style="${isW ? 'background:#ffedd5; color:#9a3412;' : 'background:#e0e7ff; color:#3730a3;'} font-size:0.69rem; font-weight:700;">
+                      ${isW ? '💵 Wallet' : '💳 Points'}
+                    </span>
+                  </td>
+                  <td style="padding:0.5rem 0.7rem;">
+                    <strong style="color:#1e293b; font-size:0.76rem;">${escapeHtml(r.senderName || 'Admin')}</strong>
+                    <span style="font-size:0.68rem; color:#94a3b8; display:block;">${escapeHtml(r.senderRole || 'admin')}</span>
+                  </td>
+                  <td style="padding:0.5rem 0.7rem;">
+                    <strong style="color:#1e293b; font-size:0.76rem;">${escapeHtml(r.receiverName || 'User')}</strong>
+                    <span style="font-size:0.68rem; color:#94a3b8; display:block;">${escapeHtml(r.receiverRole || 'customer')}</span>
+                  </td>
+                  <td style="padding:0.5rem 0.7rem; text-align:right; font-weight:800; color:${amtColor}; white-space:nowrap;">
+                    ${amtStr}
+                  </td>
+                  <td style="padding:0.5rem 0.7rem; color:#475569; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                    ${escapeHtml(r.purpose || '—')}
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
 // Global exports
 window.loadAdminFinancePanel = loadAdminFinancePanel;
 window.fetchAdminFinanceTransfers = fetchAdminFinanceTransfers;
@@ -751,4 +1178,10 @@ window.openAdminFinanceTransferModal = openAdminFinanceTransferModal;
 window.handleFinanceModalTypeChange = handleFinanceModalTypeChange;
 window.submitAdminFinanceTransfer = submitAdminFinanceTransfer;
 window.exportAdminFinanceTransfersCSV = exportAdminFinanceTransfersCSV;
+window.openAdminFinanceReportModal = openAdminFinanceReportModal;
+window.closeAdminFinanceReportModal = closeAdminFinanceReportModal;
+window.printAdminFinanceReport = printAdminFinanceReport;
+window.renderAdminFinanceReportContent = renderAdminFinanceReportContent;
+window.formatNumber = formatNumber;
+window.filterFinanceByToday = filterFinanceByToday;
 

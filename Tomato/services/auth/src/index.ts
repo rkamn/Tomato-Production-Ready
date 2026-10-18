@@ -189,18 +189,22 @@ const startServer = async () => {
     }, 60 * 60 * 1000);
 
     const mainServer = app.listen(PORT, () => {
-      console.log(`Auth service running on port ${PORT} (WebSocket /ws ready)`);
+      console.log(`\n==================================================`);
+      console.log(`🚀 Server started successfully!`);
+      console.log(`🔗 Localhost URL: http://localhost:${PORT}`);
+      console.log(`📡 WebSocket: ws://localhost:${PORT}/ws`);
+      console.log(`==================================================\n`);
     });
     attachWebSocketServer(mainServer);
 
     const frontendServer = app.listen(FRONTEND_PORT, '127.0.0.1', () => {
-      console.log(`Frontend running on http://127.0.0.1:${FRONTEND_PORT}`);
+      console.log(`🌐 Frontend running at: http://localhost:${FRONTEND_PORT}\n`);
     });
     attachWebSocketServer(frontendServer);
     frontendServer.on('error', (error: NodeJS.ErrnoException) => {
       if (error.code === 'EADDRINUSE') {
         console.warn(
-          `Frontend port ${FRONTEND_PORT} is occupied; frontend is also available on port ${PORT}.`,
+          `ℹ️ Frontend port ${FRONTEND_PORT} is occupied; frontend is also accessible at http://localhost:${PORT}`,
         );
         return;
       }

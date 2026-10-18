@@ -1650,14 +1650,42 @@
         body * {
           visibility: hidden;
         }
-        #bill-print-area, #bill-print-area * {
+        #bill-print-area, #bill-print-area *,
+        #admin-finance-report-modal, #admin-finance-report-modal *,
+        #admin-finance-report-printable, #admin-finance-report-printable * {
           visibility: visible;
         }
-        #bill-print-area {
-          position: absolute;
-          left: 0;
-          top: 0;
-          width: 100%;
+        #admin-finance-report-modal {
+          position: absolute !important;
+          inset: 0 !important;
+          background: #ffffff !important;
+          backdrop-filter: none !important;
+          display: block !important;
+          padding: 0 !important;
+          overflow: visible !important;
+          z-index: 9999999 !important;
+        }
+        #admin-finance-report-modal .modal-card {
+          max-width: 100% !important;
+          width: 100% !important;
+          max-height: none !important;
+          box-shadow: none !important;
+          border: none !important;
+          overflow: visible !important;
+          background: #ffffff !important;
+        }
+        #admin-finance-report-modal .modal-header,
+        #admin-finance-report-modal .modal-close,
+        #admin-finance-report-modal button {
+          display: none !important;
+        }
+        #bill-print-area,
+        #admin-finance-report-printable {
+          position: static !important;
+          width: 100% !important;
+          background: #ffffff !important;
+          overflow: visible !important;
+          padding: 0 !important;
         }
       }
       /* Toast Notifications */

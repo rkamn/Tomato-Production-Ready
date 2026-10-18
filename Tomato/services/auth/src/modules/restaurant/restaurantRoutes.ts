@@ -31,10 +31,12 @@ import Coupon, {
   CouponType,
   SponsorType,
 } from '../../model/Coupon.js';
+import partnerFinanceRoutes from '../partner/partnerFinanceRoutes.js';
 
 const createRestaurantRouter = () => {
   const router = express.Router();
   router.use(authenticate, requireRole('restaurant'));
+  router.use('/finance', partnerFinanceRoutes);
 
   router.get('/overview', (req: Request, res: Response) => {
     const user = (req as AuthenticatedRequest).user;

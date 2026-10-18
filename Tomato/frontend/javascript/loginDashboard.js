@@ -1310,8 +1310,21 @@ function initDashboard() {
   if (walletLabel) walletLabel.textContent = role === 'admin' || role === 'subadmin' ? 'W' : 'Wallet';
   const creditTransferButton = document.getElementById('admin-credit-transfer-open');
   if (creditTransferButton) {
-    creditTransferButton.style.display = role === 'admin' ? 'inline-flex' : 'none';
+    creditTransferButton.style.display = (role === 'admin' || role === 'restaurant' || role === 'shop') ? 'inline-flex' : 'none';
   }
+
+function handleSidebarTransferClick() {
+  if (role === 'restaurant' || role === 'shop') {
+    if (typeof openPartnerFinanceTransferModal === 'function') {
+      openPartnerFinanceTransferModal();
+    }
+  } else {
+    if (typeof openAdminFinanceTransferModal === 'function') {
+      openAdminFinanceTransferModal();
+    }
+  }
+}
+window.handleSidebarTransferClick = handleSidebarTransferClick;
   const customerSidebarToggle = document.getElementById('customer-sidebar-store-toggle-wrapper');
   if (customerSidebarToggle) {
     customerSidebarToggle.style.display = role === 'customer' ? 'block' : 'none';
@@ -1610,6 +1623,7 @@ function buildNav() {
       { id: 'restaurant-menu', icon: '📋', label: 'Menu Management' },
       { id: 'partner-coupons', icon: '🎟️', label: 'Coupons & Offers' },
       { id: 'partner-bank', icon: '🏦', label: 'Bank & Payouts' },
+      { id: 'partner-finance', icon: '💰', label: 'Finance' },
       { id: 'support', icon: '🛟', label: 'Help & Support' },
       { id: 'settings', icon: '⚙️', label: 'Restaurant Profile' },
     ],
@@ -1619,6 +1633,7 @@ function buildNav() {
       { id: 'shop-items', icon: '📋', label: 'Item Management' },
       { id: 'partner-coupons', icon: '🎟️', label: 'Coupons & Offers' },
       { id: 'partner-bank', icon: '🏦', label: 'Bank & Payouts' },
+      { id: 'partner-finance', icon: '💰', label: 'Finance' },
       { id: 'support', icon: '🛟', label: 'Help & Support' },
       { id: 'settings', icon: '⚙️', label: 'Shop Profile' },
     ],
@@ -1654,7 +1669,7 @@ function buildNav() {
       }
     });
     // Ensure newly added tabs appear above settings if not in savedOrder (and 'admin-partner-billing' sits right below 'admin-bank')
-    ['admin-bank', 'admin-partner-billing', 'admin-coupons', 'partner-coupons', 'partner-bank', 'support', 'admin-complaints'].forEach((newId) => {
+    ['admin-bank', 'admin-partner-billing', 'admin-coupons', 'partner-coupons', 'partner-bank', 'partner-finance', 'support', 'admin-complaints'].forEach((newId) => {
       if (newId === 'admin-partner-billing' && itemMap.has('admin-partner-billing')) {
         const billingItem = itemMap.get('admin-partner-billing');
         itemMap.delete('admin-partner-billing');
@@ -1672,6 +1687,15 @@ function buildNav() {
         const insertIdx = billingIdx !== -1 ? billingIdx + 1 : bankIdx !== -1 ? bankIdx + 1 : -1;
         if (insertIdx !== -1) {
           items.splice(insertIdx, 0, couponItem);
+          return;
+        }
+      }
+      if (newId === 'partner-finance' && itemMap.has('partner-finance')) {
+        const finItem = itemMap.get('partner-finance');
+        itemMap.delete('partner-finance');
+        const bankIdx = items.findIndex((it) => it.id === 'partner-bank');
+        if (bankIdx !== -1) {
+          items.splice(bankIdx + 1, 0, finItem);
           return;
         }
       }
@@ -2052,6 +2076,10 @@ function switchView(viewId, filter = null, force = false) {
     fetchAdminCoupons();
   } else if (viewId === 'partner-bank') {
     loadPartnerBankPanel();
+  } else if (viewId === 'partner-finance') {
+    if (typeof loadPartnerFinancePanel === 'function') {
+      loadPartnerFinancePanel();
+    }
   } else if (viewId === 'partner-coupons') {
     fetchPartnerCoupons();
   } else if (viewId === 'support') {

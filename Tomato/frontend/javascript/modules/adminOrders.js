@@ -873,6 +873,10 @@ async function deleteAdminUser(userId, name, targetRole) {
 
 function openAdminCreditTransferModal(recipientId = '') {
   if (role !== 'admin') return;
+  if (typeof openAdminFinanceTransferModal === 'function') {
+    openAdminFinanceTransferModal(recipientId);
+    return;
+  }
   const recipientInput = document.getElementById('admin-credit-recipient-id');
   const pointsInput = document.getElementById('admin-credit-points');
   const purposeInput = document.getElementById('admin-credit-purpose');

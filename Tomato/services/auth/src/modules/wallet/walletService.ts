@@ -596,15 +596,26 @@ export const transferCreditPoints = async (
       400,
     );
   }
-  if (!currentAdmin) {
-    throw new WalletServiceError('Admin wallet was not found', 404);
+  let currentSender: any = currentAdmin;
+  if (!currentSender) {
+    const rest = await Restaurant.findById(adminId).select('name email phone walletBalance creditPoint').lean();
+    if (rest) currentSender = { ...rest, role: 'restaurant' };
+  }
+  if (!currentSender) {
+    const shp = await Shop.findById(adminId).select('name email phone walletBalance creditPoint').lean();
+    if (shp) currentSender = { ...shp, role: 'shop' };
+  }
+  if (!currentSender) {
+    throw new WalletServiceError('Sender wallet was not found', 404);
   }
 
-  // Ensure admin's central Wallet document is initialized
-  const adminWallet = await getOrCreateUserWallet(adminId, 'admin', currentAdmin.name);
-  const currentSnapshot = await getAdminWalletSnapshot(adminId, currentAdmin);
+  // Ensure sender's central Wallet document is initialized
+  const adminWallet = await getOrCreateUserWallet(adminId, currentSender.role || 'admin', currentSender.name);
+  const currentSnapshot = (currentSender.role === 'admin' || currentSender.role === 'subadmin')
+    ? await getAdminWalletSnapshot(adminId, currentSender)
+    : null;
 
-  // Atomically debit admin wallet in both Wallet collection and snapshot
+  // Atomically debit sender wallet in both Wallet collection and snapshot
   const updatedAdminWallet = await Wallet.findOneAndUpdate(
     {
       userId: adminId,
@@ -618,28 +629,36 @@ export const transferCreditPoints = async (
 
   if (!updatedAdminWallet) {
     throw new WalletServiceError(
-      'Insufficient credit points in the admin wallet',
+      'Insufficient credit points in the sender wallet',
       409,
     );
   }
 
-  const updatedSnapshot = await WalletCreditTrack.findOneAndUpdate(
-    {
-      _id: currentSnapshot._id,
-      recordType: 'balance_snapshot',
-    },
-    {
-      $inc: { credit_point: -creditPoints, creditPoint: -creditPoints },
-      $set: { snapshotAt: new Date() },
-    },
-    { returnDocument: 'after' },
-  );
+  const updatedSnapshot = currentSnapshot?._id
+    ? await WalletCreditTrack.findOneAndUpdate(
+        {
+          _id: currentSnapshot._id,
+          recordType: 'balance_snapshot',
+        },
+        {
+          $inc: { credit_point: -creditPoints, creditPoint: -creditPoints },
+          $set: { snapshotAt: new Date() },
+        },
+        { returnDocument: 'after' },
+      )
+    : null;
 
-  // Sync Employee document as well
-  await Employee.updateOne(
-    { _id: adminId },
-    { $inc: { creditPoint: -creditPoints } },
-  ).catch((err) => console.warn('Employee credit decrement warning:', err));
+  // Sync specific sender document
+  if (currentSender.role === 'restaurant') {
+    await Restaurant.updateOne({ _id: adminId }, { $inc: { creditPoint: -creditPoints } }).catch(() => null);
+  } else if (currentSender.role === 'shop') {
+    await Shop.updateOne({ _id: adminId }, { $inc: { creditPoint: -creditPoints } }).catch(() => null);
+  } else {
+    await Employee.updateOne(
+      { _id: adminId },
+      { $inc: { creditPoint: -creditPoints } },
+    ).catch((err) => console.warn('Employee credit decrement warning:', err));
+  }
 
   const recipientUserId = String(recipient.record._id);
   let updatedRecipient: ICustomer | IRestaurant | IShop | IRider | IEmployee | null = null;
@@ -677,10 +696,10 @@ export const transferCreditPoints = async (
       recordType: 'transfer',
       transferType: 'credit_point',
       senderUserId: adminId,
-      senderName: currentAdmin.name || 'Platform Administrator',
-      senderRole: currentAdmin.role || 'admin',
-      senderEmail: currentAdmin.email ?? '',
-      senderMobile: currentAdmin.phone ?? '',
+      senderName: currentSender.name || 'Platform Administrator',
+      senderRole: currentSender.role || 'admin',
+      senderEmail: currentSender.email ?? '',
+      senderMobile: currentSender.phone ?? '',
       receiverUserId: recipientUserId,
       receiverName: updatedRecipientWallet?.name || updatedRecipient.name || 'User',
       receiverRole: updatedRecipientWallet?.role || updatedRecipient.role || 'customer',
@@ -797,17 +816,29 @@ export const transferWalletBalance = async (
     throw new WalletServiceError('Order number must be 100 characters or fewer', 400);
   }
 
+  let currentSender: { name?: string; role?: string; email?: string; phone?: string; walletBalance?: number; creditPoint?: number } | null = null;
   const [recipient, senderAdmin] = await Promise.all([
     findRecipientAccount(lookupId),
-    Employee.findById(senderId).select('name role email phone walletBalance creditPoint'),
+    Employee.findById(senderId).select('name role email phone walletBalance creditPoint').lean(),
   ]);
+
+  if (senderAdmin) {
+    currentSender = senderAdmin;
+  } else {
+    const rest = await Restaurant.findById(senderId).select('name email phone walletBalance creditPoint').lean();
+    if (rest) currentSender = { ...rest, role: 'restaurant' };
+    else {
+      const shp = await Shop.findById(senderId).select('name email phone walletBalance creditPoint').lean();
+      if (shp) currentSender = { ...shp, role: 'shop' };
+    }
+  }
 
   if (!recipient) {
     throw new WalletServiceError('Recipient user was not found', 404);
   }
 
   // Get or create sender wallet in central 'wallet' table
-  const senderWallet = await getOrCreateUserWallet(senderId, senderAdmin?.role || 'admin', senderAdmin?.name);
+  const senderWallet = await getOrCreateUserWallet(senderId, currentSender?.role || 'admin', currentSender?.name);
   if (Number(senderWallet.walletBalance || 0) < roundedAmount) {
     throw new WalletServiceError(
       `Insufficient wallet balance. Available: ₹${Number(senderWallet.walletBalance || 0).toFixed(2)}, Requested: ₹${roundedAmount.toFixed(2)}`,
@@ -832,7 +863,11 @@ export const transferWalletBalance = async (
   }
 
   // Also sync Employee or sender model
-  if (senderAdmin) {
+  if (currentSender?.role === 'restaurant') {
+    await Restaurant.updateOne({ _id: senderId }, { $inc: { walletBalance: -roundedAmount } }).catch(() => {});
+  } else if (currentSender?.role === 'shop') {
+    await Shop.updateOne({ _id: senderId }, { $inc: { walletBalance: -roundedAmount } }).catch(() => {});
+  } else {
     await Employee.updateOne({ _id: senderId }, { $inc: { walletBalance: -roundedAmount } }).catch(() => {});
   }
 
@@ -870,10 +905,10 @@ export const transferWalletBalance = async (
       recordType: 'transfer',
       transferType: 'wallet_balance',
       senderUserId: senderId,
-      senderName: senderAdmin?.name || updatedSenderWallet.name || 'Platform Administrator',
-      senderRole: senderAdmin?.role || updatedSenderWallet.role || 'admin',
-      senderEmail: senderAdmin?.email ?? updatedSenderWallet.email ?? '',
-      senderMobile: senderAdmin?.phone ?? updatedSenderWallet.phone ?? '',
+      senderName: currentSender?.name || updatedSenderWallet.name || 'Tomato Partner',
+      senderRole: currentSender?.role || updatedSenderWallet.role || 'partner',
+      senderEmail: currentSender?.email ?? updatedSenderWallet.email ?? '',
+      senderMobile: currentSender?.phone ?? updatedSenderWallet.phone ?? '',
       receiverUserId: recipientUserId,
       receiverName: updatedRecipientWallet?.name || recipient.record.name || 'User',
       receiverRole: updatedRecipientWallet?.role || recipient.record.role || 'customer',
@@ -902,7 +937,11 @@ export const transferWalletBalance = async (
 
     // Rollback sender
     await Wallet.updateOne({ userId: senderId }, { $inc: { walletBalance: roundedAmount } }).catch(() => {});
-    if (senderAdmin) {
+    if (currentSender?.role === 'restaurant') {
+      await Restaurant.updateOne({ _id: senderId }, { $inc: { walletBalance: roundedAmount } }).catch(() => {});
+    } else if (currentSender?.role === 'shop') {
+      await Shop.updateOne({ _id: senderId }, { $inc: { walletBalance: roundedAmount } }).catch(() => {});
+    } else {
       await Employee.updateOne({ _id: senderId }, { $inc: { walletBalance: roundedAmount } }).catch(() => {});
     }
 

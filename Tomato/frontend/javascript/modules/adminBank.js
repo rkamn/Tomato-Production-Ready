@@ -34,17 +34,21 @@ function renderAdminBankPartnersPaginationBar() {
   if (!bar) return;
 
   const totalAll = cachedAdminBankPartners.length;
+  const totalAdmin = cachedAdminBankPartners.filter((p) => p.role === 'admin').length;
   const totalRest = cachedAdminBankPartners.filter((p) => p.role === 'restaurant').length;
   const totalShop = cachedAdminBankPartners.filter((p) => p.role === 'shop').length;
   const totalRider = cachedAdminBankPartners.filter((p) => p.role === 'deliveryPartner').length;
   const totalSubAdmin = cachedAdminBankPartners.filter((p) => p.role === 'subadmin').length;
+  const totalEmployee = cachedAdminBankPartners.filter((p) => p.role === 'employee').length;
 
   const roles = [
-    { key: 'all', label: 'All Partners', count: totalAll, icon: '👥' },
+    { key: 'all', label: 'All Partners & Staff', count: totalAll, icon: '👥' },
+    { key: 'admin', label: 'Platform Admin', count: totalAdmin, icon: '👑' },
     { key: 'restaurant', label: 'Restaurants', count: totalRest, icon: '🏪' },
     { key: 'shop', label: 'Shops', count: totalShop, icon: '🏬' },
     { key: 'deliveryPartner', label: 'Delivery Partners', count: totalRider, icon: '🚴' },
     { key: 'subadmin', label: 'Sub-Admins', count: totalSubAdmin, icon: '🛡️' },
+    { key: 'employee', label: 'Employees', count: totalEmployee, icon: '👔' },
   ];
 
   bar.innerHTML = `
@@ -131,9 +135,9 @@ function renderAdminBankPartnersKpis(partners) {
 
   kpiEl.innerHTML = `
     <div style="background:#f8fafc; border:1px solid var(--border); border-radius:10px; padding:0.7rem 0.85rem;">
-    <div style="font-size:0.7rem; color:var(--muted); font-weight:700; text-transform:uppercase;">Total Partners</div>
+    <div style="font-size:0.7rem; color:var(--muted); font-weight:700; text-transform:uppercase;">Total Partners &amp; Staff</div>
     <div style="font-size:1.25rem; font-weight:800; color:var(--ink); margin-top:0.15rem;">${total}</div>
-    <div style="font-size:0.7rem; color:var(--muted);">Restaurants, Shops, Riders &amp; Sub-Admins</div>
+    <div style="font-size:0.7rem; color:var(--muted);">Restaurants, Shops, Riders, Sub-Admins &amp; Employees</div>
     </div>
     <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:0.7rem 0.85rem;">
     <div style="font-size:0.7rem; color:#15803d; font-weight:700; text-transform:uppercase;">🔒 Approved &amp; Locked</div>
@@ -195,12 +199,14 @@ function renderAdminBankPartnersTable() {
 
   if (!filtered.length) {
     const roleLabelsMap = {
+      admin: 'Platform Admin',
       restaurant: 'Restaurants',
       shop: 'Shops',
       deliveryPartner: 'Delivery Partners',
       subadmin: 'Sub-Admins',
+      employee: 'Normal Employees',
     };
-    const roleScope = roleLabelsMap[currentAdminBankPartnerRole] || 'Partner';
+    const roleScope = roleLabelsMap[currentAdminBankPartnerRole] || 'Partner & Staff';
     container.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">🏦</div>
@@ -212,10 +218,12 @@ function renderAdminBankPartnersTable() {
   }
 
   const roleBadge = (r) => {
+    if (r === 'admin') return '<span class="badge" style="background:#fef3c7; color:#92400e; border:1px solid #fde68a;">👑 Admin</span>';
     if (r === 'restaurant') return '<span class="badge badge-ready">🏪 Restaurant</span>';
     if (r === 'shop') return '<span class="badge badge-accepted">🏬 Shop</span>';
     if (r === 'deliveryPartner') return '<span class="badge badge-pending">🚴 Delivery Partner</span>';
     if (r === 'subadmin') return '<span class="badge" style="background:#e0e7ff; color:#3730a3; border:1px solid #c7d2fe;">🛡️ Sub-Admin</span>';
+    if (r === 'employee') return '<span class="badge" style="background:#fefce8; color:#a16207; border:1px solid #fef08a;">👔 Employee</span>';
     return `<span class="badge">${escapeHtml(r)}</span>`;
   };
 
@@ -278,7 +286,7 @@ function renderAdminBankPartnersTable() {
     <tr>
     <th>Partner &amp; ID</th>
     <th>Bank Account &amp; IFSC</th>
-    <th>Account Holder vs PAN Card</th>
+    <th>Account Holder &amp; PAN</th>
     <th>Agreement / Access</th>
     <th>KYC &amp; Lock Status</th>
     <th>Actions</th>
@@ -292,11 +300,17 @@ function renderAdminBankPartnersTable() {
       const isLocked = Boolean(bd.isLocked);
       const partnerCodeVal = p.partnerCode || String(p.id || p._id || '').slice(-6);
       let agreementLabel = `Tomato Comm: <strong>${Number(bd.agreementCommissionPercent ?? (p.role === 'shop' ? 12 : 15))}%</strong>`;
-      if (p.role === 'deliveryPartner') {
+      if (p.role === 'admin') {
+        agreementLabel = `Staff Role: <strong>👑 Platform Administrator</strong>`;
+      } else if (p.role === 'deliveryPartner') {
         agreementLabel = `Rider Payout: <strong>₹${Number(bd.riderPayoutPerOrder ?? 40)}/order</strong>`;
       } else if (p.role === 'subadmin') {
-        agreementLabel = `Admin Access: <strong>Sub-Admin</strong>`;
+        agreementLabel = `Staff Role: <strong>Sub-Admin</strong>`;
+      } else if (p.role === 'employee') {
+        agreementLabel = `Staff Role: <strong>Normal Employee</strong>`;
       }
+      const holderName = bd.accountHolderName || bd.panHolderName || p.displayName || p.name || '—';
+      const panCard = bd.panNumber || '—';
       return `<tr>
       <td>
       <div style="font-weight:700; color:var(--ink);">${escapeHtml(p.displayName || p.name)}</div>
@@ -316,10 +330,8 @@ function renderAdminBankPartnersTable() {
       </td>
       <td>
       ${bd.accountHolderName || bd.panNumber ? `
-      <div style="font-size:0.82rem;"><strong>Bank Holder:</strong> ${escapeHtml(bd.accountHolderName || '—')}</div>
-      <div style="font-size:0.82rem;"><strong>PAN Holder:</strong> ${escapeHtml(bd.panHolderName || '—')}</div>
-      <div style="font-family:monospace; font-size:0.8rem; margin-top:2px;">PAN: <strong>${escapeHtml(bd.panNumber || '—')}</strong></div>
-      <div style="margin-top:4px;">${p.namesMatch || p.verification?.nameMatched ? '<span class="badge badge-approved" style="font-size:0.7rem;">✓ Bank &amp; PAN Name Match</span>' : '<span class="badge badge-blocked" style="font-size:0.7rem;">✕ Name Mismatch</span>'}</div>
+      <div style="font-weight:700; color:var(--ink); font-size:0.88rem;">${escapeHtml(holderName)}/${escapeHtml(panCard)}</div>
+      <div style="margin-top:4px;">${p.role === 'admin' || p.namesMatch || p.verification?.nameMatched ? '<span class="badge badge-approved" style="font-size:0.7rem;">✓ Bank &amp; PAN Verified</span>' : '<span class="badge badge-blocked" style="font-size:0.7rem;">✕ Name Mismatch</span>'}</div>
       ` : '<span style="color:var(--muted); font-size:0.8rem;">No PAN / Holder Name</span>'}
       </td>
       <td>
@@ -327,14 +339,14 @@ function renderAdminBankPartnersTable() {
       ${bd.adminNote ? `<div style="font-size:0.74rem; color:var(--muted); margin-top:2px;">📝 ${escapeHtml(bd.adminNote)}</div>` : ''}
       </td>
       <td>
-      <div><span class="badge ${p.isApproved ? 'badge-approved' : 'badge-pending'}">Partner: ${p.isApproved ? 'Approved' : 'Pending'}</span></div>
-      <div style="margin-top:4px;">${isBankApproved && isLocked ? '<span class="badge badge-delivered">🔒 Bank Approved &amp; Locked</span>' : hasSubmitted ? '<span class="badge badge-ready">⏳ Submitted (Awaiting Approval)</span>' : '<span class="badge badge-blocked">⚠️ Incomplete KYC</span>'}</div>
+      <div>${p.role === 'admin' ? '<span class="badge badge-approved" style="background:#fef3c7; color:#92400e; border:1px solid #fde68a;">👑 Platform Super Admin</span>' : `<span class="badge ${p.isApproved ? 'badge-approved' : 'badge-pending'}">Partner: ${p.isApproved ? 'Approved' : 'Pending'}</span>`}</div>
+      <div style="margin-top:4px;">${p.role === 'admin' ? (bd.accountNumber ? '<span class="badge badge-delivered" style="background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0;">🛡️ Active &amp; Verified</span>' : '<span class="badge badge-blocked">⚠️ No Bank Details</span>') : (isBankApproved && isLocked ? '<span class="badge badge-delivered">🔒 Bank Approved &amp; Locked</span>' : hasSubmitted ? '<span class="badge badge-ready">⏳ Submitted (Awaiting Approval)</span>' : '<span class="badge badge-blocked">⚠️ Incomplete KYC</span>')}</div>
       </td>
       <td>
       <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
       <button type="button" class="btn btn-outline btn-sm" style="font-weight:600;" onclick="openAdminBankEditModal('${escapeHtml(String(p.id || p._id || ''))}')">✏️ View / Edit &amp; Configure</button>
       <button type="button" class="btn btn-outline btn-sm" style="font-weight:600; color:#1d4ed8; border-color:#bfdbfe; background:#eff6ff;" onclick="viewPartnerSettlementsById('${escapeHtml(partnerCodeVal)}')" title="Filter payout settlements by this Partner ID">💸 View Payouts</button>
-      ${!p.isApproved || !isBankApproved ? `<button type="button" class="btn btn-success btn-sm" onclick="quickApprovePartnerBank('${escapeHtml(String(p.id || p._id || ''))}')" title="Approve Partner & Lock Bank Details">✓ Approve &amp; Lock</button>` : ''}
+      ${p.role !== 'admin' && (!p.isApproved || !isBankApproved) ? `<button type="button" class="btn btn-success btn-sm" onclick="quickApprovePartnerBank('${escapeHtml(String(p.id || p._id || ''))}')" title="Approve Partner & Lock Bank Details">✓ Approve &amp; Lock</button>` : ''}
       </div>
       </td>
       </tr>`;
@@ -426,17 +438,31 @@ async function openAdminBankEditModal(userId) {
     if (noteHint) {
       noteHint.textContent = '📌 Rider has to share Licence number & expiry. (Shop and Restaurant has to share FSSAI registration number and expiry.)';
     }
-  } else if (partner.role === 'subadmin') {
+  } else if (partner.role === 'admin' || partner.role === 'subadmin' || partner.role === 'employee') {
     if (commGroup) commGroup.style.display = 'none';
     if (riderGroup) riderGroup.style.display = 'none';
+    const isAdm = partner.role === 'admin';
+    const isEmp = partner.role === 'employee';
     if (noteLabel) {
-      noteLabel.textContent = 'Sub-Admin Designation & Bank KYC Note';
+      noteLabel.textContent = isAdm
+        ? 'Platform Administrator Settlement Account Note'
+        : isEmp
+          ? 'Employee Designation & Bank KYC Note'
+          : 'Sub-Admin Designation & Bank KYC Note';
     }
     if (noteInput) {
-      noteInput.placeholder = 'Sub-Admin designation, permissions, and bank KYC verification note';
+      noteInput.placeholder = isAdm
+        ? 'Official platform treasury & settlement account note'
+        : isEmp
+          ? 'Employee designation, department, and bank KYC verification note'
+          : 'Sub-Admin designation, permissions, and bank KYC verification note';
     }
     if (noteHint) {
-      noteHint.textContent = '📌 Sub-Admin bank account and PAN details verification note.';
+      noteHint.textContent = isAdm
+        ? '📌 Platform Administrator bank account details are active directly without external approval.'
+        : isEmp
+          ? '📌 Normal Employee bank account and PAN details verification note.'
+          : '📌 Sub-Admin bank account and PAN details verification note.';
     }
   } else {
     if (commGroup) commGroup.style.display = 'block';

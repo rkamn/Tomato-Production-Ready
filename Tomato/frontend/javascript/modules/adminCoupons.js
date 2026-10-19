@@ -6,6 +6,7 @@
 // =========================================================================
 const MAX_COUPONS_PER_ORDER_LIMIT = 1;
 const COUPON_TYPE_META = {
+  instant: { icon: '⚡', label: 'Instant Coupon', badgeBg: '#fef08a', badgeColor: '#854d0e' },
   restaurant_item_category: { icon: '🍽️', label: 'Restaurant Item Category', badgeBg: '#ffedd5', badgeColor: '#c2410c' },
   category_occasion: { icon: '🥂', label: 'Category Occasion', badgeBg: '#fae8ff', badgeColor: '#a21caf' },
   new_user: { icon: '🆕', label: 'New Users', badgeBg: '#dcfce7', badgeColor: '#15803d' },
@@ -208,7 +209,12 @@ function renderAdminCouponsTable() {
             const targetParts = [];
             if (c.targetItemCategory) targetParts.push(`<span style="color:#1e3a8a; font-weight:700;">Category: ${escapeHtml(c.targetItemCategory)}</span>`);
             if (c.occasionName) targetParts.push(`<span>Occasion: <strong>${escapeHtml(c.occasionName)}</strong></span>`);
-            if (c.targetUserIdentifier) targetParts.push(`<span style="color:#b45309; font-weight:700;">User: ${escapeHtml(c.targetUserIdentifier)}</span>`);
+            if (c.couponType === 'instant') {
+              targetParts.push(`<span style="color:#854d0e; font-weight:800; background:#fef9c3; padding:1px 6px; border-radius:4px; border:1px solid #fde047;">⚡ Assigned: ${escapeHtml(c.targetUserIdentifier || 'User ID')}</span>`);
+              targetParts.push('<span style="color:#dc2626; font-size:0.72rem; font-weight:600;">💥 Single-use (Destroys after use)</span>');
+            } else if (c.targetUserIdentifier) {
+              targetParts.push(`<span style="color:#b45309; font-weight:700;">User: ${escapeHtml(c.targetUserIdentifier)}</span>`);
+            }
             if (c.couponType === 'new_user') targetParts.push('<span style="color:#15803d; font-weight:700;">First Order / New Users</span>');
             if (!targetParts.length) targetParts.push('<span style="color:var(--muted);">All Eligible Orders</span>');
 
@@ -303,7 +309,33 @@ function onAdminCouponTypeChange() {
   if (occLabel) occLabel.innerHTML = 'Occasion / Festival / Settlement Label';
   if (userLabel) userLabel.innerHTML = 'Specific User (Customer ID, Email, or Phone)';
 
-  if (cType === 'restaurant_item_category') {
+  const expiryEl = document.getElementById('adm-coupon-valid-until');
+  if (expiryEl && cType !== 'instant') {
+    expiryEl.removeAttribute('max');
+  }
+
+  if (cType === 'instant') {
+    if (storeSelect) storeSelect.value = 'all';
+    if (userLabel) userLabel.innerHTML = 'Assigned User (User ID / Customer ID / Phone / Email) <span style="color:var(--tomato);">*</span>';
+    if (userInput) userInput.placeholder = 'e.g. cust-1001, user@email.com, or 9876543210 (Required)';
+    if (perUserInput) perUserInput.value = '1';
+    const totalLimitInput = document.getElementById('adm-coupon-total-limit');
+    if (totalLimitInput) totalLimitInput.value = '1';
+
+    // Auto-calculate 15 days validity max
+    const max15 = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
+    const yyyy = max15.getFullYear();
+    const mm = String(max15.getMonth() + 1).padStart(2, '0');
+    const dd = String(max15.getDate()).padStart(2, '0');
+    if (expiryEl) {
+      expiryEl.value = `${yyyy}-${mm}-${dd}`;
+      expiryEl.max = `${yyyy}-${mm}-${dd}`;
+    }
+    const descInput = document.getElementById('adm-coupon-description');
+    if (descInput && !descInput.value) {
+      descInput.value = 'Single-use instant coupon for assigned user. Auto-destroys upon use. Valid for max 15 days.';
+    }
+  } else if (cType === 'restaurant_item_category') {
     if (storeSelect) storeSelect.value = 'restaurant';
     if (catLabel) catLabel.innerHTML = 'Target Restaurant Item Category <span style="color:var(--tomato);">*</span>';
     if (catInput && !catInput.value) catInput.placeholder = 'e.g. Sweets, Main Course, Starters, Biryani';
@@ -335,6 +367,7 @@ function onAdminCouponTypeChange() {
 function generateAdminCouponCode() {
   const cType = document.getElementById('adm-coupon-type')?.value || 'restaurant_item_category';
   const prefixes = {
+    instant: 'INSTANT',
     restaurant_item_category: 'ITEM',
     category_occasion: 'CATOCC',
     new_user: 'WELCOME',
@@ -453,6 +486,26 @@ async function saveAdminCoupon(event) {
     validUntil: document.getElementById('adm-coupon-valid-until')?.value || null,
     isActive: Boolean(document.getElementById('adm-coupon-active')?.checked),
   };
+
+  if (payload.couponType === 'instant') {
+    if (!payload.targetUserIdentifier) {
+      alert('Please provide the Assigned User (User ID / Customer ID / Email / Phone) for this Instant Coupon.');
+      document.getElementById('adm-coupon-target-user')?.focus();
+      return;
+    }
+    payload.usageLimitPerUser = 1;
+    payload.totalUsageLimit = 1;
+
+    const max15 = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000 + 86400000);
+    if (!payload.validUntil) {
+      const exp = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
+      payload.validUntil = exp.toISOString().split('T')[0];
+    } else if (new Date(payload.validUntil) > max15) {
+      alert('Instant coupon validity cannot exceed 15 days. Expiry date has been capped to 15 days.');
+      const exp = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
+      payload.validUntil = exp.toISOString().split('T')[0];
+    }
+  }
 
   try {
     const endpoint = couponId ? `/api/admin/coupons/${couponId}` : '/api/admin/coupons';

@@ -1,4 +1,5 @@
 import express, { Express } from 'express';
+import mongoose from 'mongoose';
 import multer from 'multer';
 
 import {
@@ -164,23 +165,58 @@ const createAuthRouter = (upload: multer.Multer) => {
             },
           };
         } else if (
+          currentUser.role === 'superadmin' ||
           currentUser.role === 'admin' ||
-          currentUser.role === 'subadmin'
+          currentUser.role === 'subadmin' ||
+          currentUser.baseRole === 'admin' ||
+          currentUser.baseRole === 'subadmin'
         ) {
-          defaultAddress = {
-            userId: currentUser.userId,
-            label: 'Operations HQ',
-            line1: 'Tomato Operations Headquarters',
-            locality: 'Central HQ',
-            city: 'Bengaluru',
-            state: 'Karnataka',
-            postalCode: '560001',
-            isDefault: true,
-            location: {
-              type: 'Point',
-              coordinates: [77.5946, 12.9716],
-            },
-          };
+          let empDoc: any = null;
+          if (currentUser.userId && mongoose.isValidObjectId(currentUser.userId)) {
+            empDoc = await Employee.findById(currentUser.userId).lean();
+          }
+          if (!empDoc && currentUser.email) {
+            empDoc = await Employee.findOne({ email: currentUser.email.toLowerCase() }).lean();
+          }
+          if (!empDoc && (currentUser as any).username) {
+            empDoc = await Employee.findOne({ username: (currentUser as any).username.toLowerCase() }).lean();
+          }
+          if (!empDoc && (currentUser as any).adminId) {
+            empDoc = await Employee.findOne({ adminId: (currentUser as any).adminId }).lean();
+          }
+
+          if (empDoc?.assignedLocation && empDoc.assignedLocation.city && empDoc.assignedLocation.postalCode) {
+            const loc = empDoc.assignedLocation;
+            defaultAddress = {
+              userId: currentUser.userId,
+              label: loc.label || `${loc.city} Operations HQ`,
+              line1: loc.line1 || 'Tomato Regional Headquarters',
+              locality: loc.locality || loc.city,
+              city: loc.city,
+              state: loc.state || 'Karnataka',
+              postalCode: loc.postalCode,
+              isDefault: true,
+              location: loc.location || {
+                type: 'Point',
+                coordinates: [77.5946, 12.9716],
+              },
+            };
+          } else {
+            defaultAddress = {
+              userId: currentUser.userId,
+              label: 'Operations HQ',
+              line1: 'Tomato Operations Headquarters',
+              locality: 'Central HQ',
+              city: 'Bengaluru',
+              state: 'Karnataka',
+              postalCode: '560001',
+              isDefault: true,
+              location: {
+                type: 'Point',
+                coordinates: [77.5946, 12.9716],
+              },
+            };
+          }
         } else {
           defaultAddress = {
             userId: currentUser.userId,

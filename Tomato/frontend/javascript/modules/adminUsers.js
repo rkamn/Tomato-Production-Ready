@@ -57,6 +57,203 @@ function clearAdminSubAdminsSearch() {
   fetchAdminSubAdmins(true);
 }
 
+let currentStaffRoleFilter = 'all'; // 'all' | 'admin' | 'subadmin' | 'employee'
+
+function filterStaffRole(filterRole) {
+  currentStaffRoleFilter = filterRole || 'all';
+  const tabAll = document.getElementById('staff-filter-all');
+  const tabAdmin = document.getElementById('staff-filter-admin');
+  const tabSub = document.getElementById('staff-filter-subadmin');
+  const tabEmp = document.getElementById('staff-filter-employee');
+
+  [tabAll, tabAdmin, tabSub, tabEmp].forEach(tab => {
+    if (tab) {
+      tab.className = 'btn btn-outline btn-sm';
+      tab.style.background = '';
+      tab.style.color = '';
+      tab.style.fontWeight = '500';
+    }
+  });
+
+  const activeTab = filterRole === 'admin' ? tabAdmin : filterRole === 'subadmin' ? tabSub : filterRole === 'employee' ? tabEmp : tabAll;
+  if (activeTab) {
+    activeTab.className = 'btn btn-sm';
+    activeTab.style.background = 'var(--primary)';
+    activeTab.style.color = '#fff';
+    activeTab.style.fontWeight = '700';
+  }
+
+  renderStaffMembersTable();
+}
+
+function renderStaffMembersTable() {
+  const container = document.getElementById('admin-subadmins-table');
+  if (!container) return;
+
+  const q = document.getElementById('admin-subadmins-search')?.value?.trim().toLowerCase() || '';
+
+  let filtered = currentSubAdminsList;
+  if (currentStaffRoleFilter !== 'all') {
+    if (currentStaffRoleFilter === 'admin') {
+      filtered = filtered.filter(s => s.role === 'admin' || s.role === 'superadmin');
+    } else {
+      filtered = filtered.filter(s => s.role === currentStaffRoleFilter);
+    }
+  }
+  if (q) {
+    filtered = filtered.filter(s => {
+      const name = String(s.name || '').toLowerCase();
+      const username = String(s.username || '').toLowerCase();
+      const email = String(s.email || '').toLowerCase();
+      const phone = String(s.phone || '').toLowerCase();
+      const title = String(s.adminRoleTitle || '').toLowerCase();
+      const admId = String(s.adminId || '').toLowerCase();
+      const subId = String(s.subadminId || '').toLowerCase();
+      const empId = String(s.employeeId || '').toLowerCase();
+      const id = String(s._id || s.id || '').toLowerCase();
+      const locCity = String(s.assignedLocation?.city || '').toLowerCase();
+      const locPincode = String(s.assignedLocation?.postalCode || '').toLowerCase();
+      return name.includes(q) || username.includes(q) || email.includes(q) || phone.includes(q) || title.includes(q) || admId.includes(q) || subId.includes(q) || empId.includes(q) || id.includes(q) || locCity.includes(q) || locPincode.includes(q);
+    });
+  }
+
+  if (!filtered.length) {
+    const roleLabel = currentStaffRoleFilter === 'admin' ? 'Platform Admins' : currentStaffRoleFilter === 'subadmin' ? 'Sub-Administrators' : currentStaffRoleFilter === 'employee' ? 'Normal Employees' : 'Staff Members';
+    container.innerHTML = `
+      <div style="text-align:center; padding:2.5rem 1rem; color:var(--muted); background:#faf8f5; border:1px dashed var(--line); border-radius:10px;">
+        <span style="font-size:2rem; display:block; margin-bottom:0.5rem;">👥</span>
+        <strong style="font-size:1.1rem; color:var(--ink);">${q ? `No ${roleLabel} found matching "${escapeHtml(q)}"` : `No ${roleLabel} Created Yet`}</strong>
+        <p style="margin-top:0.4rem; font-size:0.85rem;">Use the action buttons above to add Sub-Admins or Normal Employees.</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Staff Member &amp; ID</th>
+            <th>Contact &amp; Role</th>
+            <th>Monthly Salary</th>
+            <th>Operating Location</th>
+            <th>Bank &amp; Account</th>
+            <th style="text-align:right;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${filtered.map(s => {
+            const isSuper = s.role === 'superadmin';
+            const isAdmin = s.role === 'admin' || isSuper;
+            const isEmployee = s.role === 'employee';
+            const roleTitle = s.adminRoleTitle || (isSuper ? 'Super Administrator' : s.role === 'admin' ? 'Platform Administrator' : isEmployee ? 'Normal Employee' : 'Sub-Admin');
+            const isBlocked = Boolean(s.isBlocked);
+            const sId = isEmployee ? (s.employeeId || `emp-${String(s.id || s._id).slice(-4)}`) : isAdmin ? (s.adminId || (isSuper ? 'sup-0001' : `adm-${String(s.id || s._id).slice(-4)}`)) : (s.subadminId || `sub-${String(s.id || s._id).slice(-4)}`);
+            const salaryVal = Number(s.salary || 0);
+
+            const bd = s.bankDetails || {};
+            const isBankApproved = Boolean(bd.isApproved);
+            const hasBank = Boolean(bd.accountNumber);
+
+            let bankBadge = '<span class="badge badge-pending" style="font-size:0.75rem;">⚠️ No Bank Details</span>';
+            if (isAdmin && !hasBank) {
+              bankBadge = '<span class="badge" style="font-size:0.75rem; background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0;">Platform Settlement</span>';
+            } else if (isBankApproved) {
+              bankBadge = '<span class="badge badge-approved" style="font-size:0.75rem; background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0;">🔒 Approved</span>';
+            } else if (hasBank) {
+              bankBadge = '<span class="badge badge-ready" style="font-size:0.75rem; background:#fffbeb; color:#b45309; border:1px solid #fde68a;">⏳ Verification Pending</span>';
+            }
+
+            let roleBadgeHtml = '';
+            if (isSuper) {
+              roleBadgeHtml = '<span class="badge" style="background:#fef3c7; color:#b45309; border:1px solid #fde68a; font-size:0.72rem; font-weight:800;">👑 Super Admin</span>';
+            } else if (isAdmin) {
+              roleBadgeHtml = '<span class="badge" style="background:#fdf2f8; color:#be185d; border:1px solid #fbcfe8; font-size:0.72rem; font-weight:700;">👑 Admin</span>';
+            } else if (isEmployee) {
+              roleBadgeHtml = '<span class="badge" style="background:#fefce8; color:#a16207; border:1px solid #fef08a; font-size:0.72rem; font-weight:700;">👔 Employee</span>';
+            } else {
+              roleBadgeHtml = '<span class="badge" style="background:#e0f2fe; color:#0369a1; font-size:0.72rem; font-weight:700;">🛡️ Sub-Admin</span>';
+            }
+
+            const loc = s.assignedLocation || {};
+            const hasLocation = Boolean(loc.city && loc.postalCode);
+            const locBadge = hasLocation
+              ? `<div style="display:inline-flex; align-items:center; gap:0.35rem; background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; padding:0.25rem 0.55rem; font-size:0.75rem; color:#1e40af; font-weight:600;" title="${escapeHtml((loc.locality ? loc.locality + ', ' : '') + loc.city + ', ' + (loc.state || '') + ' ' + loc.postalCode)}">
+                   <span>📍</span>
+                   <span>${escapeHtml(loc.city)}, ${escapeHtml(loc.postalCode)}</span>
+                   ${loc.state ? `<span style="color:#64748b; font-weight:normal;">(${escapeHtml(loc.state)})</span>` : ''}
+                 </div>`
+              : `<div style="display:inline-flex; align-items:center; gap:0.35rem; background:#fef2f2; border:1px solid #fecaca; border-radius:6px; padding:0.25rem 0.55rem; font-size:0.75rem; color:#b91c1c;">
+                   <span>⚠️</span>
+                   <span>No Location Assigned</span>
+                 </div>`;
+
+            const perms = Array.isArray(s.permissions) ? s.permissions : [];
+            const permsBadges = isEmployee
+              ? `<span class="badge" style="background:#f8fafc; color:#475569; font-size:0.7rem; border:1px solid #e2e8f0;">Department: ${escapeHtml(s.department || 'Operations')}</span>`
+              : isSuper
+                ? '<span class="badge" style="background:#fef3c7; color:#92400e; font-size:0.7rem; border:1px solid #fde68a;">🌟 Full Super Admin Access</span>'
+                : perms.map(pKey => {
+                    const meta = RBAC_PERMISSIONS_MAP[pKey] || { label: pKey, icon: '🔑', color: '#475569' };
+                    return `<span class="badge" style="background:#f1f5f9; color:${meta.color}; border:1px solid #e2e8f0; font-size:0.7rem; margin:0.1rem 0.15rem 0.1rem 0; display:inline-flex; align-items:center; gap:0.2rem;">${meta.icon} ${meta.label}</span>`;
+                  }).join('');
+
+            return `
+              <tr id="staff-row-${s._id}" style="${isBlocked ? 'background:#faf9f6; opacity:0.85;' : ''}">
+                <td>
+                  <div style="font-weight:700; color:var(--ink); font-size:0.95rem;">${escapeHtml(formatCleanName(s.name || s.displayName || 'Staff Member'))}</div>
+                  <div style="display:flex; gap:0.35rem; align-items:center; flex-wrap:wrap; margin-top:0.2rem;">
+                    ${roleBadgeHtml}
+                    <span class="badge" style="background:#f1f5f9; color:#475569; font-size:0.7rem; font-family:monospace; font-weight:700;">ID: ${escapeHtml(sId)}</span>
+                    <span class="badge" style="background:#f8fafc; color:#334155; font-size:0.7rem;">${escapeHtml(roleTitle)}</span>
+                  </div>
+                </td>
+                <td>
+                  <div>✉️ ${escapeHtml(s.email || s.username ? (s.email || `@${s.username}`) : 'N/A')}</div>
+                  ${s.phone ? `<small style="color:var(--muted);">📞 ${escapeHtml(s.phone)}</small>` : ''}
+                  <div style="margin-top:0.25rem; display:flex; flex-wrap:wrap; max-width:240px;">
+                    ${permsBadges}
+                  </div>
+                </td>
+                <td>
+                  <div style="font-weight:800; color:var(--green); font-size:1.05rem;">₹${salaryVal.toLocaleString('en-IN')}</div>
+                  <small style="color:var(--muted);">per month</small>
+                </td>
+                <td>
+                  ${locBadge}
+                  ${loc.locality ? `<div style="font-size:0.72rem; color:var(--muted); margin-top:0.2rem;">${escapeHtml(loc.locality)}</div>` : ''}
+                </td>
+                <td>
+                  <div>${bankBadge}</div>
+                  ${bd.accountNumber ? `<small style="color:var(--muted); font-family:monospace;">A/C: ${escapeHtml(bd.accountNumber.slice(-4).padStart(bd.accountNumber.length, '•'))} • ${escapeHtml(bd.bankName || '')}</small>` : ''}
+                  <div style="margin-top:0.25rem;">
+                    <span class="badge ${isBlocked ? 'badge-cancelled' : 'badge-delivered'}" style="font-size:0.72rem;">
+                      ${isBlocked ? 'Restricted' : 'Active'}
+                    </span>
+                  </div>
+                </td>
+                <td style="text-align:right; white-space:nowrap;">
+                  <button type="button" class="btn btn-outline btn-sm" style="background:#eff6ff; border-color:#93c5fd; color:#1d4ed8; font-weight:600; padding:0.25rem 0.55rem;" onclick="openAssignAdminLocationModal('${s._id || s.id}')" title="Assign default operating location">📍 Location</button>
+                  <button type="button" class="btn btn-sm" style="background:#7c3aed; color:#fff; border:1px solid #7c3aed; font-weight:600; padding:0.25rem 0.55rem;" onclick="openSalaryReleaseModal('${s._id}')" title="Disburse salary">💸 Salary</button>
+                  ${!isEmployee && !isAdmin ? `<button class="btn btn-outline btn-sm" onclick="openEditSubAdminModal('${s._id}')" title="Configure permissions">⚙️ Perms</button>` : ''}
+                  <button type="button" class="btn btn-outline btn-sm" style="background:#fff7ed; border-color:#fdba74; color:#c2410c; font-weight:600; padding:0.25rem 0.55rem;" onclick="openAdminResetPasswordModal('${s._id}', '${escapeHtml(formatCleanName(s.name || s.displayName || 'Staff Member'))}', '${s.role}', '${escapeHtml(s.dob || '')}', '${escapeHtml(s.email || s.phone || s.username || '')}')" title="Reset password">🔑 Password</button>
+                  ${!isAdmin ? `
+                    <button class="btn btn-outline btn-sm" style="${isBlocked ? 'color:var(--green); border-color:var(--green);' : 'color:var(--tomato); border-color:var(--tomato);'} padding:0.25rem 0.5rem;" onclick="toggleSubAdminStatus('${s._id}', ${isBlocked})">
+                      ${isBlocked ? '✓' : '🚫'}
+                    </button>
+                    <button class="btn btn-sm" style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; padding:0.25rem 0.5rem;" onclick="deleteSubAdmin('${s._id}', '${escapeHtml(s.name)}')" title="Delete staff member">🗑️</button>
+                  ` : ''}
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
 async function fetchAdminSubAdmins(force = false) {
   const container = document.getElementById('admin-subadmins-table');
   const statsContainer = document.getElementById('admin-subadmins-stats');
@@ -72,7 +269,7 @@ async function fetchAdminSubAdmins(force = false) {
   }
 
   if (!hasExisting) {
-    container.innerHTML = renderTableSkeleton('sub-administrators');
+    container.innerHTML = renderTableSkeleton('sub-administrators & employees');
   } else {
     container.style.opacity = '0.75';
     container.style.transition = 'opacity 0.15s ease';
@@ -87,99 +284,24 @@ async function fetchAdminSubAdmins(force = false) {
     currentSubAdminsList = subadmins;
 
     // Render stats
+    const totalStaff = subadmins.length;
+    const subAdminCount = subadmins.filter(s => s.role === 'subadmin').length;
+    const employeeCount = subadmins.filter(s => s.role === 'employee').length;
     const activeCount = subadmins.filter(s => !s.isBlocked).length;
     const blockedCount = subadmins.filter(s => s.isBlocked).length;
-    const fullAccessCount = subadmins.filter(s => Array.isArray(s.permissions) && s.permissions.length >= 6).length;
+    const totalSalary = subadmins.reduce((sum, s) => sum + (Number(s.salary) || 0), 0);
+    const approvedBankCount = subadmins.filter(s => s.bankDetails?.isApproved).length;
 
     if (statsContainer) {
       statsContainer.innerHTML = `
-        <div class="stat-card"><span class="stat-label">Total Sub-Admins</span><div class="stat-value">${subadmins.length}</div><span class="stat-note">Delegated operators</span></div>
-        <div class="stat-card"><span class="stat-label">Active Team</span><div class="stat-value" style="color:var(--green);">${activeCount}</div><span class="stat-note">Operating normally</span></div>
-        <div class="stat-card"><span class="stat-label">Blocked / Restricted</span><div class="stat-value" style="color:${blockedCount ? 'var(--tomato)' : 'var(--muted)'};">${blockedCount}</div><span class="stat-note">Access revoked</span></div>
-        <div class="stat-card"><span class="stat-label">Full Co-Admins</span><div class="stat-value">${fullAccessCount}</div><span class="stat-note">All 6 permissions</span></div>
+        <div class="stat-card"><span class="stat-label">Total Staff</span><div class="stat-value">${totalStaff}</div><span class="stat-note">${subAdminCount} Sub-Admins • ${employeeCount} Employees</span></div>
+        <div class="stat-card"><span class="stat-label">Active Team</span><div class="stat-value" style="color:var(--green);">${activeCount}</div><span class="stat-note">${blockedCount} blocked</span></div>
+        <div class="stat-card"><span class="stat-label">Monthly Payroll</span><div class="stat-value" style="color:#7c3aed;">₹${totalSalary.toLocaleString('en-IN')}</div><span class="stat-note">Base commitment / mo</span></div>
+        <div class="stat-card"><span class="stat-label">Bank Verified</span><div class="stat-value" style="color:var(--green);">${approvedBankCount} / ${totalStaff}</div><span class="stat-note">Approved for payouts</span></div>
       `;
     }
 
-    if (!subadmins.length) {
-      container.innerHTML = `
-        <div style="text-align:center; padding:2.5rem 1rem; color:var(--muted); background:#faf8f5; border:1px dashed var(--line); border-radius:10px;">
-          <span style="font-size:2rem; display:block; margin-bottom:0.5rem;">🛡️</span>
-          <strong style="font-size:1.1rem; color:var(--ink);">${q ? `No sub-admins found matching "${escapeHtml(q)}"` : 'No Sub-Administrators Created Yet'}</strong>
-          <p style="margin-top:0.4rem; font-size:0.85rem;">Click "+ Create Sub-Admin" above to delegate management roles with custom permissions.</p>
-          <div style="margin-top:1rem;">
-            <button type="button" class="btn btn-primary btn-sm" style="background:var(--green); border-color:var(--green);" onclick="openCreateSubAdminModal()">➕ Create Sub-Admin</button>
-          </div>
-        </div>
-      `;
-      return;
-    }
-
-    container.innerHTML = `
-      <div class="table-wrapper">
-        <table>
-          <thead>
-            <tr>
-              <th>Sub-Admin &amp; Operational Title</th>
-              <th>Contact Details</th>
-              <th>Assigned RBAC Permissions</th>
-              <th>Status</th>
-              <th>Created By</th>
-              <th style="text-align:right;">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${subadmins.map(s => {
-              const roleTitle = s.adminRoleTitle || 'Sub-Admin';
-              const isBlocked = Boolean(s.isBlocked);
-              const perms = Array.isArray(s.permissions) ? s.permissions : [];
-
-              const permsBadges = perms.map(pKey => {
-                const meta = RBAC_PERMISSIONS_MAP[pKey] || { label: pKey, icon: '🔑', color: '#475569' };
-                return `<span class="badge" style="background:#f1f5f9; color:${meta.color}; border:1px solid #e2e8f0; font-size:0.7rem; margin:0.15rem 0.2rem 0.15rem 0; display:inline-flex; align-items:center; gap:0.25rem;">${meta.icon} ${meta.label}</span>`;
-              }).join('');
-
-              const sId = s.subadminId || String(s.id || s._id);
-              return `
-                <tr id="subadmin-row-${s._id}" style="${isBlocked ? 'background:#faf9f6; opacity:0.85;' : ''}">
-                  <td>
-                    <div style="font-weight:700; color:var(--ink);">${escapeHtml(formatCleanName(s.name || s.displayName || 'Sub-Admin'))}</div>
-                    <div style="display:flex; gap:0.35rem; align-items:center; flex-wrap:wrap; margin-top:0.2rem;">
-                      <span class="badge" style="background:#e0f2fe; color:#0369a1; font-size:0.72rem;">${escapeHtml(roleTitle)}</span>
-                      <span class="badge" style="background:#f1f5f9; color:#475569; font-size:0.7rem; font-family:monospace;" title="MongoDB ID: ${escapeHtml(String(s.id || s._id))}">ID: ${escapeHtml(sId)}</span>
-                    </div>
-                  </td>
-                  <td>
-                    <div>✉️ ${escapeHtml(s.email || 'N/A')}</div>
-                    ${s.phone ? `<small style="color:var(--muted);">📞 ${escapeHtml(s.phone)}</small>` : ''}
-                  </td>
-                  <td>
-                    <div style="display:flex; flex-wrap:wrap; max-width:320px;">
-                      ${permsBadges || '<span style="color:var(--muted); font-size:0.75rem;">No permissions</span>'}
-                    </div>
-                  </td>
-                  <td>
-                    <span class="badge ${isBlocked ? 'badge-cancelled' : 'badge-delivered'}">
-                      ${isBlocked ? 'Restricted / Blocked' : 'Active'}
-                    </span>
-                  </td>
-                  <td>
-                    <small style="color:var(--muted);">${escapeHtml(s.createdBy || 'Platform Admin')}</small>
-                  </td>
-                  <td style="text-align:right; white-space:nowrap;">
-                    <button class="btn btn-outline btn-sm" onclick="openEditSubAdminModal('${s._id}')" title="Configure permissions">⚙️ Permissions</button>
-                    <button type="button" class="btn btn-outline btn-sm" style="background:#fff7ed; border-color:#fdba74; color:#c2410c; font-weight:600;" onclick="openAdminResetPasswordModal('${s._id}', '${escapeHtml(formatCleanName(s.name || s.displayName || 'Sub-Admin'))}', 'subadmin', '${escapeHtml(s.dob || '')}', '${escapeHtml(s.email || s.phone || '')}')" title="Reset password to Tomato<DDMMYYYY> or custom">🔑 Reset Password</button>
-                    <button class="btn btn-outline btn-sm" style="${isBlocked ? 'color:var(--green); border-color:var(--green);' : 'color:var(--tomato); border-color:var(--tomato);'}" onclick="toggleSubAdminStatus('${s._id}', ${isBlocked})">
-                      ${isBlocked ? '✓ Unblock' : '🚫 Block'}
-                    </button>
-                    <button class="btn btn-sm" style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; padding:0.25rem 0.5rem;" onclick="deleteSubAdmin('${s._id}', '${escapeHtml(s.name)}')" title="Delete sub-admin">🗑️</button>
-                  </td>
-                </tr>
-              `;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>
-    `;
+    renderStaffMembersTable();
   } catch (err) {
     if (!hasExisting) {
       container.innerHTML = `<p style="color:var(--tomato-dark); padding:1rem 0;">${err.message}</p>`;
@@ -266,10 +388,13 @@ async function submitCreateSubAdmin(e) {
     return;
   }
 
+  const salary = Number(document.getElementById('subadm-salary')?.value || 0);
+  const dob = (document.getElementById('subadm-dob')?.value || '').trim();
+
   try {
     const res = await apiFetch('/api/admin/subadmins', {
       method: 'POST',
-      body: JSON.stringify({ name, email, phone, password, adminRoleTitle, permissions }),
+      body: JSON.stringify({ name, email, phone, password, adminRoleTitle, permissions, salary, dob }),
     });
 
     alert(res.message || 'Sub-admin created successfully!');
@@ -365,6 +490,183 @@ async function deleteSubAdmin(subAdminId, name) {
     fetchAdminSubAdmins();
   } catch (err) {
     alert(`Error: ${err.message}`);
+  }
+}
+
+// =========================================================================
+// NORMAL EMPLOYEES & SALARY DISBURSEMENT (PAYROLL)
+// =========================================================================
+
+function openCreateEmployeeModal() {
+  const form = document.getElementById('create-employee-form');
+  if (form) form.reset();
+  const title = document.getElementById('emp-title');
+  if (title) title.value = 'Operations Associate';
+  const salary = document.getElementById('emp-salary');
+  if (salary) salary.value = '25000';
+  openModal('admin-create-employee-modal');
+}
+
+async function submitCreateEmployee(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const submitBtn = document.getElementById('btn-create-employee-submit');
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Creating...';
+  }
+
+  const name = document.getElementById('emp-name')?.value?.trim() || '';
+  const adminRoleTitle = document.getElementById('emp-title')?.value?.trim() || 'Operations Associate';
+  const email = document.getElementById('emp-email')?.value?.trim() || '';
+  const phone = document.getElementById('emp-phone')?.value?.trim() || '';
+  const salary = Number(document.getElementById('emp-salary')?.value || 0);
+  const dob = document.getElementById('emp-dob')?.value?.trim() || '';
+  const password = document.getElementById('emp-password')?.value || '';
+
+  if (!name) {
+    alert('Full name is required.');
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Create Employee'; }
+    return;
+  }
+  if (!email && !phone) {
+    alert('Please enter either an email address or mobile number.');
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Create Employee'; }
+    return;
+  }
+  if (!password || password.length < 8) {
+    alert('Password must be at least 8 characters long.');
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Create Employee'; }
+    return;
+  }
+
+  try {
+    const res = await apiFetch('/api/admin/employees', {
+      method: 'POST',
+      body: JSON.stringify({ name, adminRoleTitle, email, phone, salary, dob, password }),
+    });
+
+    alert(res.message || 'Employee created successfully!');
+    closeModal('admin-create-employee-modal');
+    fetchAdminSubAdmins(true);
+  } catch (err) {
+    alert(`Error: ${err.message}`);
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Create Employee';
+    }
+  }
+}
+
+function openSalaryReleaseModal(preselectedStaffId = null) {
+  const select = document.getElementById('salary-target-select');
+  if (select) {
+    select.innerHTML = '<option value="all">👥 All Active Staff (All Sub-Admins &amp; Employees)</option>';
+    currentSubAdminsList.filter(s => !s.isBlocked).forEach(s => {
+      const isEmp = s.role === 'employee';
+      const roleText = isEmp ? 'Employee' : 'Sub-Admin';
+      const opt = document.createElement('option');
+      opt.value = s._id;
+      opt.textContent = `${s.name} (${roleText} • Base: ₹${Number(s.salary || 0).toLocaleString('en-IN')}/mo)`;
+      select.appendChild(opt);
+    });
+
+    if (preselectedStaffId) {
+      select.value = preselectedStaffId;
+    } else {
+      select.value = 'all';
+    }
+  }
+
+  const monthInput = document.getElementById('salary-month-input');
+  if (monthInput) {
+    const now = new Date();
+    monthInput.value = now.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+  }
+
+  handleSalaryTargetChange(select ? select.value : 'all');
+  openModal('admin-salary-release-modal');
+}
+
+function handleSalaryTargetChange(targetVal) {
+  const amtGroup = document.getElementById('salary-amount-group');
+  const amtInput = document.getElementById('salary-amount-input');
+  const countEl = document.getElementById('salary-preview-count');
+  const totalEl = document.getElementById('salary-preview-total');
+
+  if (targetVal === 'all') {
+    if (amtGroup) amtGroup.style.display = 'none';
+    const activeStaff = currentSubAdminsList.filter(s => !s.isBlocked);
+    const totalPayroll = activeStaff.reduce((sum, s) => sum + (Number(s.salary) || 0), 0);
+    if (countEl) countEl.textContent = `${activeStaff.length} active staff members`;
+    if (totalEl) totalEl.textContent = `₹${totalPayroll.toLocaleString('en-IN')}`;
+  } else {
+    if (amtGroup) amtGroup.style.display = 'block';
+    const staff = currentSubAdminsList.find(s => String(s._id) === String(targetVal));
+    const baseSalary = Number(staff?.salary || 0);
+    if (amtInput) amtInput.value = baseSalary;
+    if (countEl) countEl.textContent = `1 staff member (${staff?.name || 'Selected'})`;
+    if (totalEl) totalEl.textContent = `₹${baseSalary.toLocaleString('en-IN')}`;
+  }
+}
+
+async function submitSalaryRelease(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const submitBtn = document.getElementById('btn-submit-salary-release');
+  const targetVal = document.getElementById('salary-target-select')?.value || 'all';
+  const month = document.getElementById('salary-month-input')?.value?.trim() || '';
+  const customAmt = document.getElementById('salary-amount-input')?.value;
+  const note = document.getElementById('salary-notes-input')?.value?.trim() || '';
+
+  if (!month) {
+    alert('Please specify the salary month / period.');
+    return;
+  }
+
+  const isAll = targetVal === 'all';
+  const payload = {
+    all: isAll,
+    staffId: isAll ? undefined : targetVal,
+    month,
+    note,
+    amount: (!isAll && customAmt) ? Number(customAmt) : undefined,
+  };
+
+  const confirmMsg = isAll
+    ? `Are you sure you want to release monthly salaries for ALL active staff for "${month}" from Central Treasury?`
+    : `Are you sure you want to release salary for this staff member for "${month}"?`;
+
+  if (!confirm(confirmMsg)) return;
+
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Disbursing Funds...';
+  }
+
+  try {
+    const res = await apiFetch('/api/admin/payroll/release', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+
+    const reportMsg = `✅ ${res.message || 'Salaries disbursed successfully!'}\n\n` +
+      `Staff Paid: ${res.disbursedCount || 0}\n` +
+      `Total Disbursed: ₹${Number(res.totalDisbursed || 0).toLocaleString('en-IN')}\n` +
+      `Treasury Reference: ${res.month || month}`;
+
+    alert(reportMsg);
+    closeModal('admin-salary-release-modal');
+    fetchAdminSubAdmins(true);
+    if (typeof loadProfileSettings === 'function') {
+      loadProfileSettings();
+    }
+  } catch (err) {
+    alert(`Salary Release Error: ${err.message}`);
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = '💸 Disburse Salary';
+    }
   }
 }
 
@@ -793,5 +1095,182 @@ window.fetchAllAdminFleetPartners = fetchAllAdminFleetPartners;
 window.updateAdminFleetModalTabs = updateAdminFleetModalTabs;
 window.formatDobToDDMMYYYYFrontend = formatDobToDDMMYYYYFrontend;
 window.normalizeDobForDateInput = normalizeDobForDateInput;
+
+// Employee Management & Payroll
+window.filterStaffRole = filterStaffRole;
+window.renderStaffMembersTable = renderStaffMembersTable;
+window.openCreateEmployeeModal = openCreateEmployeeModal;
+window.submitCreateEmployee = submitCreateEmployee;
+window.openSalaryReleaseModal = openSalaryReleaseModal;
+window.handleSalaryTargetChange = handleSalaryTargetChange;
+window.submitSalaryRelease = submitSalaryRelease;
+
+// =========================================================================
+// SUPER ADMIN & ADMIN: LOCATION ASSIGNMENT MODAL & LOGIC
+// =========================================================================
+
+function openAssignAdminLocationModal(adminId) {
+  let staff = currentSubAdminsList.find(s => String(s._id || s.id) === String(adminId));
+  if (!staff && typeof currentControlPanelData !== "undefined" && currentControlPanelData?.admins) {
+    staff = currentControlPanelData.admins.find(s => String(s._id || s.id) === String(adminId));
+  }
+  if (!staff) {
+    alert("Admin / Staff member not found in current directory.");
+    return;
+  }
+
+  const idInput = document.getElementById("assign-loc-admin-id");
+  const summaryEl = document.getElementById("assign-loc-admin-summary");
+  const cityInput = document.getElementById("assign-loc-city");
+  const pincodeInput = document.getElementById("assign-loc-pincode");
+  const stateInput = document.getElementById("assign-loc-state");
+  const localityInput = document.getElementById("assign-loc-locality");
+  const line1Input = document.getElementById("assign-loc-line1");
+
+  if (idInput) idInput.value = String(staff._id || staff.id);
+
+  const loc = staff.assignedLocation || {};
+  const currentCity = loc.city || "Bengaluru";
+  const currentPincode = loc.postalCode || "560001";
+  const currentState = loc.state || "Karnataka";
+  const currentLocality = loc.locality || "Central HQ";
+  const currentLine1 = loc.line1 || "Tomato Operations Headquarters";
+
+  if (cityInput) cityInput.value = currentCity;
+  if (pincodeInput) pincodeInput.value = currentPincode;
+  if (stateInput) stateInput.value = currentState;
+  if (localityInput) localityInput.value = currentLocality;
+  if (line1Input) line1Input.value = currentLine1;
+
+  if (summaryEl) {
+    summaryEl.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+        <div>
+          <strong style="font-size:1rem; color:var(--ink);">${escapeHtml(formatCleanName(staff.name || 'Staff Member'))}</strong>
+          <span class="badge" style="margin-left:0.4rem; background:#e0f2fe; color:#0369a1; font-weight:700;">${escapeHtml(staff.adminRoleTitle || staff.role)}</span>
+          <div style="font-size:0.78rem; color:var(--muted); margin-top:0.2rem;">Email: ${escapeHtml(staff.email || (staff.username ? '@' + staff.username : 'N/A'))} • ID: ${escapeHtml(staff.adminId || staff.subadminId || staff.employeeId || staff._id)}</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:0.75rem; color:var(--muted);">Current Active Location</div>
+          <strong style="color:#0284c7; font-size:0.88rem;">📍 ${escapeHtml(currentCity)}, ${escapeHtml(currentPincode)}</strong>
+        </div>
+      </div>
+    `;
+  }
+
+  openModal("assign-admin-location-modal");
+}
+
+function applyLocationPreset(city, postalCode, state, locality, line1) {
+  const cityInput = document.getElementById("assign-loc-city");
+  const pincodeInput = document.getElementById("assign-loc-pincode");
+  const stateInput = document.getElementById("assign-loc-state");
+  const localityInput = document.getElementById("assign-loc-locality");
+  const line1Input = document.getElementById("assign-loc-line1");
+
+  if (cityInput) cityInput.value = city || "";
+  if (pincodeInput) pincodeInput.value = postalCode || "";
+  if (stateInput) stateInput.value = state || "";
+  if (localityInput) localityInput.value = locality || "";
+  if (line1Input) line1Input.value = line1 || "";
+}
+
+async function submitAssignAdminLocation(event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  const idInput = document.getElementById("assign-loc-admin-id");
+  const cityInput = document.getElementById("assign-loc-city");
+  const pincodeInput = document.getElementById("assign-loc-pincode");
+  const stateInput = document.getElementById("assign-loc-state");
+  const localityInput = document.getElementById("assign-loc-locality");
+  const line1Input = document.getElementById("assign-loc-line1");
+  const submitBtn = document.getElementById("assign-loc-submit-btn");
+
+  const targetId = idInput?.value?.trim();
+  const city = cityInput?.value?.trim();
+  const postalCode = pincodeInput?.value?.trim();
+  const state = stateInput?.value?.trim() || "Karnataka";
+  const locality = localityInput?.value?.trim() || city;
+  const line1 = line1Input?.value?.trim() || `${locality}, ${city}`;
+
+  if (!targetId) {
+    alert("Target admin ID is missing.");
+    return;
+  }
+  if (!city) {
+    alert("Please enter the operating city.");
+    return;
+  }
+  if (!postalCode || !/^\d{5,6}$/.test(postalCode)) {
+    alert("Please enter a valid 5 or 6 digit pincode.");
+    return;
+  }
+
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Assigning Location...";
+  }
+
+  try {
+    const res = await apiFetch(`/api/admin/admins/${encodeURIComponent(targetId)}/location`, {
+      method: "PUT",
+      body: JSON.stringify({ city, postalCode, state, locality, line1 }),
+    });
+
+    closeModal("assign-admin-location-modal");
+
+    // Update in memory directory
+    const idx = currentSubAdminsList.findIndex(s => String(s._id || s.id) === String(targetId));
+    if (idx !== -1 && res.assignedLocation) {
+      currentSubAdminsList[idx].assignedLocation = res.assignedLocation;
+      renderStaffMembersTable();
+    }
+
+    // If current logged-in user is this target admin, immediately refresh location badge!
+    if (user && (String(user._id || user.id) === String(targetId) || user.email === currentSubAdminsList[idx]?.email || user.username === currentSubAdminsList[idx]?.username)) {
+      if (typeof fetchUserLocation === "function") {
+        await fetchUserLocation({
+          city,
+          postalCode,
+          state,
+          locality,
+          line1,
+        });
+      }
+    }
+
+    if (typeof showToastNotification === "function") {
+      showToastNotification({
+        title: "📍 Location Assigned",
+        message: res.message || `Location "${city}, ${postalCode}" assigned successfully!`,
+        type: "success",
+        duration: 4000,
+      });
+    } else {
+      alert(`✅ ${res.message || `Location "${city}, ${postalCode}" assigned successfully!`}`);
+    }
+
+    fetchAdminSubAdmins(true);
+    if (typeof loadAdminControlPanel === "function") {
+      loadAdminControlPanel(true);
+    }
+  } catch (err) {
+    console.error("Assign admin location failed:", err);
+    alert(`Failed to assign location: ${err.message}`);
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "📍 Assign & Save Location";
+    }
+  }
+}
+
+window.openAssignAdminLocationModal = openAssignAdminLocationModal;
+window.applyLocationPreset = applyLocationPreset;
+window.submitAssignAdminLocation = submitAssignAdminLocation;
+
 
 

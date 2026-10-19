@@ -761,23 +761,129 @@ async function fetchAdminAnalytics(isAllTime = false, force = false) {
             <h3 style="font-size:1.05rem; margin:0; font-weight:700;">Payment Method Breakdown</h3>
             <span class="badge ${periodBadgeClass}" style="font-size:0.72rem;">${periodBadgeText}</span>
           </div>
-          ${Object.keys(an.paymentDistribution || {}).length ? Object.entries(an.paymentDistribution || {}).map(([method, info]) => {
-            const count = typeof info === 'object' ? (info.count || 0) : info;
-            const volume = typeof info === 'object' ? (info.volume || 0) : 0;
-            return `
-              <div style="display:flex; justify-content:space-between; align-items:center; padding:0.6rem 0; border-bottom:1px solid #f1eee4;">
-                <div>
-                  <span style="text-transform:uppercase; font-weight:700; font-size:0.88rem;">${escapeHtml(method)}</span>
-                  <div style="font-size:0.75rem; color:var(--muted);">${count} order${count === 1 ? '' : 's'} in period</div>
+          ${(() => {
+            const dist = { ...(an.paymentDistribution || {}) };
+            const codInfo = dist['cod'] || (an.codDetails ? { count: an.codDetails.totalOrders || 0, volume: an.codDetails.collectedVolume || 0, codDetails: an.codDetails } : null);
+            if (codInfo && !dist['cod']) {
+              dist['cod'] = codInfo;
+            }
+
+            const entries = Object.entries(dist);
+            if (!entries.length) {
+              return '<p style="color:var(--muted); font-size:0.88rem; padding:1rem 0;">No payment transactions recorded for this period.</p>';
+            }
+
+            return entries.map(([method, info]) => {
+              const count = typeof info === 'object' ? (info.count || 0) : info;
+              const volume = typeof info === 'object' ? (info.volume || 0) : 0;
+              const isCod = method === 'cod';
+              const cod = isCod ? (info.codDetails || an.codDetails || {}) : null;
+
+              let methodName = 'Cash on Delivery (COD)';
+              let methodIcon = '💵';
+              if (method === 'razorpay') {
+                methodName = 'Razorpay (Online / Cards / UPI)';
+                methodIcon = '⚡';
+              } else if (method === 'wallet') {
+                methodName = 'Tomato In-App Wallet';
+                methodIcon = '👛';
+              } else if (method === 'upi') {
+                methodName = 'Direct UPI';
+                methodIcon = '📱';
+              } else if (method === 'card') {
+                methodName = 'Credit / Debit Card';
+                methodIcon = '💳';
+              } else if (method !== 'cod') {
+                methodName = method.toUpperCase();
+                methodIcon = '💳';
+              }
+
+              const totalCodVol = cod ? (cod.totalVolume || volume || 0) : 0;
+              const codActiveBase = Math.max(1, (totalCodVol - (cod?.cancelledVolume || 0)));
+              const cashPct = cod ? Math.min(100, Math.round(((cod.cashVolume || 0) / codActiveBase) * 100)) : 0;
+              const upiPct = cod ? Math.min(100, Math.round(((cod.upiVolume || 0) / codActiveBase) * 100)) : 0;
+              const pendingPct = cod ? Math.max(0, 100 - cashPct - upiPct) : 0;
+
+              return `
+                <div style="padding:0.75rem 0; border-bottom:1px solid #f1eee4;">
+                  <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                      <div style="display:flex; align-items:center; gap:0.45rem;">
+                        <span style="font-size:1.1rem;">${methodIcon}</span>
+                        <strong style="font-size:0.92rem; color:var(--ink);">${escapeHtml(methodName)}</strong>
+                        ${isCod && cod ? `
+                          <span class="badge ${cod.collectionRate >= 80 ? 'badge-delivered' : 'badge-preparing'}" style="font-size:0.68rem; font-weight:800; padding:0.15rem 0.5rem; border-radius:999px;">
+                            ${cod.collectionRate || 0}% Collected
+                          </span>
+                        ` : ''}
+                      </div>
+                      <div style="font-size:0.75rem; color:var(--muted); margin-top:0.15rem; margin-left:1.55rem;">
+                        ${count} order${count === 1 ? '' : 's'} in selected period
+                      </div>
+                    </div>
+                    <div style="text-align:right;">
+                      <strong style="color:var(--green); font-size:0.95rem;">₹${formatRupees(volume)}</strong>
+                      <div style="font-size:0.72rem; color:var(--muted);">${count} txn${count === 1 ? '' : 's'}</div>
+                    </div>
+                  </div>
+
+                  ${isCod && cod ? `
+                    <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:0.75rem 0.85rem; margin-top:0.6rem; margin-left:0.5rem;">
+                      <!-- Visual Pipeline Progress Bar -->
+                      <div style="margin-bottom:0.55rem;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.72rem; color:#475569; margin-bottom:0.25rem;">
+                          <span style="font-weight:700; text-transform:uppercase; letter-spacing:0.04em;">COD Settlement Breakdown</span>
+                          <span><strong>${cod.collectedOrders || 0}</strong> collected • <strong>${cod.pendingOrders || 0}</strong> pending</span>
+                        </div>
+                        <div style="height:6px; width:100%; background:#e2e8f0; border-radius:999px; overflow:hidden; display:flex;">
+                          <div style="width:${cashPct}%; background:#16a34a;" title="Cash Handed to Rider: ₹${formatRupees(cod.cashVolume || 0)}"></div>
+                          <div style="width:${upiPct}%; background:#0284c7;" title="UPI / QR at Doorstep: ₹${formatRupees(cod.upiVolume || 0)}"></div>
+                          <div style="width:${pendingPct}%; background:#f59e0b;" title="Pending Delivery Collection: ₹${formatRupees(cod.pendingVolume || 0)}"></div>
+                        </div>
+                      </div>
+
+                      <!-- Metric Badges Grid -->
+                      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:0.45rem;">
+                        <div style="background:#fff; border:1px solid #bbf7d0; border-radius:6px; padding:0.4rem 0.55rem;">
+                          <div style="font-size:0.68rem; color:#15803d; font-weight:700; display:flex; align-items:center; gap:0.25rem;">
+                            <span>💵</span> Physical Cash
+                          </div>
+                          <div style="font-size:0.92rem; font-weight:800; color:#166534; margin-top:0.1rem;">₹${formatRupees(cod.cashVolume || 0)}</div>
+                          <div style="font-size:0.68rem; color:#64748b;">${cod.cashOrders || 0} order${cod.cashOrders === 1 ? '' : 's'} collected</div>
+                        </div>
+
+                        <div style="background:#fff; border:1px solid #bae6fd; border-radius:6px; padding:0.4rem 0.55rem;">
+                          <div style="font-size:0.68rem; color:#0369a1; font-weight:700; display:flex; align-items:center; gap:0.25rem;">
+                            <span>📱</span> UPI / QR Code
+                          </div>
+                          <div style="font-size:0.92rem; font-weight:800; color:#075985; margin-top:0.1rem;">₹${formatRupees(cod.upiVolume || 0)}</div>
+                          <div style="font-size:0.68rem; color:#64748b;">${cod.upiOrders || 0} order${cod.upiOrders === 1 ? '' : 's'} collected</div>
+                        </div>
+
+                        <div style="background:#fff; border:1px solid #fde68a; border-radius:6px; padding:0.4rem 0.55rem;">
+                          <div style="font-size:0.68rem; color:#b45309; font-weight:700; display:flex; align-items:center; gap:0.25rem;">
+                            <span>⏳</span> Pending Collection
+                          </div>
+                          <div style="font-size:0.92rem; font-weight:800; color:#92400e; margin-top:0.1rem;">₹${formatRupees(cod.pendingVolume || 0)}</div>
+                          <div style="font-size:0.68rem; color:#64748b;">${cod.pendingOrders || 0} order${cod.pendingOrders === 1 ? '' : 's'} in delivery</div>
+                        </div>
+
+                        ${cod.cancelledOrders ? `
+                          <div style="background:#fff; border:1px solid #fecaca; border-radius:6px; padding:0.4rem 0.55rem;">
+                            <div style="font-size:0.68rem; color:#b91c1c; font-weight:700; display:flex; align-items:center; gap:0.25rem;">
+                              <span>✕</span> Cancelled / Void
+                            </div>
+                            <div style="font-size:0.92rem; font-weight:800; color:#991b1b; margin-top:0.1rem;">₹${formatRupees(cod.cancelledVolume || 0)}</div>
+                            <div style="font-size:0.68rem; color:#64748b;">${cod.cancelledOrders} order${cod.cancelledOrders === 1 ? '' : 's'}</div>
+                          </div>
+                        ` : ''}
+                      </div>
+                    </div>
+                  ` : ''}
                 </div>
-                <div style="text-align:right;">
-                  <strong style="color:var(--green); font-size:0.92rem;">₹${formatRupees(volume)}</strong>
-                  <div style="font-size:0.72rem; color:var(--muted);">${count} txn${count === 1 ? '' : 's'}</div>
-                </div>
-              </div>
-            `;
-          }).join('') : '<p style="color:var(--muted); font-size:0.88rem; padding:1rem 0;">No payment transactions recorded for this period.</p>'}
-        </div>
+              `;
+            }).join('');
+          })()}
 
         <!-- 4. Order Status Breakdown in Selected Period -->
         <div style="background:#fff; border:1px solid var(--line); border-radius:10px; padding:1.2rem;">

@@ -33,34 +33,36 @@ const router = Router();
       try {
         const { role, status, search } = req.query;
 
-        const [restaurants, shops, riders, subadmins] = await Promise.all([
+        const [restaurants, shops, riders, admins, subadmins, employees] = await Promise.all([
           Restaurant.find().sort({ createdAt: -1 }).lean(),
           Shop.find().sort({ createdAt: -1 }).lean(),
           Rider.find().sort({ createdAt: -1 }).lean(),
+          Employee.find({ role: 'admin' }).sort({ createdAt: -1 }).lean(),
           Employee.find({ role: 'subadmin' }).sort({ createdAt: -1 }).lean(),
+          Employee.find({ role: 'employee' }).sort({ createdAt: -1 }).lean(),
         ]);
 
         const formatPartnerBankRow = (
           doc: any,
-          partnerRole: 'restaurant' | 'shop' | 'deliveryPartner' | 'subadmin',
+          partnerRole: 'restaurant' | 'shop' | 'deliveryPartner' | 'admin' | 'subadmin' | 'employee',
         ) => {
           const bd = doc.bankDetails || {};
           const hasAnyField = Boolean(
             bd.accountNumber || bd.ifscCode || bd.accountHolderName || bd.panNumber || bd.panHolderName,
           );
-          const validation = validateBankAndPanDetails(bd);
+          const validation = validateBankAndPanDetails(bd, partnerRole === 'admin');
           const normAccHolder = String(bd.accountHolderName || '').replace(/\s+/g, ' ').trim().toLowerCase();
           const normPanHolder = String(bd.panHolderName || '').replace(/\s+/g, ' ').trim().toLowerCase();
           const nameMatched = Boolean(normAccHolder && normPanHolder && normAccHolder === normPanHolder);
 
-          const isApproved = Boolean(doc.isApproved && (bd.isApproved || validation.valid));
-          const isLocked = Boolean(doc.isApproved || bd.isApproved || bd.isLocked);
+          const isApproved = Boolean(partnerRole === 'admin' || (doc.isApproved && (bd.isApproved || validation.valid)));
+          const isLocked = Boolean(partnerRole === 'admin' ? false : (doc.isApproved || bd.isApproved || bd.isLocked));
 
           return {
             id: String(doc._id),
             _id: String(doc._id),
             partnerCode:
-              doc.restaurantId || doc.shopId || doc.riderId || doc.subadminId || String(doc._id).slice(-6),
+              doc.adminId || doc.restaurantId || doc.shopId || doc.riderId || doc.subadminId || doc.employeeId || String(doc._id).slice(-6),
             name: doc.name,
             displayName: doc.name,
             email: doc.email || '',
@@ -69,7 +71,7 @@ const router = Router();
             isApproved: Boolean(doc.isApproved),
             walletBalance: Math.max(0, Number(doc.walletBalance || 0)),
             creditPoint: Math.max(0, Number((doc as any).creditPoint || 0)),
-            namesMatch: nameMatched,
+            namesMatch: partnerRole === 'admin' ? true : nameMatched,
             bankDetails: {
               accountHolderName: bd.accountHolderName || '',
               bankName: bd.bankName || '',
@@ -91,21 +93,25 @@ const router = Router();
             },
             verification: {
               hasSubmitted: Boolean(bd.isSubmitted || hasAnyField),
-              isValid: validation.valid,
-              nameMatched,
-              validationMessage: hasAnyField
-                ? validation.message || 'Bank & PAN verified (Holder Name matches PAN)'
-                : 'Bank & PAN details not submitted yet',
+              isValid: partnerRole === 'admin' ? true : validation.valid,
+              nameMatched: partnerRole === 'admin' ? true : nameMatched,
+              validationMessage: partnerRole === 'admin'
+                ? (hasAnyField ? 'Admin Bank Details Active (Direct platform operations, no approval needed)' : 'Admin Bank details not added yet')
+                : hasAnyField
+                  ? validation.message || 'Bank & PAN verified (Holder Name matches PAN)'
+                  : 'Bank & PAN details not submitted yet',
             },
             createdAt: doc.createdAt,
           };
         };
 
         let partners = [
+          ...admins.map((adm) => formatPartnerBankRow(adm, 'admin')),
           ...restaurants.map((r) => formatPartnerBankRow(r, 'restaurant')),
           ...shops.map((s) => formatPartnerBankRow(s, 'shop')),
           ...riders.map((r) => formatPartnerBankRow(r, 'deliveryPartner')),
           ...subadmins.map((sa) => formatPartnerBankRow(sa, 'subadmin')),
+          ...employees.map((emp) => formatPartnerBankRow(emp, 'employee')),
         ];
 
         if (typeof role === 'string' && role !== 'all' && role.trim()) {
@@ -161,7 +167,7 @@ const router = Router();
         }
 
         let doc: any = await Restaurant.findById(userId);
-        let partnerRole: 'restaurant' | 'shop' | 'deliveryPartner' | 'subadmin' = 'restaurant';
+        let partnerRole: 'restaurant' | 'shop' | 'deliveryPartner' | 'admin' | 'subadmin' | 'employee' = 'restaurant';
         if (!doc) {
           doc = await Shop.findById(userId);
           partnerRole = 'shop';
@@ -171,13 +177,13 @@ const router = Router();
           partnerRole = 'deliveryPartner';
         }
         if (!doc) {
-          doc = await Employee.findOne({ _id: userId, role: 'subadmin' });
+          doc = await Employee.findOne({ _id: userId, role: { $in: ['admin', 'subadmin', 'employee'] } });
           if (doc) {
-            partnerRole = 'subadmin';
+            partnerRole = doc.role as any;
           }
         }
         if (!doc) {
-          return res.status(404).json({ message: 'Partner (Restaurant, Shop, Rider, or Sub-Admin) not found' });
+          return res.status(404).json({ message: 'Partner (Admin, Restaurant, Shop, Rider, Sub-Admin, or Employee) not found' });
         }
 
         const existingBd = (doc.bankDetails as any)?.toObject
@@ -205,7 +211,7 @@ const router = Router();
           upiId: req.body.upiId !== undefined ? req.body.upiId : existingBd.upiId,
         };
 
-        const validation = validateBankAndPanDetails(mergedPayload);
+        const validation = validateBankAndPanDetails(mergedPayload, partnerRole === 'admin');
         const rawApproveFlag =
           req.body.approvePartner !== undefined
             ? req.body.approvePartner
@@ -237,7 +243,7 @@ const router = Router();
           }
         }
 
-        if (wantsApprove && !validation.valid) {
+        if (wantsApprove && !validation.valid && partnerRole !== 'admin') {
           return res.status(400).json({
             message: `Cannot approve bank details for "${doc.name}": ${validation.message}`,
           });
@@ -245,6 +251,7 @@ const router = Router();
 
         // Even if only saving bank details, if bank & PAN fields are provided, enforce name match
         if (
+          partnerRole !== 'admin' &&
           mergedPayload.accountHolderName &&
           mergedPayload.panHolderName &&
           !validation.valid
@@ -267,8 +274,8 @@ const router = Router();
         const adminIdentifier =
           adminUser?.name || adminUser?.email || adminUser?.userId || 'Admin';
 
-        const nextApproved = unlockForUserEdit ? false : wantsApprove && validation.valid;
-        const nextLocked = unlockForUserEdit ? false : nextApproved;
+        const nextApproved = partnerRole === 'admin' ? true : (unlockForUserEdit ? false : wantsApprove && validation.valid);
+        const nextLocked = partnerRole === 'admin' ? false : (unlockForUserEdit ? false : nextApproved);
 
         doc.isApproved = nextApproved;
         doc.bankDetails = {
@@ -323,6 +330,137 @@ const router = Router();
       } catch (error) {
         console.error('Admin update partner bank details failed:', error);
         return res.status(500).json({ message: 'Unable to update partner bank details' });
+      }
+    });
+
+    // 2.1 Get Staff Bank Details (Admin, Sub-Admin, Employee)
+    router.get('/staff-bank-details', async (req: Request, res: Response) => {
+      try {
+        const user = (req as AuthenticatedRequest).user;
+        if (!user?.userId && !user?.email) return res.status(401).json({ message: 'Authentication required' });
+        let emp = null;
+        if (user.userId && mongoose.isValidObjectId(user.userId)) {
+          emp = await Employee.findById(user.userId).select('name role bankDetails isApproved').lean();
+        }
+        if (!emp && user.email) {
+          emp = await Employee.findOne({ email: user.email.toLowerCase() }).select('name role bankDetails isApproved').lean();
+        }
+        if (!emp && (user as any).adminId) {
+          emp = await Employee.findOne({ adminId: (user as any).adminId }).select('name role bankDetails isApproved').lean();
+        }
+        if (!emp && user.role === 'admin') {
+          emp = await Employee.findOne({ role: 'admin' }).select('name role bankDetails isApproved').lean();
+        }
+        if (!emp) return res.status(404).json({ message: 'Staff profile not found' });
+        const isApproved = Boolean(emp.bankDetails?.isApproved || (emp.role === 'admin' && emp.bankDetails?.accountNumber));
+        return res.json({
+          bankDetails: emp.bankDetails || {},
+          isApproved,
+          role: emp.role,
+        });
+      } catch (error) {
+        console.error('Staff bank details fetch failed:', error);
+        return res.status(500).json({ message: 'Unable to fetch bank details' });
+      }
+    });
+
+    // 2.2 Save Staff Bank Details (Admin, Sub-Admin, Employee)
+    router.put('/staff-bank-details', async (req: Request, res: Response) => {
+      try {
+        const user = (req as AuthenticatedRequest).user;
+        if (!user?.userId && !user?.email) return res.status(401).json({ message: 'Authentication required' });
+
+        let emp = null;
+        if (user.userId && mongoose.isValidObjectId(user.userId)) {
+          emp = await Employee.findById(user.userId);
+        }
+        if (!emp && user.email) {
+          emp = await Employee.findOne({ email: user.email.toLowerCase() });
+        }
+        if (!emp && (user as any).adminId) {
+          emp = await Employee.findOne({ adminId: (user as any).adminId });
+        }
+        if (!emp && user.role === 'admin') {
+          emp = await Employee.findOne({ role: 'admin' });
+        }
+        if (!emp) return res.status(404).json({ message: 'Staff profile not found' });
+
+        const isAdmin = emp.role === 'admin' || user.role === 'admin';
+        const isSubAdminOrEmp = emp.role === 'subadmin' || emp.role === 'employee';
+
+        if (isSubAdminOrEmp && emp.bankDetails?.isApproved && emp.bankDetails?.isLocked) {
+          return res.status(403).json({
+            message: 'Your bank details have been verified and locked by the Administrator. Please contact Administrator for updates.',
+          });
+        }
+
+        const {
+          accountHolderName,
+          panHolderName,
+          panNumber,
+          bankName,
+          accountNumber,
+          ifscCode,
+          upiId,
+        } = req.body;
+
+        const validation = validateBankAndPanDetails(
+          {
+            accountHolderName: accountHolderName || emp.name,
+            panHolderName: panHolderName || accountHolderName || emp.name,
+            panNumber: panNumber || (isAdmin ? (emp.bankDetails?.panNumber || 'ABCDE1234F') : ''),
+            bankName,
+            accountNumber,
+            ifscCode,
+            upiId,
+          },
+          isAdmin,
+        );
+
+        if (!validation.valid || !validation.sanitized) {
+          return res.status(400).json({ message: validation.message || 'Invalid Bank or PAN details.' });
+        }
+
+        const autoApprove = isAdmin;
+        emp.bankDetails = {
+          ...(emp.bankDetails || {}),
+          ...validation.sanitized,
+          isSubmitted: true,
+          isApproved: autoApprove,
+          isLocked: false,
+          submittedAt: new Date(),
+          ...(autoApprove ? { approvedAt: new Date(), approvedBy: 'Platform Admin' } : {}),
+        };
+
+        if (autoApprove) {
+          emp.isApproved = true;
+        }
+
+        await emp.save();
+
+        if (!autoApprove) {
+          const adminUsers = await Employee.find({ role: 'admin' }).select('_id');
+          for (const adm of adminUsers) {
+            await Notification.create({
+              userId: String(adm._id),
+              role: 'admin',
+              title: `Bank Details Submitted: ${emp.name} (${emp.role === 'subadmin' ? 'Sub-Admin' : 'Employee'})`,
+              message: `${emp.name} has submitted bank details for verification and approval.`,
+              type: 'alert',
+            }).catch(() => {});
+          }
+        }
+
+        return res.json({
+          message: autoApprove
+            ? 'Bank details saved and activated successfully! (Admin bank details require no approval)'
+            : 'Bank details submitted successfully! Awaiting approval by the Administrator.',
+          bankDetails: emp.bankDetails,
+          isApproved: emp.bankDetails.isApproved,
+        });
+      } catch (error) {
+        console.error('Staff bank details save failed:', error);
+        return res.status(500).json({ message: 'Unable to save bank details' });
       }
     });
 

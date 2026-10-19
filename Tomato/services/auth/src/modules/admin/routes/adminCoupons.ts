@@ -154,6 +154,27 @@ const router = Router();
           message: 'Please provide the Specific User ID, Email, or Mobile Number for this coupon',
         });
       }
+      if (couponType === 'instant') {
+        if (!targetUserIdentifier) {
+          return res.status(400).json({
+            message: 'Instant coupon must be assigned to a specific user (User ID, Customer ID, Email, or Phone).',
+          });
+        }
+      }
+
+      // Instant coupon: maximum validity 15 days, single use per user and total
+      let finalValidUntil = validUntil;
+      let finalUsageLimitPerUser = usageLimitPerUser;
+      let finalTotalUsageLimit = totalUsageLimit;
+
+      if (couponType === 'instant') {
+        finalUsageLimitPerUser = 1;
+        finalTotalUsageLimit = 1;
+        const max15Days = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000 + 60 * 1000);
+        if (!finalValidUntil || finalValidUntil > max15Days) {
+          finalValidUntil = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
+        }
+      }
 
       const existing = await Coupon.findOne({ code });
       if (existing) {
@@ -176,11 +197,12 @@ const router = Router();
         occasionName,
         targetUserIdentifier,
         applicableStoreType,
-        usageLimitPerUser,
-        totalUsageLimit,
+        usageLimitPerUser: finalUsageLimitPerUser,
+        totalUsageLimit: finalTotalUsageLimit,
         validFrom,
-        validUntil,
+        validUntil: finalValidUntil,
         isActive,
+        isInstant: couponType === 'instant',
         createdBy: (user as any)?.name || user?.role || 'Admin',
       });
 
@@ -277,6 +299,16 @@ const router = Router();
       }
       if (body.isActive !== undefined) {
         coupon.isActive = Boolean(body.isActive);
+      }
+
+      if (coupon.couponType === 'instant') {
+        coupon.isInstant = true;
+        coupon.usageLimitPerUser = 1;
+        coupon.totalUsageLimit = 1;
+        const max15Days = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000 + 60 * 1000);
+        if (!coupon.validUntil || coupon.validUntil > max15Days) {
+          coupon.validUntil = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
+        }
       }
 
       await coupon.save();

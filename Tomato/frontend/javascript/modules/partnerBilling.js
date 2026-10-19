@@ -402,7 +402,7 @@ function renderAdminPartnerBillingKPIs() {
     <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:10px; padding:0.8rem 1rem;">
       <div style="font-size:0.72rem; color:#475569; font-weight:700; text-transform:uppercase;">💵 Gross Net Payouts Payable</div>
       <div style="font-size:1.45rem; font-weight:800; color:#0f172a; margin-top:0.15rem;">₹${totalPayable.toLocaleString('en-IN')}</div>
-      <div style="font-size:0.72rem; color:#475569; margin-top:0.15rem;">After Tomato Comm &amp; Coupon Deductions</div>
+      <div style="font-size:0.72rem; color:#475569; margin-top:0.15rem;">After Comm, 18% GST &amp; Coupon Deductions</div>
     </div>
   `;
 }
@@ -523,7 +523,7 @@ function renderAdminPartnerBillingTable() {
         <td style="text-align:right;">
           <div style="font-weight:700; color:var(--ink); font-size:0.86rem;">₹${Number(p.grossVolume || 0).toLocaleString('en-IN')}</div>
           ${!isRider || Number(p.tomatoCommission || 0) > 0 ? `<div style="font-size:0.7rem; color:var(--muted);">Comm: -₹${Number(p.tomatoCommission || 0).toLocaleString('en-IN')}</div>` : ''}
-          <div style="font-size:0.7rem; color:var(--muted);">GST: -₹${Number(p.gstAmount || 0).toLocaleString('en-IN')}</div>
+          <div style="font-size:0.7rem; color:var(--muted);">GST (18%): -₹${Number(p.gstAmount || 0).toLocaleString('en-IN')}</div>
           ${p.discountsFunded > 0 ? `<div style="font-size:0.7rem; color:#dc2626;">Disc: -₹${Number(p.discountsFunded).toLocaleString('en-IN')}</div>` : ''}
         </td>
         <td style="text-align:right;">
@@ -600,7 +600,7 @@ function renderAdminPartnerBillingTable() {
             <td style="text-align:right;">
               <div style="font-weight:800; color:#0f172a; font-size:0.9rem;">₹${sumGross.toLocaleString('en-IN')}</div>
               <div style="font-size:0.7rem; color:var(--muted); font-weight:500;">Comm: -₹${sumComm.toLocaleString('en-IN')}</div>
-              <div style="font-size:0.7rem; color:var(--muted); font-weight:500;">GST: -₹${sumGst.toLocaleString('en-IN')}</div>
+              <div style="font-size:0.7rem; color:var(--muted); font-weight:500;">GST (18%): -₹${sumGst.toLocaleString('en-IN')}</div>
               ${sumDisc > 0 ? `<div style="font-size:0.7rem; color:#dc2626; font-weight:500;">Disc: -₹${sumDisc.toLocaleString('en-IN')}</div>` : ''}
             </td>
             <td style="text-align:right;">
@@ -737,6 +737,7 @@ function exportAdminPartnerBillingCsv() {
     'Orders Count',
     'Gross Volume (INR)',
     'Commission Deducted (INR)',
+    'GST Deducted (18%) (INR)',
     'Discount Funded (INR)',
     'Total Paid (INR)',
     'Still Pending (INR)',
@@ -756,6 +757,7 @@ function exportAdminPartnerBillingCsv() {
     p.totalOrders || 0,
     Number(p.grossVolume || 0).toFixed(2),
     Number(p.tomatoCommission || 0).toFixed(2),
+    Number(p.gstAmount || 0).toFixed(2),
     Number(p.discountsFunded || 0).toFixed(2),
     Number(p.totalPaid || 0).toFixed(2),
     Number(p.totalPending || 0).toFixed(2),
@@ -766,6 +768,7 @@ function exportAdminPartnerBillingCsv() {
   const sumOrders = adminPartnerBillingData.reduce((sum, p) => sum + Number(p.totalOrders || 0), 0);
   const sumGross = adminPartnerBillingData.reduce((sum, p) => sum + Number(p.grossVolume || 0), 0);
   const sumComm = adminPartnerBillingData.reduce((sum, p) => sum + Number(p.tomatoCommission || 0), 0);
+  const sumGst = adminPartnerBillingData.reduce((sum, p) => sum + Number(p.gstAmount || 0), 0);
   const sumDisc = adminPartnerBillingData.reduce((sum, p) => sum + Number(p.discountsFunded || 0), 0);
   const sumPaid = adminPartnerBillingData.reduce((sum, p) => sum + Number(p.totalPaid || 0), 0);
   const sumPending = adminPartnerBillingData.reduce((sum, p) => sum + Number(p.totalPending || 0), 0);
@@ -783,6 +786,7 @@ function exportAdminPartnerBillingCsv() {
     sumOrders,
     sumGross.toFixed(2),
     sumComm.toFixed(2),
+    sumGst.toFixed(2),
     sumDisc.toFixed(2),
     sumPaid.toFixed(2),
     sumPending.toFixed(2),

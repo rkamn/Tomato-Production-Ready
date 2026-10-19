@@ -97,6 +97,7 @@ const createCustomerRouter = () => {
           if (c.totalUsageLimit > 0 && c.usedCount >= c.totalUsageLimit) return false;
           if (
             c.couponType === 'specific_user' ||
+            c.couponType === 'instant' ||
             (c.couponType === 'settlement' && String(c.targetUserIdentifier || '').trim())
           ) {
             return doesUserMatchTargetIdentifier(c.targetUserIdentifier, userContext);

@@ -512,11 +512,46 @@ const router = Router();
         const totalRestaurants = restaurants.length;
         const totalRiders = riders.length;
 
-        // Payment method distribution in period
+        // Payment method distribution and comprehensive COD metrics in period
         const paymentDistribution: Record<
           string,
-          { count: number; volume: number }
+          {
+            count: number;
+            volume: number;
+            codDetails?: {
+              totalOrders: number;
+              totalVolume: number;
+              collectedOrders: number;
+              collectedVolume: number;
+              cashOrders: number;
+              cashVolume: number;
+              upiOrders: number;
+              upiVolume: number;
+              pendingOrders: number;
+              pendingVolume: number;
+              cancelledOrders: number;
+              cancelledVolume: number;
+              collectionRate: number;
+            };
+          }
         > = {};
+
+        const codDetails = {
+          totalOrders: 0,
+          totalVolume: 0,
+          collectedOrders: 0,
+          collectedVolume: 0,
+          cashOrders: 0,
+          cashVolume: 0,
+          upiOrders: 0,
+          upiVolume: 0,
+          pendingOrders: 0,
+          pendingVolume: 0,
+          cancelledOrders: 0,
+          cancelledVolume: 0,
+          collectionRate: 0,
+        };
+
         for (const o of filteredOrders) {
           const method = (o.paymentMethod || 'cod').toLowerCase();
           if (!paymentDistribution[method]) {
@@ -526,6 +561,51 @@ const router = Router();
           if (isCountableForGMV(o)) {
             paymentDistribution[method].volume += o.totalAmount || 0;
           }
+
+          if (method === 'cod') {
+            const amt = Number(o.totalAmount || 0);
+            codDetails.totalOrders += 1;
+            codDetails.totalVolume += amt;
+
+            const isDelivered = o.status === 'delivered';
+            const isCancelled = o.status === 'cancelled';
+            const isPaid = o.paymentStatus === 'paid' || isDelivered;
+
+            if (isCancelled) {
+              codDetails.cancelledOrders += 1;
+              codDetails.cancelledVolume += amt;
+            } else if (isDelivered || isPaid) {
+              codDetails.collectedOrders += 1;
+              codDetails.collectedVolume += amt;
+
+              const via = String(o.codCollectedVia || '').toLowerCase().trim();
+              if (via === 'upi') {
+                codDetails.upiOrders += 1;
+                codDetails.upiVolume += amt;
+              } else {
+                codDetails.cashOrders += 1;
+                codDetails.cashVolume += amt;
+              }
+            } else {
+              codDetails.pendingOrders += 1;
+              codDetails.pendingVolume += amt;
+            }
+          }
+        }
+
+        const validCodOrders = codDetails.totalOrders - codDetails.cancelledOrders;
+        codDetails.collectionRate = validCodOrders > 0
+          ? Math.round((codDetails.collectedOrders / validCodOrders) * 100)
+          : (codDetails.totalOrders > 0 ? 0 : 100);
+
+        if (paymentDistribution['cod']) {
+          paymentDistribution['cod'].codDetails = codDetails;
+        } else if (codDetails.totalOrders > 0) {
+          paymentDistribution['cod'] = {
+            count: codDetails.totalOrders,
+            volume: codDetails.collectedVolume,
+            codDetails,
+          };
         }
 
         // Top selling dishes in period
@@ -624,6 +704,7 @@ const router = Router();
             totalRiders,
             activeRidersInPeriod,
             paymentDistribution,
+            codDetails,
             topDishes,
             topRestaurants,
             userFilter: trimmedUserId

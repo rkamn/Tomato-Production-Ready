@@ -82,6 +82,11 @@ export const generateSubAdminId = (): Promise<string> =>
 		Boolean(await Employee.exists({ subadminId: { $in: [id, id.toUpperCase()] } })),
 	);
 
+export const generateEmployeeId = (): Promise<string> =>
+	generateIdFromCounter('employeeId', 'emp', 1000, async (id: string) =>
+		Boolean(await Employee.exists({ employeeId: { $in: [id, id.toUpperCase()] } })),
+	);
+
 export const generateAdminId = (): Promise<string> =>
 	generateIdFromCounter('adminId', 'adm', 1000, async (id: string) =>
 		Boolean(await Employee.exists({ adminId: { $in: [id, id.toUpperCase()] } })),
@@ -104,6 +109,7 @@ export const createToken = (user: {
 	customerId?: string;
 	subadminId?: string;
 	adminId?: string;
+	employeeId?: string;
 	shopId?: string;
 }) => {
 	const jwtSecret = process.env.JWT_SECRET || 'tomato-local-development-secret';
@@ -124,6 +130,7 @@ export const createToken = (user: {
 			customerId: formatUserId(user.customerId),
 			subadminId: formatUserId(user.subadminId),
 			adminId: formatUserId((user as any).adminId),
+			employeeId: formatUserId((user as any).employeeId),
 		},
 		jwtSecret,
 		{ expiresIn: '12h' },
@@ -170,6 +177,7 @@ export const userResponse = (user: {
 	const rawCustomerId = user.customerId || (user.role === 'customer' ? `cust-${String(user._id).slice(-4).toLowerCase()}` : '');
 	const rawSubadminId = user.subadminId || (user.role === 'subadmin' ? `sub-${String(user._id).slice(-4).toLowerCase()}` : '');
 	const rawAdminId = (user as any).adminId || (user.role === 'admin' ? ((user as any).adminId || `adm-${String(user._id).slice(-4).toLowerCase()}`) : '');
+	const rawEmployeeId = (user as any).employeeId || (user.role === 'employee' ? ((user as any).employeeId || `emp-${String(user._id).slice(-4).toLowerCase()}`) : '');
 	const rawRestaurantId = user.restaurantId || (user.role === 'restaurant' ? `rest-${String(user._id).slice(-4).toLowerCase()}` : '');
 	const rawShopId = (user as any).shopId || (user.role === 'shop' ? `shop-${String(user._id).slice(-4).toLowerCase()}` : '');
 	const rawRiderId = user.riderId || (user.role === 'deliveryPartner' || (user.role as string) === 'rider' ? `ride-${String(user._id).slice(-4).toLowerCase()}` : '');
@@ -177,6 +185,7 @@ export const userResponse = (user: {
 	const customerId = formatUserId(rawCustomerId);
 	const subadminId = formatUserId(rawSubadminId);
 	const adminId = formatUserId(rawAdminId);
+	const employeeId = formatUserId(rawEmployeeId);
 	const restaurantId = formatUserId(rawRestaurantId);
 	const shopId = formatUserId(rawShopId);
 	const riderId = formatUserId(rawRiderId);
@@ -204,6 +213,11 @@ export const userResponse = (user: {
 		customerId,
 		subadminId,
 		adminId,
+		employeeId,
+		username: (user as any).username || '',
+		isSuperAdmin: user.role === 'superadmin' || (user as any).username === 'super',
+		assignedLocation: (user as any).assignedLocation || null,
+		salary: Math.max(0, Number((user as any).salary || 0)),
 		digipin: user.digipin || '',
 		pincode: resolvePartnerPincode(user),
 		restaurantAddress: user.restaurantAddress || user.shopAddress || '',
@@ -230,8 +244,8 @@ export const registerUser = async (req: Request, res: Response) => {
 	const password = typeof req.body?.password === 'string' ? req.body.password : '';
 	const requestedRole = typeof req.body?.role === 'string' ? req.body.role : 'customer';
 
-	if (requestedRole === 'subadmin') {
-		return res.status(403).json({ message: 'Sub-admin accounts can only be created by an administrator' });
+	if (requestedRole === 'subadmin' || requestedRole === 'employee' || requestedRole === 'admin') {
+		return res.status(403).json({ message: 'Administrative and staff accounts can only be created by an administrator' });
 	}
 
 	const role = USER_ROLES.includes(requestedRole as UserRole) ? requestedRole as UserRole : null;
@@ -511,7 +525,15 @@ export const loginUser = async (req: Request, res: Response) => {
 	try {
 		let user: any = null;
 
-		if (rawValue.includes('@')) {
+		// 1. Check direct username match (e.g. 'super' for Super Admin)
+		user = await (Employee as any).findOne({
+			$or: [
+				{ username: rawValue.toLowerCase() },
+				...(rawValue.toLowerCase() === 'super' ? [{ role: 'superadmin' }] : []),
+			],
+		}).select('+passwordHash');
+
+		if (!user && rawValue.includes('@')) {
 			const emailClean = rawValue.toLowerCase();
 			const escaped = emailClean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 			const emailQuery = { email: { $regex: new RegExp(`^${escaped}$`, 'i') } };
@@ -520,7 +542,7 @@ export const loginUser = async (req: Request, res: Response) => {
 			if (!user) user = await Restaurant.findOne(emailQuery).select('+passwordHash');
 			if (!user) user = await Shop.findOne(emailQuery).select('+passwordHash');
 			if (!user) user = await Employee.findOne(emailQuery).select('+passwordHash');
-		} else {
+		} else if (!user) {
 			const digits = rawValue.replace(/\D/g, '');
 			const phoneVariants = new Set<string>();
 			phoneVariants.add(rawValue);

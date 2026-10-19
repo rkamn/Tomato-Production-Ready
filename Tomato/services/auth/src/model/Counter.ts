@@ -13,6 +13,7 @@ export interface ICounter {
   restaurantId?: number;
   subadminId?: number;
   adminId?: number;
+  employeeId?: number;
   shopId?: number;
   orderId?: number;
   pincodes?: string[];
@@ -34,6 +35,7 @@ const counterSchema: Schema<ICounter> = new Schema(
     restaurantId: { type: Number },
     subadminId: { type: Number },
     adminId: { type: Number },
+    employeeId: { type: Number },
     shopId: { type: Number },
     orderId: { type: Number },
     pincodes: { type: [String], default: undefined },
@@ -100,7 +102,7 @@ export const getNextCounterValue = async (
   const nextVal = counter?.seq ?? counter?.lastNumber ?? (startValue + 1);
 
   // Synchronize with 'all_counters' summary record in counters table
-  const standardFields = ['customerId', 'riderId', 'restaurentId', 'restaurantId', 'shopId', 'subadminId', 'adminId', 'orderId'];
+  const standardFields = ['customerId', 'riderId', 'restaurentId', 'restaurantId', 'shopId', 'subadminId', 'adminId', 'employeeId', 'orderId'];
   const baseKey = counterKey.startsWith('orderId') ? 'orderId' : counterKey;
   if (standardFields.includes(baseKey)) {
     try {

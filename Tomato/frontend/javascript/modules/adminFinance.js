@@ -1163,6 +1163,362 @@ function renderAdminFinanceReportContent() {
   `;
 }
 
+// =========================================================================
+// ADMIN FINANCE: STAFF SALARY MANAGEMENT (ADMIN, SUB-ADMIN, EMPLOYEES)
+// =========================================================================
+let cachedFinancePayrollStaff = [];
+let currentFinanceSalaryRoleFilter = 'all'; // 'all' | 'admin' | 'subadmin' | 'employee'
+
+function openAdminFinanceSalaryModal() {
+  const monthInput = document.getElementById('finance-salary-batch-month');
+  if (monthInput) {
+    const now = new Date();
+    monthInput.value = now.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+  }
+
+  currentFinanceSalaryRoleFilter = 'all';
+  const searchInput = document.getElementById('finance-salary-search-input');
+  if (searchInput) searchInput.value = '';
+
+  filterFinanceSalaryRole('all');
+  openModal('admin-finance-salary-modal');
+  fetchFinancePayrollStaff();
+}
+
+async function fetchFinancePayrollStaff() {
+  const container = document.getElementById('finance-salary-table-container');
+  if (container) {
+    container.innerHTML = '<div style="text-align:center; padding:2rem; color:var(--muted);">Loading staff salary records...</div>';
+  }
+
+  try {
+    const res = await apiFetch('/api/admin/payroll/staff');
+    cachedFinancePayrollStaff = Array.isArray(res.staff) ? res.staff : [];
+
+    // Summary calculations
+    const totalCommitment = cachedFinancePayrollStaff.reduce((sum, s) => sum + (Number(s.salary) || 0), 0);
+    const adminCount = cachedFinancePayrollStaff.filter(s => s.role === 'admin').length;
+    const subadminCount = cachedFinancePayrollStaff.filter(s => s.role === 'subadmin').length;
+    const employeeCount = cachedFinancePayrollStaff.filter(s => s.role === 'employee').length;
+
+    const totalEl = document.getElementById('finance-salary-total-commitment');
+    if (totalEl) totalEl.textContent = `₹${totalCommitment.toLocaleString('en-IN')} / mo`;
+
+    const breakdownEl = document.getElementById('finance-salary-staff-breakdown');
+    if (breakdownEl) {
+      breakdownEl.textContent = `${adminCount} Admin • ${subadminCount} Sub-Admins • ${employeeCount} Normal Employees (${cachedFinancePayrollStaff.length} Total Staff)`;
+    }
+
+    renderFinanceSalaryTable();
+  } catch (err) {
+    if (container) {
+      container.innerHTML = `<div class="empty-state"><p style="color:#dc2626;">Failed to load staff payroll data: ${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+}
+
+function filterFinanceSalaryRole(filterRole) {
+  currentFinanceSalaryRoleFilter = filterRole || 'all';
+  const tabAll = document.getElementById('finance-salary-tab-all');
+  const tabAdmin = document.getElementById('finance-salary-tab-admin');
+  const tabSub = document.getElementById('finance-salary-tab-subadmin');
+  const tabEmp = document.getElementById('finance-salary-tab-employee');
+
+  [tabAll, tabAdmin, tabSub, tabEmp].forEach(tab => {
+    if (tab) {
+      tab.className = 'btn btn-outline btn-sm';
+      tab.style.background = '';
+      tab.style.color = '';
+      tab.style.fontWeight = '500';
+    }
+  });
+
+  const activeTab = filterRole === 'admin' ? tabAdmin : filterRole === 'subadmin' ? tabSub : filterRole === 'employee' ? tabEmp : tabAll;
+  if (activeTab) {
+    activeTab.className = 'btn btn-sm';
+    activeTab.style.background = 'var(--primary)';
+    activeTab.style.color = '#fff';
+    activeTab.style.fontWeight = '700';
+  }
+
+  renderFinanceSalaryTable();
+}
+
+function renderFinanceSalaryTable() {
+  const container = document.getElementById('finance-salary-table-container');
+  if (!container) return;
+
+  const q = document.getElementById('finance-salary-search-input')?.value?.trim().toLowerCase() || '';
+
+  let filtered = cachedFinancePayrollStaff;
+  if (currentFinanceSalaryRoleFilter !== 'all') {
+    filtered = filtered.filter(s => s.role === currentFinanceSalaryRoleFilter);
+  }
+  if (q) {
+    filtered = filtered.filter(s => {
+      const name = String(s.name || '').toLowerCase();
+      const email = String(s.email || '').toLowerCase();
+      const phone = String(s.phone || '').toLowerCase();
+      const title = String(s.adminRoleTitle || '').toLowerCase();
+      const subId = String(s.subadminId || '').toLowerCase();
+      const empId = String(s.employeeId || '').toLowerCase();
+      const admId = String(s.adminId || '').toLowerCase();
+      const id = String(s._id || s.id || '').toLowerCase();
+      return name.includes(q) || email.includes(q) || phone.includes(q) || title.includes(q) || subId.includes(q) || empId.includes(q) || admId.includes(q) || id.includes(q);
+    });
+  }
+
+  if (!filtered.length) {
+    const roleLabel = currentFinanceSalaryRoleFilter === 'admin' ? 'Platform Administrators' : currentFinanceSalaryRoleFilter === 'subadmin' ? 'Sub-Administrators' : currentFinanceSalaryRoleFilter === 'employee' ? 'Normal Employees' : 'Staff Members';
+    container.innerHTML = `
+      <div style="text-align:center; padding:2.5rem 1rem; color:var(--muted); background:#faf8f5; border:1px dashed var(--line); border-radius:10px;">
+        <span style="font-size:2rem; display:block; margin-bottom:0.5rem;">💼</span>
+        <strong style="font-size:1.1rem; color:var(--ink);">${q ? `No ${roleLabel} found matching "${escapeHtml(q)}"` : `No ${roleLabel} Records Available`}</strong>
+        <p style="margin-top:0.4rem; font-size:0.85rem;">Use the Platform Settings or Sub-Admins panel to onboard staff.</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="table-responsive">
+      <table style="width:100%; border-collapse:collapse;">
+        <thead>
+          <tr style="border-bottom:1px solid #e2e8f0; background:#f8fafc; font-size:0.78rem; text-transform:uppercase; color:#64748b;">
+            <th style="padding:0.6rem 0.8rem; text-align:left;">Staff Member &amp; ID</th>
+            <th style="padding:0.6rem 0.8rem; text-align:left;">Contact &amp; Title</th>
+            <th style="padding:0.6rem 0.8rem; text-align:left;">Bank Payout Status</th>
+            <th style="padding:0.6rem 0.8rem; text-align:left;">Base Salary (₹ / mo)</th>
+            <th style="padding:0.6rem 0.8rem; text-align:left;">Wallet Balance</th>
+            <th style="padding:0.6rem 0.8rem; text-align:right;">Salary Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${filtered.map(s => {
+            const isAdmin = s.role === 'admin';
+            const isEmployee = s.role === 'employee';
+            const roleTitle = s.adminRoleTitle || (isAdmin ? 'Super Administrator' : isEmployee ? 'Normal Employee' : 'Sub-Admin');
+            const sId = isAdmin ? (s.adminId || 'ADM-1001') : isEmployee ? (s.employeeId || `emp-${String(s.id || s._id).slice(-4)}`) : (s.subadminId || `sub-${String(s.id || s._id).slice(-4)}`);
+            const salaryVal = Number(s.salary || 0);
+
+            const bd = s.bankDetails || {};
+            const isBankApproved = Boolean(bd.isApproved || isAdmin);
+            const hasBank = Boolean(bd.accountNumber);
+
+            let bankBadge = '<span class="badge badge-pending" style="font-size:0.72rem;">⚠️ No Bank Details</span>';
+            if (isAdmin) {
+              bankBadge = hasBank
+                ? '<span class="badge badge-approved" style="font-size:0.72rem; background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0;">✅ Direct Approval</span>'
+                : '<span class="badge badge-pending" style="font-size:0.72rem; background:#fffbeb; color:#b45309; border:1px solid #fde68a;">⚠️ Add in Profile</span>';
+            } else if (isBankApproved) {
+              bankBadge = '<span class="badge badge-approved" style="font-size:0.72rem; background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0;">🔒 Approved &amp; Locked</span>';
+            } else if (hasBank) {
+              bankBadge = '<span class="badge badge-ready" style="font-size:0.72rem; background:#fffbeb; color:#b45309; border:1px solid #fde68a;">⏳ Pending Verification</span>';
+            }
+
+            const roleBadgeStyle = isAdmin
+              ? 'background:#fef3c7; color:#92400e; border:1px solid #fde68a;'
+              : isEmployee
+              ? 'background:#fefce8; color:#a16207; border:1px solid #fef08a;'
+              : 'background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd;';
+
+            const roleIcon = isAdmin ? '👑 Admin' : isEmployee ? '👔 Employee' : '🛡️ Sub-Admin';
+
+            return `
+              <tr style="border-bottom:1px solid #f1f5f9; transition:background 0.15s ease;">
+                <td style="padding:0.7rem 0.8rem;">
+                  <div style="font-weight:700; color:var(--ink); font-size:0.92rem;">${escapeHtml(formatCleanName(s.name || 'Staff Member'))}</div>
+                  <div style="display:flex; gap:0.35rem; align-items:center; flex-wrap:wrap; margin-top:0.25rem;">
+                    <span class="badge" style="${roleBadgeStyle} font-size:0.7rem; font-weight:700;">${roleIcon}</span>
+                    <span class="badge" style="background:#f1f5f9; color:#475569; font-size:0.7rem; font-family:monospace; font-weight:700;">ID: ${escapeHtml(sId)}</span>
+                  </div>
+                </td>
+                <td style="padding:0.7rem 0.8rem;">
+                  <div style="font-size:0.82rem; font-weight:600; color:#334155;">${escapeHtml(roleTitle)}</div>
+                  <div style="font-size:0.78rem; color:var(--muted); margin-top:2px;">✉️ ${escapeHtml(s.email || 'N/A')}</div>
+                  ${s.phone ? `<div style="font-size:0.78rem; color:var(--muted);">📞 ${escapeHtml(s.phone)}</div>` : ''}
+                </td>
+                <td style="padding:0.7rem 0.8rem;">
+                  <div>${bankBadge}</div>
+                  ${bd.accountNumber ? `<div style="font-size:0.72rem; color:var(--muted); font-family:monospace; margin-top:2px;">${escapeHtml(bd.bankName || 'Bank')} • ••••${escapeHtml(String(bd.accountNumber).slice(-4))}</div>` : ''}
+                </td>
+                <td style="padding:0.7rem 0.8rem;">
+                  <div style="display:flex; align-items:center; gap:0.4rem;">
+                    <strong style="color:var(--green); font-size:1.05rem;">₹${salaryVal.toLocaleString('en-IN')}</strong>
+                    <button type="button" class="btn btn-outline btn-sm" onclick="openEditStaffSalaryModal('${s._id}')" style="padding:0.15rem 0.45rem; font-size:0.7rem;" title="Edit base salary">✏️ Set</button>
+                  </div>
+                  <small style="color:var(--muted); font-size:0.72rem;">per month</small>
+                </td>
+                <td style="padding:0.7rem 0.8rem;">
+                  <strong style="color:#2563eb; font-size:0.95rem;">₹${Number(s.walletBalance || 0).toLocaleString('en-IN')}</strong>
+                  <div style="font-size:0.72rem; color:var(--muted);">Platform Wallet</div>
+                </td>
+                <td style="padding:0.7rem 0.8rem; text-align:right; white-space:nowrap;">
+                  <button type="button" class="btn btn-sm" style="background:#7c3aed; color:#fff; border:1px solid #7c3aed; font-weight:700; padding:0.3rem 0.75rem; display:inline-flex; align-items:center; gap:0.3rem;" onclick="releaseIndividualStaffSalary('${s._id}')" title="Disburse monthly salary for this staff member">
+                    <span>💸 Release</span>
+                  </button>
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function openEditStaffSalaryModal(userId) {
+  const staff = cachedFinancePayrollStaff.find(s => String(s._id || s.id) === String(userId));
+  if (!staff) {
+    alert('Staff member record not found.');
+    return;
+  }
+
+  document.getElementById('edit-salary-user-id').value = staff._id;
+  document.getElementById('edit-salary-amount').value = staff.salary || 0;
+
+  const infoEl = document.getElementById('edit-salary-staff-info');
+  if (infoEl) {
+    const isAdmin = staff.role === 'admin';
+    const isEmp = staff.role === 'employee';
+    const roleBadge = isAdmin ? '👑 Platform Administrator' : isEmp ? '👔 Normal Employee' : '🛡️ Sub-Administrator';
+    infoEl.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <strong style="font-size:0.95rem; color:#0f172a;">${escapeHtml(formatCleanName(staff.name))}</strong>
+          <div style="font-size:0.78rem; color:#64748b; margin-top:2px;">${roleBadge} • ID: ${escapeHtml(staff.adminId || staff.subadminId || staff.employeeId || String(staff._id).slice(-4))}</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:0.72rem; color:#64748b; text-transform:uppercase;">Current Base</div>
+          <strong style="color:#16a34a; font-size:0.95rem;">₹${Number(staff.salary || 0).toLocaleString('en-IN')}</strong>
+        </div>
+      </div>
+    `;
+  }
+
+  openModal('admin-edit-staff-salary-modal');
+}
+
+async function submitEditStaffSalary(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const userId = document.getElementById('edit-salary-user-id')?.value;
+  const salary = Number(document.getElementById('edit-salary-amount')?.value || 0);
+  const saveBtn = document.getElementById('btn-save-staff-salary');
+
+  if (!userId) return;
+
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+  }
+
+  try {
+    const res = await apiFetch(`/api/admin/payroll/salary/${encodeURIComponent(userId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ salary }),
+    });
+
+    alert(res.message || 'Base monthly salary updated successfully!');
+    closeModal('admin-edit-staff-salary-modal');
+    fetchFinancePayrollStaff();
+    if (typeof fetchAdminSubAdmins === 'function') {
+      fetchAdminSubAdmins(true);
+    }
+  } catch (err) {
+    alert(`Error updating salary: ${err.message}`);
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = '💾 Save Salary';
+    }
+  }
+}
+
+async function releaseIndividualStaffSalary(staffId) {
+  const staff = cachedFinancePayrollStaff.find(s => String(s._id || s.id) === String(staffId));
+  if (!staff) {
+    alert('Staff record could not be loaded.');
+    return;
+  }
+
+  const defaultMonth = document.getElementById('finance-salary-batch-month')?.value?.trim() || new Date().toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+  const salaryAmt = Number(staff.salary || 0);
+
+  if (salaryAmt <= 0) {
+    if (!confirm(`Warning: Base monthly salary for ${staff.name} is currently ₹0. Would you like to set their base salary first?`)) {
+      return;
+    }
+    openEditStaffSalaryModal(staffId);
+    return;
+  }
+
+  const confirmMsg = `Disburse monthly salary of ₹${salaryAmt.toLocaleString('en-IN')} to ${staff.name} (${staff.role.toUpperCase()}) for "${defaultMonth}" from Central Treasury?`;
+  if (!confirm(confirmMsg)) return;
+
+  try {
+    const res = await apiFetch('/api/admin/payroll/release', {
+      method: 'POST',
+      body: JSON.stringify({
+        staffId: staff._id,
+        month: defaultMonth,
+        amount: salaryAmt,
+        note: `Monthly Salary Release (${defaultMonth})`,
+      }),
+    });
+
+    alert(`✅ ${res.message || 'Salary released successfully!'}`);
+    fetchFinancePayrollStaff();
+    fetchAdminFinanceTransfers();
+    if (typeof loadProfileSettings === 'function') {
+      loadProfileSettings();
+    }
+  } catch (err) {
+    alert(`Salary Release Error: ${err.message}`);
+  }
+}
+
+async function executeFinanceBatchSalaryRelease() {
+  const month = document.getElementById('finance-salary-batch-month')?.value?.trim() || new Date().toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+  const totalCommitment = cachedFinancePayrollStaff.reduce((sum, s) => sum + (Number(s.salary) || 0), 0);
+  const eligibleStaff = cachedFinancePayrollStaff.filter(s => (Number(s.salary) || 0) > 0 && !s.isBlocked);
+
+  if (!eligibleStaff.length) {
+    alert('No eligible active staff members with configured monthly salaries found.');
+    return;
+  }
+
+  const confirmMsg = `⚠️ Confirm Batch Salary Disbursal:\n\n` +
+    `Disburse salaries to ALL ${eligibleStaff.length} active staff members (Admin, Sub-Admins, Employees) for "${month}"?\n\n` +
+    `Total Central Treasury Commitment: ₹${totalCommitment.toLocaleString('en-IN')}`;
+
+  if (!confirm(confirmMsg)) return;
+
+  try {
+    const res = await apiFetch('/api/admin/payroll/release', {
+      method: 'POST',
+      body: JSON.stringify({
+        all: true,
+        month,
+        note: `Platform Payroll Disbursal - ${month}`,
+      }),
+    });
+
+    const reportMsg = `✅ ${res.message || 'Staff salaries released successfully!'}\n\n` +
+      `Disbursed Count: ${res.disbursedCount || eligibleStaff.length} Staff\n` +
+      `Total Disbursed: ₹${Number(res.totalDisbursed || totalCommitment).toLocaleString('en-IN')}\n` +
+      `Period: ${res.salaryMonth || month}`;
+
+    alert(reportMsg);
+    fetchFinancePayrollStaff();
+    fetchAdminFinanceTransfers();
+    if (typeof loadProfileSettings === 'function') {
+      loadProfileSettings();
+    }
+  } catch (err) {
+    alert(`Salary Batch Release Error: ${err.message}`);
+  }
+}
+
 // Global exports
 window.loadAdminFinancePanel = loadAdminFinancePanel;
 window.fetchAdminFinanceTransfers = fetchAdminFinanceTransfers;
@@ -1184,4 +1540,14 @@ window.printAdminFinanceReport = printAdminFinanceReport;
 window.renderAdminFinanceReportContent = renderAdminFinanceReportContent;
 window.formatNumber = formatNumber;
 window.filterFinanceByToday = filterFinanceByToday;
+
+// Salary & Payroll Management exports
+window.openAdminFinanceSalaryModal = openAdminFinanceSalaryModal;
+window.fetchFinancePayrollStaff = fetchFinancePayrollStaff;
+window.filterFinanceSalaryRole = filterFinanceSalaryRole;
+window.renderFinanceSalaryTable = renderFinanceSalaryTable;
+window.openEditStaffSalaryModal = openEditStaffSalaryModal;
+window.submitEditStaffSalary = submitEditStaffSalary;
+window.releaseIndividualStaffSalary = releaseIndividualStaffSalary;
+window.executeFinanceBatchSalaryRelease = executeFinanceBatchSalaryRelease;
 

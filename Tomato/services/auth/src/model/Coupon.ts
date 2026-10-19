@@ -10,6 +10,7 @@ export const COUPON_TYPES = [
   'special_occasion',
   'shop',
   'grocery',
+  'instant',
 ] as const;
 
 export type CouponType = (typeof COUPON_TYPES)[number];
@@ -34,6 +35,7 @@ export const COUPON_TYPE_LABELS: Record<CouponType, string> = {
   special_occasion: 'Special Occasion',
   shop: 'Shop',
   grocery: 'Grocery',
+  instant: 'Instant Coupon',
 };
 
 export interface ICouponUsage {
@@ -68,6 +70,8 @@ export interface ICoupon extends Document {
   validFrom: Date;
   validUntil?: Date | null;
   isActive: boolean;
+  isInstant?: boolean;
+  isDestroyed?: boolean;
   createdBy?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -197,6 +201,16 @@ const couponSchema = new Schema<ICoupon>(
     isActive: {
       type: Boolean,
       default: true,
+      index: true,
+    },
+    isInstant: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    isDestroyed: {
+      type: Boolean,
+      default: false,
       index: true,
     },
     createdBy: {

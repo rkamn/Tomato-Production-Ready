@@ -238,7 +238,7 @@ type Recipient =
   | { model: 'employee'; record: IEmployee };
 
 const RECIPIENT_PROJECTION =
-  '_id name role email phone walletBalance creditPoint customerId restaurantId shopId riderId subadminId adminId';
+  '_id name role email phone walletBalance creditPoint customerId restaurantId shopId riderId subadminId adminId employeeId';
 
 const escapeRegex = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -304,6 +304,14 @@ export const findRecipientAccount = async (
       ],
     }).select(RECIPIENT_PROJECTION);
     if (emp) return { model: 'employee', record: emp };
+  } else if (prefix === 'emp') {
+    const emp = await Employee.findOne({
+      $or: [
+        { employeeId: { $regex: `^${escaped}$`, $options: 'i' } },
+        { employeeId: { $regex: `^emp[-_ ]*0*${escapedCode}$`, $options: 'i' } },
+      ],
+    }).select(RECIPIENT_PROJECTION);
+    if (emp) return { model: 'employee', record: emp };
   } else if (prefix === 'adm') {
     const emp = await Employee.findOne({
       $or: [
@@ -324,6 +332,7 @@ export const findRecipientAccount = async (
       $or: [
         { subadminId: { $regex: `^${escaped}$`, $options: 'i' } },
         { adminId: { $regex: `^${escaped}$`, $options: 'i' } },
+        { employeeId: { $regex: `^${escaped}$`, $options: 'i' } },
       ],
     }).select(RECIPIENT_PROJECTION),
   ]);

@@ -47,14 +47,23 @@ export interface BankValidationResult {
   };
 }
 
-export function validateBankAndPanDetails(raw: any): BankValidationResult {
+export function validateBankAndPanDetails(raw: any, isAdmin: boolean = false): BankValidationResult {
   const accountHolderName = typeof raw?.accountHolderName === 'string' ? raw.accountHolderName.trim() : '';
   const bankName = typeof raw?.bankName === 'string' ? raw.bankName.trim() : '';
   const accountNumber = typeof raw?.accountNumber === 'string' ? raw.accountNumber.replace(/\s+/g, '').trim() : '';
-  const ifscCode = typeof raw?.ifscCode === 'string' ? raw.ifscCode.replace(/\s+/g, '').toUpperCase().trim() : '';
-  const panNumber = typeof raw?.panNumber === 'string' ? raw.panNumber.replace(/\s+/g, '').toUpperCase().trim() : '';
-  const panHolderName = typeof raw?.panHolderName === 'string' ? raw.panHolderName.trim() : '';
+  let ifscCode = typeof raw?.ifscCode === 'string' ? raw.ifscCode.replace(/\s+/g, '').toUpperCase().trim() : '';
+  let panNumber = typeof raw?.panNumber === 'string' ? raw.panNumber.replace(/\s+/g, '').toUpperCase().trim() : '';
+  let panHolderName = typeof raw?.panHolderName === 'string' ? raw.panHolderName.trim() : '';
   const upiId = typeof raw?.upiId === 'string' ? raw.upiId.trim() : '';
+
+  if (isAdmin) {
+    if (!panHolderName && accountHolderName) {
+      panHolderName = accountHolderName;
+    }
+    if (!panNumber) {
+      panNumber = 'ABCDE1234F';
+    }
+  }
 
   if (!accountHolderName) {
     return { valid: false, message: 'Bank Account Holder Name is required.' };
@@ -68,22 +77,29 @@ export function validateBankAndPanDetails(raw: any): BankValidationResult {
   if (!ifscCode || !/^[A-Z]{4}0[A-Z0-9]{6}$/i.test(ifscCode)) {
     return { valid: false, message: 'Valid 11-character IFSC Code is required (e.g., SBIN0001234).' };
   }
-  if (!panNumber || !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/i.test(panNumber)) {
-    return { valid: false, message: 'Valid 10-character PAN Card Number is required (e.g., ABCDE1234F).' };
-  }
-  if (!panHolderName) {
-    return { valid: false, message: 'Name on PAN Card is required.' };
-  }
+  if (!isAdmin) {
+    if (!panNumber || !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/i.test(panNumber)) {
+      return { valid: false, message: 'Valid 10-character PAN Card Number is required (e.g., ABCDE1234F).' };
+    }
+    if (!panHolderName) {
+      return { valid: false, message: 'Name on PAN Card is required.' };
+    }
 
-  // Normalize whitespace & compare case-insensitively
-  const normBankHolder = accountHolderName.replace(/\s+/g, ' ').toLowerCase();
-  const normPanHolder = panHolderName.replace(/\s+/g, ' ').toLowerCase();
+    // Normalize whitespace & compare case-insensitively
+    const normBankHolder = accountHolderName.replace(/\s+/g, ' ').toLowerCase();
+    const normPanHolder = panHolderName.replace(/\s+/g, ' ').toLowerCase();
 
-  if (normBankHolder !== normPanHolder) {
-    return {
-      valid: false,
-      message: `Bank Account Holder Name ("${accountHolderName}") MUST match the Name on PAN Card ("${panHolderName}").`,
-    };
+    if (normBankHolder !== normPanHolder) {
+      return {
+        valid: false,
+        message: `Bank Account Holder Name ("${accountHolderName}") MUST match the Name on PAN Card ("${panHolderName}").`,
+      };
+    }
+  } else {
+    if (!panHolderName) panHolderName = accountHolderName;
+    if (!panNumber || !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/i.test(panNumber)) {
+      panNumber = 'ABCDE1234F';
+    }
   }
 
   return {
@@ -160,10 +176,13 @@ export async function syncOrderToTomatoPayment(order: any, isShopOrder = false) 
       riderDoc = await Rider.findById(riderIdStr).lean();
     }
 
-    const riderPayoutAmount =
-      existing?.riderPayoutAmount ??
+    const rawRiderPayout =
       riderDoc?.bankDetails?.riderPayoutPerOrder ??
       deliveryFee;
+    const riderGst = Number((rawRiderPayout * 0.18).toFixed(2));
+    const riderPayoutAmount =
+      existing?.riderPayoutAmount ??
+      Math.max(0, Number((rawRiderPayout - riderGst).toFixed(2)));
 
     // Calculate coupon discount and funding split between Tomato and Partner
     let totalCouponDiscount = Number(order.discountAmount || 0);
@@ -205,9 +224,12 @@ export async function syncOrderToTomatoPayment(order: any, isShopOrder = false) 
     const standardTomatoCommission = Number(((subtotal * commissionPct) / 100).toFixed(2));
     const partnerGrossEarnings = Number((subtotal - standardTomatoCommission).toFixed(2));
 
-    // Partner payout: partner gets gross earnings minus partner's coupon discount share
+    // GST: 18% of agreement commission value
+    const commissionGst = Number((standardTomatoCommission * 0.18).toFixed(2));
+
+    // Partner payout: partner gets gross earnings minus partner's coupon discount share minus 18% GST
     const partnerPayoutAmount = Number(
-      Math.max(0, partnerGrossEarnings - partnerDiscountShare).toFixed(2),
+      Math.max(0, partnerGrossEarnings - partnerDiscountShare - commissionGst).toFixed(2),
     );
 
     // Tomato net commission: standard commission minus Tomato's coupon discount share

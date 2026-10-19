@@ -22,7 +22,9 @@ export interface AuthenticatedRequest extends Request {
 		customerId?: string;
 		subadminId?: string;
 		adminId?: string;
+		employeeId?: string;
 		shopId?: string;
+		baseRole?: string;
 	};
 }
 
@@ -45,11 +47,13 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 
 		let permissions: string[] = [];
 		let adminRoleTitle = '';
+		let baseRole = '';
 		let restaurantId = '';
 		let riderId = '';
 		let customerId = '';
 		let subadminId = '';
 		let adminId = '';
+		let employeeId = '';
 		let shopId = '';
 
 		try {
@@ -63,7 +67,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 			} else if (uRole === 'customer') {
 				dbUser = await Customer.findById(uid).select('isBlocked isApproved name role customerId');
 			} else {
-				dbUser = await Employee.findById(uid).select('isBlocked isApproved name role permissions adminRoleTitle restaurantId riderId customerId subadminId adminId');
+				dbUser = await Employee.findById(uid).select('isBlocked isApproved name role baseRole permissions adminRoleTitle restaurantId riderId customerId subadminId adminId employeeId');
 			}
 
 			if (!dbUser) {
@@ -71,7 +75,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 					|| (await Shop.findById(uid).select('isBlocked isApproved name role shopId'))
 					|| (await Rider.findById(uid).select('isBlocked isApproved name role riderId'))
 					|| (await Restaurant.findById(uid).select('isBlocked isApproved name role restaurantId'))
-					|| (await Employee.findById(uid).select('isBlocked isApproved name role permissions adminRoleTitle restaurantId riderId customerId subadminId adminId'));
+					|| (await Employee.findById(uid).select('isBlocked isApproved name role baseRole permissions adminRoleTitle restaurantId riderId customerId subadminId adminId employeeId'));
 			}
 			if (dbUser && dbUser.isBlocked) {
 				return res.status(403).json({ message: 'Your account has been blocked by administrator. Please contact support.' });
@@ -79,12 +83,14 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 			if (dbUser) {
 				permissions = Array.isArray(dbUser.permissions) ? dbUser.permissions : [];
 				adminRoleTitle = dbUser.adminRoleTitle || '';
+				baseRole = dbUser.baseRole || '';
 				restaurantId = dbUser.restaurantId || '';
 				shopId = dbUser.shopId || '';
 				riderId = dbUser.riderId || '';
 				customerId = dbUser.customerId || '';
 				subadminId = dbUser.subadminId || '';
 				adminId = dbUser.adminId || '';
+				employeeId = dbUser.employeeId || '';
 			}
 		} catch {
 			// In case DB is temporarily slow or disconnected during unit tests
@@ -95,6 +101,9 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 		}
 		if (!adminRoleTitle && typeof (payload as any).adminRoleTitle === 'string') {
 			adminRoleTitle = (payload as any).adminRoleTitle;
+		}
+		if (!baseRole && typeof (payload as any).baseRole === 'string') {
+			baseRole = (payload as any).baseRole;
 		}
 		if (!restaurantId && typeof (payload as any).restaurantId === 'string') {
 			restaurantId = (payload as any).restaurantId;
@@ -114,10 +123,14 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 		if (!adminId && typeof (payload as any).adminId === 'string') {
 			adminId = (payload as any).adminId;
 		}
+		if (!employeeId && typeof (payload as any).employeeId === 'string') {
+			employeeId = (payload as any).employeeId;
+		}
 
 		const authenticatedUser: NonNullable<AuthenticatedRequest['user']> = {
 			userId: uid,
 			role: uRole as UserRole,
+			baseRole,
 			permissions,
 			adminRoleTitle,
 			restaurantId,
@@ -126,6 +139,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 			customerId,
 			subadminId,
 			adminId,
+			employeeId,
 		};
 		if (typeof payload.email === 'string') authenticatedUser.email = payload.email;
 		if (typeof payload.phone === 'string') authenticatedUser.phone = payload.phone;
@@ -136,12 +150,19 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 	}
 };
 
-export const requireRole = (...roles: UserRole[]) => (req: Request, res: Response, next: NextFunction) => {
+export const requireRole = (...roles: (UserRole | string)[]) => (req: Request, res: Response, next: NextFunction) => {
 	const user = (req as AuthenticatedRequest).user;
-	if (!user || !roles.includes(user.role)) {
+	if (!user) {
 		return res.status(403).json({ message: 'You do not have permission for this resource' });
 	}
-	return next();
+	if (
+		user.role === 'superadmin' ||
+		roles.includes(user.role) ||
+		(user.baseRole && (roles.includes(user.baseRole as any) || user.baseRole === 'superadmin'))
+	) {
+		return next();
+	}
+	return res.status(403).json({ message: 'You do not have permission for this resource' });
 };
 
 export const requirePermission = (permission: string) => (req: Request, res: Response, next: NextFunction) => {
@@ -149,16 +170,14 @@ export const requirePermission = (permission: string) => (req: Request, res: Res
 	if (!user) {
 		return res.status(401).json({ message: 'Authentication required' });
 	}
-	// Super-admin has full access to all resources
-	if (user.role === 'admin') {
+	// Super-admin & Platform Admin (or custom role with base admin) have full access to all resources
+	if (user.role === 'superadmin' || user.role === 'admin' || user.baseRole === 'admin') {
 		return next();
 	}
-	// Sub-admin must have the specific permission or wildcard
-	if (user.role === 'subadmin') {
-		const perms = Array.isArray(user.permissions) ? user.permissions : [];
-		if (perms.includes(permission) || perms.includes('*')) {
-			return next();
-		}
+	// Sub-admin or custom staff roles check specific permission or wildcard
+	const perms = Array.isArray(user.permissions) ? user.permissions : [];
+	if (perms.includes(permission) || perms.includes('*')) {
+		return next();
 	}
 	return res.status(403).json({
 		message: `Access denied. Requires '${permission}' permission.`,

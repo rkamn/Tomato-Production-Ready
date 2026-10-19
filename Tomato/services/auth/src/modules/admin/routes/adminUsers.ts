@@ -9,6 +9,10 @@ import Rider, { IRider } from '../../../model/Rider.js';
 import Employee, { IEmployee, USER_ROLES, UserRole } from '../../../model/Employee.js';
 import Notification from '../../../model/Notification.js';
 import Order from '../../../model/Order.js';
+import Wallet from '../../../model/Wallet.js';
+import WalletCreditTrack from '../../../model/WalletCreditTrack.js';
+import Payment from '../../../model/Payment.js';
+import Role, { ensureDefaultRoles } from '../../../model/Role.js';
 import { AuthenticatedRequest, requireRole, requirePermission } from '../../../middleware/authenticate.js';
 import {
   hashPassword,
@@ -18,6 +22,7 @@ import {
   generateRiderId,
   generateCustomerId,
   generateSubAdminId,
+  generateEmployeeId,
   generateAdminId,
 } from '../../auth/authController.js';
 import {
@@ -28,6 +33,7 @@ import {
 import {
   validateBankAndPanDetails,
   checkPartnerCanBeApproved,
+  adjustTomatoCentralBankBalance,
   extractPincodeFromText,
   getServiceablePincodes,
   resolvePartnerPincode,
@@ -1443,24 +1449,41 @@ const router = Router();
   // SUB-ADMIN MANAGEMENT & ROLE-BASED ACCESS CONTROL (RBAC)
   // =========================================================================
 
-  // List all sub-admins with their permissions
+  // List all sub-admins & employees with their permissions & salary
   router.get(
     '/subadmins',
     requirePermission('subadmins_manage'),
     async (req: Request, res: Response) => {
       try {
-        const { search } = req.query;
-        const filter: Record<string, any> = { role: 'subadmin' };
+        const { search, role: queryRole } = req.query;
+        let roleFilter: any;
+        if (queryRole === 'admin') {
+          roleFilter = 'admin';
+        } else if (queryRole === 'subadmin') {
+          roleFilter = 'subadmin';
+        } else if (queryRole === 'employee') {
+          roleFilter = 'employee';
+        } else {
+          roleFilter = { $in: ['admin', 'subadmin', 'employee'] };
+        }
+        const filter: Record<string, any> = { role: roleFilter };
 
         if (typeof search === 'string' && search.trim()) {
           const term = search.trim();
           const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
           const orConditions: any[] = [
             { name: { $regex: escaped, $options: 'i' } },
+            { username: { $regex: escaped, $options: 'i' } },
             { email: { $regex: escaped, $options: 'i' } },
             { phone: { $regex: escaped, $options: 'i' } },
             { adminRoleTitle: { $regex: escaped, $options: 'i' } },
+            { adminId: { $regex: escaped, $options: 'i' } },
             { subadminId: { $regex: escaped, $options: 'i' } },
+            { employeeId: { $regex: escaped, $options: 'i' } },
+            { 'assignedLocation.city': { $regex: escaped, $options: 'i' } },
+            { 'assignedLocation.postalCode': { $regex: escaped, $options: 'i' } },
+            { 'assignedLocation.state': { $regex: escaped, $options: 'i' } },
+            { 'assignedLocation.locality': { $regex: escaped, $options: 'i' } },
             {
               $expr: {
                 $regexMatch: {
@@ -1483,8 +1506,8 @@ const router = Router();
           total: subadmins.length,
         });
       } catch (error) {
-        console.error('Fetch sub-admins failed:', error);
-        return res.status(500).json({ message: 'Unable to fetch sub-admins' });
+        console.error('Fetch sub-admins and staff failed:', error);
+        return res.status(500).json({ message: 'Unable to fetch sub-admins and staff' });
       }
     },
   );
@@ -1496,13 +1519,13 @@ const router = Router();
     async (req: Request, res: Response) => {
       try {
         const creator = (req as AuthenticatedRequest).user;
-        if (creator?.role !== 'admin') {
+        if (creator?.role !== 'admin' && creator?.role !== 'superadmin') {
           return res.status(403).json({
             message: 'Access denied. Only the platform administrator can create sub-admin accounts.',
           });
         }
 
-        const { name, email, phone, password, adminRoleTitle, permissions } =
+        const { name, email, phone, password, adminRoleTitle, permissions, salary, dob } =
           req.body;
 
         if (!name || (!email && !phone) || !password) {
@@ -1568,6 +1591,8 @@ const router = Router();
               ? adminRoleTitle.trim()
               : 'Operations Sub-Admin',
           permissions: safePermissions,
+          salary: Math.max(0, Number(salary || 0)),
+          dob: dob && typeof dob === 'string' ? dob.trim() : '',
           createdBy: creator?.name || creator?.email || 'Platform Admin',
         };
         if (cleanEmail) subAdminData.email = cleanEmail;
@@ -1594,6 +1619,294 @@ const router = Router();
     },
   );
 
+  // Create normal employee account (Admin only)
+  router.post(
+    '/employees',
+    requireRole('admin', 'superadmin'),
+    async (req: Request, res: Response) => {
+      try {
+        const creator = (req as AuthenticatedRequest).user;
+        const { name, email, phone, password, adminRoleTitle, salary, dob } = req.body;
+
+        if (!name || (!email && !phone) || !password) {
+          return res.status(400).json({
+            message: 'Name, email or phone, and password are required',
+          });
+        }
+
+        if (typeof password !== 'string' || password.length < 8) {
+          return res.status(400).json({ message: 'Password must be at least 8 characters long' });
+        }
+
+        const cleanEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+        const cleanPhone = typeof phone === 'string' ? phone.trim() : '';
+
+        const existing = await Employee.findOne({
+          $or: [
+            ...(cleanEmail ? [{ email: cleanEmail }] : []),
+            ...(cleanPhone ? [{ phone: cleanPhone }] : []),
+          ],
+        });
+
+        if (existing) {
+          return res.status(409).json({ message: 'An account with that email or phone already exists' });
+        }
+
+        const empData: Record<string, any> = {
+          name: name.trim(),
+          employeeId: await generateEmployeeId(),
+          passwordHash: await hashPassword(password),
+          role: 'employee',
+          isApproved: true,
+          isBlocked: false,
+          adminRoleTitle:
+            adminRoleTitle && typeof adminRoleTitle === 'string'
+              ? adminRoleTitle.trim()
+              : 'Operations Staff',
+          salary: Math.max(0, Number(salary || 0)),
+          dob: dob && typeof dob === 'string' ? dob.trim() : '',
+          permissions: ['dashboard_view'],
+          createdBy: creator?.name || creator?.email || 'Platform Admin',
+        };
+        if (cleanEmail) empData.email = cleanEmail;
+        if (cleanPhone) empData.phone = cleanPhone;
+
+        const emp = await Employee.create(empData);
+
+        await Notification.create({
+          userId: String(emp._id),
+          role: 'employee',
+          title: 'Welcome to Tomato Platform Team',
+          message: `Your employee account (${emp.adminRoleTitle}) has been created by the Administrator.`,
+          type: 'system',
+        });
+
+        return res.status(201).json({
+          message: `Employee "${emp.name}" created successfully!`,
+          employee: userResponse(emp),
+        });
+      } catch (error) {
+        console.error('Create employee failed:', error);
+        return res.status(500).json({ message: 'Unable to create employee' });
+      }
+    },
+  );
+
+  // Admin Release Salary for Sub-Admins and Normal Employees
+  router.post(
+    '/payroll/release',
+    requireRole('admin'),
+    async (req: Request, res: Response) => {
+      try {
+        const adminUser = (req as AuthenticatedRequest).user;
+        const { staffId, month, amount, note, all } = req.body;
+        const salaryMonth = month || new Date().toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+        const adminNote = note || `Monthly Salary Release - ${salaryMonth}`;
+
+        let targets: any[] = [];
+        if (all) {
+          targets = await Employee.find({
+            role: { $in: ['admin', 'subadmin', 'employee'] },
+            isBlocked: false,
+          });
+        } else if (staffId) {
+          const staff = await Employee.findOne({
+            _id: staffId,
+            role: { $in: ['admin', 'subadmin', 'employee'] },
+          });
+          if (!staff) {
+            return res.status(404).json({ message: 'Staff member not found.' });
+          }
+          targets = [staff];
+        } else {
+          return res.status(400).json({ message: 'Specify staffId or set all: true to disburse salary.' });
+        }
+
+        if (!targets.length) {
+          return res.status(400).json({ message: 'No active staff (admin, sub-admins, or employees) available for salary release.' });
+        }
+
+        const disbursedResults: any[] = [];
+        let totalDisbursed = 0;
+
+        for (const staff of targets) {
+          const payoutAmt = (amount !== undefined && amount !== null && !all)
+            ? Math.max(0, Number(amount))
+            : Math.max(0, Number(staff.salary || amount || 0));
+
+          if (payoutAmt <= 0) {
+            disbursedResults.push({
+              staffId: String(staff._id),
+              name: staff.name,
+              role: staff.role,
+              status: 'skipped',
+              reason: 'Salary amount is ₹0. Set base monthly salary first.',
+            });
+            continue;
+          }
+
+          // Credit wallet balance
+          staff.walletBalance = Number(((staff.walletBalance || 0) + payoutAmt).toFixed(2));
+          await staff.save();
+
+          await Wallet.updateOne(
+            { userId: String(staff._id) },
+            { $set: { walletBalance: staff.walletBalance } },
+            { upsert: true },
+          ).catch(() => {});
+
+          // Decrement Tomato Central Bank Treasury balance
+          await adjustTomatoCentralBankBalance(-payoutAmt);
+
+          const utrRef = `SAL-${salaryMonth.replace(/\s+/g, '').toUpperCase()}-${String(staff._id).slice(-4)}-${Date.now().toString().slice(-4)}`;
+
+          // Record in WalletCreditTrack ledger
+          await WalletCreditTrack.create({
+            recordType: 'transfer',
+            transferType: 'wallet_balance',
+            senderUserId: adminUser?.userId || 'TOMATO-CENTRAL-BANK',
+            senderName: adminUser?.name || 'Platform Administrator',
+            senderRole: 'admin',
+            senderEmail: adminUser?.email || 'admin@tomato.com',
+            receiverUserId: String(staff._id),
+            receiverName: staff.name,
+            receiverRole: staff.role,
+            receiverEmail: staff.email || '',
+            receiverMobile: staff.phone || '',
+            receiverCurrentWalletBalance: staff.walletBalance,
+            walletBalanceTransferred: payoutAmt,
+            creditTransferred: payoutAmt,
+            amount: payoutAmt,
+            purpose: `${adminNote} (Disbursed to Platform Wallet & Settlement Treasury)`,
+            orderNumber: utrRef,
+          });
+
+          // Also record in Payment settlements collection for financial audit
+          await Payment.create({
+            orderNumber: utrRef,
+            customerName: adminUser?.name || 'Platform Admin',
+            partnerName: staff.name,
+            partnerRole: (staff.role === 'admin' ? 'admin' : staff.role === 'subadmin' ? 'subadmin' : 'employee') as any,
+            partnerId: String(staff._id),
+            totalAmount: payoutAmt,
+            partnerPayoutAmount: payoutAmt,
+            tomatoCommissionAmount: 0,
+            agreementCommissionPercent: 0,
+            paymentMethod: 'wallet',
+            tomatoAccountStatus: 'received',
+            partnerPayoutStatus: 'approved_paid',
+            partnerPaidAt: new Date(),
+            partnerPayoutRef: utrRef,
+            partnerBankSnapshot: staff.bankDetails || {},
+          }).catch(() => {});
+
+          // Notify staff member
+          await Notification.create({
+            userId: String(staff._id),
+            role: staff.role,
+            title: `Salary Released: ₹${payoutAmt} for ${salaryMonth}`,
+            message: `Platform Admin has approved and released your salary of ₹${payoutAmt} for ${salaryMonth}. Reference: ${utrRef}.`,
+            type: 'service',
+          }).catch(() => {});
+
+          totalDisbursed += payoutAmt;
+          disbursedResults.push({
+            staffId: String(staff._id),
+            code: staff.adminId || staff.subadminId || staff.employeeId || String(staff._id).slice(-6),
+            name: staff.name,
+            role: staff.role,
+            amount: payoutAmt,
+            status: 'paid',
+            utr: utrRef,
+            newWalletBalance: staff.walletBalance,
+          });
+        }
+
+        return res.json({
+          success: true,
+          message: `Salary for ${salaryMonth} released successfully! Disbursed ₹${totalDisbursed.toLocaleString('en-IN')} to ${disbursedResults.filter(r => r.status === 'paid').length} staff member(s).`,
+          salaryMonth,
+          totalDisbursed,
+          results: disbursedResults,
+        });
+      } catch (error) {
+        console.error('Salary release failed:', error);
+        return res.status(500).json({ message: 'Unable to release salary' });
+      }
+    },
+  );
+
+  // List all payroll staff (Admin, Sub-Admins, Employees, Custom Roles)
+  router.get(
+    '/payroll/staff',
+    requireRole('superadmin', 'admin', 'subadmin'),
+    async (_req: Request, res: Response) => {
+      try {
+        const staff = await Employee.find(
+          {},
+          {
+            name: 1,
+            email: 1,
+            phone: 1,
+            role: 1,
+            baseRole: 1,
+            adminRoleTitle: 1,
+            adminId: 1,
+            subadminId: 1,
+            employeeId: 1,
+            salary: 1,
+            walletBalance: 1,
+            creditPoint: 1,
+            bankDetails: 1,
+            isBlocked: 1,
+            isApproved: 1,
+            createdAt: 1,
+          },
+        ).sort({ role: 1, createdAt: 1 });
+
+        return res.json({ success: true, staff });
+      } catch (error) {
+        console.error('Fetch payroll staff failed:', error);
+        return res.status(500).json({ message: 'Unable to fetch payroll staff.' });
+      }
+    },
+  );
+
+  // Update base monthly salary for any staff member (Admin, Sub-Admin, or Normal Employee)
+  router.put(
+    '/payroll/salary/:userId',
+    requireRole('admin'),
+    async (req: Request, res: Response) => {
+      try {
+        const { userId } = req.params;
+        const { salary } = req.body;
+        if (!userId || !mongoose.isValidObjectId(userId)) {
+          return res.status(400).json({ message: 'Valid user ID is required.' });
+        }
+        const numericSalary = Math.max(0, Number(salary || 0));
+
+        const staff = await Employee.findOneAndUpdate(
+          { _id: userId, role: { $in: ['admin', 'subadmin', 'employee'] } },
+          { $set: { salary: numericSalary } },
+          { returnDocument: 'after' },
+        );
+
+        if (!staff) {
+          return res.status(404).json({ message: 'Staff member not found.' });
+        }
+
+        return res.json({
+          success: true,
+          message: `Base salary for ${staff.name} (${staff.role.toUpperCase()}) updated to ₹${numericSalary.toLocaleString('en-IN')}/mo`,
+          staff,
+        });
+      } catch (error) {
+        console.error('Update staff salary failed:', error);
+        return res.status(500).json({ message: 'Unable to update base salary.' });
+      }
+    },
+  );
+
   // Update sub-admin permissions and role title
   router.put(
     '/subadmins/:id/permissions',
@@ -1601,7 +1914,7 @@ const router = Router();
     async (req: Request, res: Response) => {
       try {
         const currentUser = (req as AuthenticatedRequest).user;
-        if (currentUser?.role !== 'admin') {
+        if (currentUser?.role !== 'admin' && currentUser?.role !== 'superadmin') {
           return res.status(403).json({
             message: 'Access denied. Only the platform administrator can update sub-admin roles and permissions.',
           });
@@ -1680,7 +1993,7 @@ const router = Router();
     async (req: Request, res: Response) => {
       try {
         const currentUser = (req as AuthenticatedRequest).user;
-        if (currentUser?.role !== 'admin') {
+        if (currentUser?.role !== 'admin' && currentUser?.role !== 'superadmin') {
           return res.status(403).json({
             message: 'Access denied. Only the platform administrator can change sub-admin status.',
           });
@@ -1702,7 +2015,7 @@ const router = Router();
         const target = await Employee.findById(subAdminId);
         if (!target)
           return res.status(404).json({ message: 'Sub-admin not found' });
-        if (target.role !== 'subadmin') {
+        if (target.role !== 'subadmin' && target.role !== 'employee') {
           return res
             .status(403)
             .json({
@@ -1718,7 +2031,7 @@ const router = Router();
         await target.save();
 
         return res.json({
-          message: `Sub-admin account ${nextBlocked ? 'blocked' : 'unblocked'} successfully`,
+          message: `Staff account ${nextBlocked ? 'blocked' : 'unblocked'} successfully`,
           subadmin: userResponse(target),
         });
       } catch (error) {
@@ -1737,32 +2050,32 @@ const router = Router();
     async (req: Request, res: Response) => {
       try {
         const currentUser = (req as AuthenticatedRequest).user;
-        if (currentUser?.role !== 'admin') {
+        if (currentUser?.role !== 'admin' && currentUser?.role !== 'superadmin') {
           return res.status(403).json({
-            message: 'Access denied. Only the platform administrator can delete sub-admin accounts.',
+            message: 'Access denied. Only the platform administrator can delete staff accounts.',
           });
         }
 
         const subAdminId = req.params.id;
         if (!mongoose.isValidObjectId(subAdminId)) {
-          return res.status(400).json({ message: 'Invalid sub-admin ID' });
+          return res.status(400).json({ message: 'Invalid staff ID' });
         }
 
         if (currentUser?.userId === subAdminId) {
           return res
             .status(400)
             .json({
-              message: 'You cannot delete your own administrator account',
+              message: 'You cannot delete your own account',
             });
         }
 
         const target = await Employee.findById(subAdminId);
         if (!target)
-          return res.status(404).json({ message: 'Sub-admin not found' });
-        if (target.role !== 'subadmin') {
+          return res.status(404).json({ message: 'Staff member not found' });
+        if (target.role === 'admin' || target.role === 'superadmin') {
           return res
             .status(403)
-            .json({ message: 'Access denied. Administrator accounts cannot be deleted.' });
+            .json({ message: 'Access denied. Platform Administrator accounts cannot be deleted.' });
         }
 
         await Employee.findByIdAndDelete(subAdminId);
@@ -1778,5 +2091,512 @@ const router = Router();
     },
   );
 
+  // =========================================================================
+  // CONTROL PANEL: SUMMARY & DIRECTORY OF ADMINS & OPERATING ADDRESSES
+  // =========================================================================
+  router.get(
+    '/control-panel',
+    requireRole('superadmin', 'admin', 'subadmin'),
+    async (req: Request, res: Response) => {
+      try {
+        const caller = (req as AuthenticatedRequest).user;
+        const isSuperAdmin = caller?.role === 'superadmin';
+
+        // 1. Fetch current caller's profile & assigned location
+        let myEmployeeDoc: any = null;
+        if (caller?.userId && mongoose.isValidObjectId(caller.userId)) {
+          myEmployeeDoc = await Employee.findById(caller.userId).lean();
+        }
+        if (!myEmployeeDoc && caller?.email) {
+          myEmployeeDoc = await Employee.findOne({ email: caller.email.toLowerCase() }).lean();
+        }
+        if (!myEmployeeDoc && (caller as any)?.username) {
+          myEmployeeDoc = await Employee.findOne({ username: (caller as any).username.toLowerCase() }).lean();
+        }
+
+        // 2. Fetch all platform staff (superadmin, admin, subadmin, employee, custom roles)
+        const admins = await Employee.find({})
+          .sort({ role: 1, createdAt: 1 })
+          .lean();
+
+        // 3. Fetch roles with assigned counts
+        await ensureDefaultRoles();
+        const allRoles = await Role.find({}).sort({ isSystem: -1, createdAt: 1 }).lean();
+        const roleCounts: Record<string, number> = {};
+        for (const adm of admins) {
+          const rKey = (adm as any).role || 'employee';
+          roleCounts[rKey] = (roleCounts[rKey] || 0) + 1;
+        }
+        const rolesWithCounts = allRoles.map((r: any) => ({
+          ...r,
+          id: r._id,
+          assignedCount: roleCounts[r.roleKey] || 0,
+        }));
+
+        return res.json({
+          success: true,
+          isSuperAdmin,
+          currentUserId: caller?.userId,
+          currentUserRole: caller?.role,
+          myLocation: myEmployeeDoc?.assignedLocation || {
+            city: 'Bengaluru',
+            postalCode: '560001',
+            state: 'Karnataka',
+            locality: 'Central HQ',
+            line1: 'Tomato Operations Headquarters',
+            label: 'Operations HQ',
+          },
+          admins: admins.map((a: any) => userResponse(a)),
+          roles: rolesWithCounts,
+        });
+      } catch (error) {
+        console.error('Fetch control panel data failed:', error);
+        return res.status(500).json({ message: 'Unable to load control panel data' });
+      }
+    },
+  );
+
+  // =========================================================================
+  // SUPER ADMIN ONLY: ASSIGN & EDIT ADMIN OPERATING LOCATIONS
+  // =========================================================================
+  const handleAdminLocationAssignment = async (req: Request, res: Response) => {
+    try {
+      const caller = (req as AuthenticatedRequest).user;
+      if (caller?.role !== 'superadmin') {
+        return res.status(403).json({
+          message: 'Access denied. Only Super Administrator can assign or edit administrator operating locations.',
+        });
+      }
+
+      const targetId = String(req.params.id || '').trim();
+      const { city, postalCode, state, locality, line1, label, digipin, lat, lng } = req.body;
+
+      if (!targetId) {
+        return res.status(400).json({ message: 'Target admin or staff ID is required' });
+      }
+
+      let targetEmployee: any = null;
+      if (mongoose.isValidObjectId(targetId)) {
+        targetEmployee = await Employee.findById(targetId);
+      }
+      if (!targetEmployee) {
+        targetEmployee = await Employee.findOne({
+          $or: [
+            { adminId: targetId },
+            { subadminId: targetId },
+            { employeeId: targetId },
+            { username: targetId.toLowerCase() },
+            { email: targetId.toLowerCase() },
+          ],
+        });
+      }
+
+      if (!targetEmployee) {
+        return res.status(404).json({ message: 'Admin / Staff account not found' });
+      }
+
+      const cleanCity = typeof city === 'string' ? city.trim() : '';
+      const cleanPincode = typeof postalCode === 'string' ? postalCode.trim() : '';
+
+      if (!cleanCity) {
+        return res.status(400).json({ message: 'City is required for location assignment' });
+      }
+      if (!cleanPincode || !/^\d{5,6}$/.test(cleanPincode)) {
+        return res.status(400).json({ message: 'A valid 5 or 6 digit pincode is required' });
+      }
+
+      const cleanState = typeof state === 'string' && state.trim() ? state.trim() : 'Karnataka';
+      const cleanLocality = typeof locality === 'string' && locality.trim() ? locality.trim() : cleanCity;
+      const cleanLine1 = typeof line1 === 'string' && line1.trim() ? line1.trim() : `${cleanLocality}, ${cleanCity}`;
+      const cleanLabel = typeof label === 'string' && label.trim() ? label.trim() : `${cleanCity} Regional Office`;
+      const cleanDigipin = typeof digipin === 'string' ? digipin.trim() : '';
+
+      let coordinates: [number, number] = [77.5946, 12.9716];
+      if (lat !== undefined && lng !== undefined && !isNaN(Number(lat)) && !isNaN(Number(lng))) {
+        coordinates = [Number(lng), Number(lat)];
+      }
+
+      targetEmployee.assignedLocation = {
+        city: cleanCity,
+        postalCode: cleanPincode,
+        state: cleanState,
+        locality: cleanLocality,
+        line1: cleanLine1,
+        label: cleanLabel,
+        digipin: cleanDigipin,
+        assignedBy: caller?.name || (caller as any)?.username || 'Super Admin',
+        assignedAt: new Date(),
+        location: {
+          type: 'Point',
+          coordinates,
+        },
+      };
+
+      await targetEmployee.save();
+
+      // Dispatch notification to target admin
+      await Notification.create({
+        userId: String(targetEmployee._id),
+        role: targetEmployee.role,
+        title: 'Default Operating Location Assigned',
+        message: `Super Admin (${caller?.name || 'Super Admin'}) has assigned your operating location to "${cleanCity}, ${cleanPincode} (${cleanState})". This is now active on your dashboard.`,
+        type: 'system',
+      }).catch(() => {});
+
+      return res.json({
+        success: true,
+        message: `Default location "${cleanCity}, ${cleanPincode}" assigned successfully to ${targetEmployee.name} (${targetEmployee.adminRoleTitle || targetEmployee.role})!`,
+        admin: userResponse(targetEmployee),
+        assignedLocation: targetEmployee.assignedLocation,
+      });
+    } catch (error) {
+      console.error('Assign admin location failed:', error);
+      return res.status(500).json({ message: 'Unable to assign operating location' });
+    }
+  };
+
+  router.put('/admins/:id/location', requireRole('superadmin'), handleAdminLocationAssignment);
+  router.post('/admins/:id/location', requireRole('superadmin'), handleAdminLocationAssignment);
+  router.put('/subadmins/:id/location', requireRole('superadmin'), handleAdminLocationAssignment);
+
+  // =========================================================================
+  // SUPER ADMIN ONLY: CHANGE ADMIN / STAFF ROLE & DESIGNATION
+  // =========================================================================
+  router.put(
+    '/admins/:id/role',
+    requireRole('superadmin'),
+    async (req: Request, res: Response) => {
+      try {
+        const caller = (req as AuthenticatedRequest).user;
+        const targetId = String(req.params.id || '').trim();
+        const { role, adminRoleTitle, permissions } = req.body;
+
+        if (!targetId) {
+          return res.status(400).json({ message: 'Target user ID is required' });
+        }
+
+        let targetEmployee: any = null;
+        if (mongoose.isValidObjectId(targetId)) {
+          targetEmployee = await Employee.findById(targetId);
+        }
+        if (!targetEmployee) {
+          targetEmployee = await Employee.findOne({
+            $or: [
+              { adminId: targetId },
+              { subadminId: targetId },
+              { employeeId: targetId },
+              { username: targetId.toLowerCase() },
+              { email: targetId.toLowerCase() },
+            ],
+          });
+        }
+
+        if (!targetEmployee) {
+          return res.status(404).json({ message: 'Admin / Staff account not found' });
+        }
+
+        if (targetEmployee.role === 'superadmin' && String(targetEmployee._id) !== String(caller?.userId)) {
+          return res.status(403).json({ message: 'Cannot demote or change role of primary Super Admin account' });
+        }
+
+        let roleDoc: any = null;
+        if (role) {
+          const cleanRoleKey = String(role).trim().toLowerCase();
+          roleDoc = await Role.findOne({ roleKey: cleanRoleKey });
+          if (!roleDoc && !['admin', 'subadmin', 'employee'].includes(cleanRoleKey)) {
+            return res.status(400).json({
+              message: `Invalid role "${role}". Allowed roles must exist in system or custom roles.`,
+            });
+          }
+        }
+
+        const oldRole = targetEmployee.role;
+        const oldTitle = targetEmployee.adminRoleTitle;
+
+        if (role) {
+          const effectiveRoleKey = roleDoc ? roleDoc.roleKey : String(role).trim().toLowerCase();
+          const effectiveBaseRole = roleDoc ? roleDoc.baseRole : (['admin', 'subadmin', 'employee'].includes(effectiveRoleKey) ? effectiveRoleKey : 'subadmin');
+          targetEmployee.role = effectiveRoleKey;
+          targetEmployee.baseRole = effectiveBaseRole;
+
+          if (effectiveBaseRole === 'admin' && !targetEmployee.adminId) {
+            targetEmployee.adminId = await generateAdminId();
+          } else if (effectiveBaseRole === 'subadmin' && !targetEmployee.subadminId) {
+            targetEmployee.subadminId = await generateSubAdminId();
+          } else if (effectiveBaseRole === 'employee' && !targetEmployee.employeeId) {
+            targetEmployee.employeeId = await generateEmployeeId();
+          }
+
+          if (roleDoc && Array.isArray(roleDoc.permissions) && roleDoc.permissions.length > 0 && (!permissions || !permissions.length)) {
+            targetEmployee.permissions = roleDoc.permissions;
+          }
+        }
+
+        if (typeof adminRoleTitle === 'string' && adminRoleTitle.trim()) {
+          targetEmployee.adminRoleTitle = adminRoleTitle.trim();
+        } else if (roleDoc && roleDoc.displayName) {
+          targetEmployee.adminRoleTitle = roleDoc.displayName;
+        }
+
+        if (Array.isArray(permissions)) {
+          targetEmployee.permissions = permissions;
+        } else if (targetEmployee.role === 'admin' || targetEmployee.baseRole === 'admin') {
+          targetEmployee.permissions = ['*'];
+        }
+
+        await targetEmployee.save();
+
+        await Notification.create({
+          userId: String(targetEmployee._id),
+          role: targetEmployee.role,
+          title: 'Platform Role Updated',
+          message: `Super Admin (${caller?.name || 'Super Admin'}) has updated your platform role from ${oldRole} (${oldTitle}) to ${targetEmployee.role} (${targetEmployee.adminRoleTitle}).`,
+          type: 'system',
+        }).catch(() => {});
+
+        return res.json({
+          success: true,
+          message: `Role for "${targetEmployee.name}" successfully updated to ${targetEmployee.role.toUpperCase()} (${targetEmployee.adminRoleTitle})!`,
+          admin: userResponse(targetEmployee),
+        });
+      } catch (error) {
+        console.error('Change admin role failed:', error);
+        return res.status(500).json({ message: 'Unable to update admin role' });
+      }
+    },
+  );
+
+  // =========================================================================
+  // ROLES MANAGEMENT: LIST, CREATE, EDIT, DELETE ROLES
+  // =========================================================================
+
+  // 1. GET ALL ROLES (Admin & Super Admin)
+  router.get(
+    '/roles',
+    requireRole('superadmin', 'admin'),
+    async (_req: Request, res: Response) => {
+      try {
+        await ensureDefaultRoles();
+        const allRoles = await Role.find({}).sort({ isSystem: -1, createdAt: 1 }).lean();
+        const allStaff = await Employee.find({}).select('role').lean();
+        const counts: Record<string, number> = {};
+        for (const s of allStaff) {
+          const rKey = (s as any).role || 'employee';
+          counts[rKey] = (counts[rKey] || 0) + 1;
+        }
+        const rolesWithCounts = allRoles.map((r: any) => ({
+          ...r,
+          id: r._id,
+          assignedCount: counts[r.roleKey] || 0,
+        }));
+        return res.json({ success: true, roles: rolesWithCounts });
+      } catch (error) {
+        console.error('Fetch roles failed:', error);
+        return res.status(500).json({ message: 'Unable to fetch roles' });
+      }
+    },
+  );
+
+  // 2. CREATE NEW ROLE (Super Admin Only)
+  router.post(
+    '/roles',
+    requireRole('superadmin'),
+    async (req: Request, res: Response) => {
+      try {
+        const caller = (req as AuthenticatedRequest).user;
+        const { displayName, roleKey, baseRole, description, permissions } = req.body;
+
+        const cleanDisplayName = typeof displayName === 'string' ? displayName.trim() : '';
+        if (!cleanDisplayName) {
+          return res.status(400).json({ message: 'Role Display Name is required' });
+        }
+
+        // Generate or sanitize roleKey
+        let cleanRoleKey = typeof roleKey === 'string' ? roleKey.trim().toLowerCase() : '';
+        if (!cleanRoleKey) {
+          cleanRoleKey = cleanDisplayName
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '_')
+            .replace(/^_+|_+$/g, '');
+        }
+
+        if (!/^[a-z0-9_-]{2,40}$/.test(cleanRoleKey)) {
+          return res.status(400).json({
+            message: 'Role Key must be 2-40 characters containing only lowercase letters, numbers, hyphens, and underscores.',
+          });
+        }
+
+        // Check if roleKey is reserved or exists
+        const existing = await Role.findOne({ roleKey: cleanRoleKey });
+        if (existing) {
+          return res.status(400).json({
+            message: `Role with key "${cleanRoleKey}" already exists (${existing.displayName}). Please choose a different name or key.`,
+          });
+        }
+
+        const validBaseRoles = ['admin', 'subadmin', 'employee'];
+        const cleanBaseRole = validBaseRoles.includes(baseRole) ? baseRole : 'subadmin';
+        const cleanDescription = typeof description === 'string' ? description.trim() : '';
+        const cleanPermissions = Array.isArray(permissions) ? permissions.filter((p: any) => typeof p === 'string' && p.trim()) : [];
+
+        const newRole = await Role.create({
+          roleKey: cleanRoleKey,
+          displayName: cleanDisplayName,
+          baseRole: cleanBaseRole,
+          description: cleanDescription,
+          permissions: cleanPermissions.length ? cleanPermissions : (cleanBaseRole === 'admin' ? ['*'] : ['dashboard_view', 'orders_manage']),
+          isSystem: false,
+          createdBy: caller?.name || (caller as any)?.username || 'Super Admin',
+        });
+
+        // Broadcast notification
+        await Notification.create({
+          userId: String(caller?.userId || ''),
+          role: 'superadmin',
+          title: 'New Platform Role Created',
+          message: `Super Admin created custom role "${newRole.displayName}" (Key: ${newRole.roleKey}, Base: ${newRole.baseRole}).`,
+          type: 'system',
+        }).catch(() => {});
+
+        return res.status(201).json({
+          success: true,
+          message: `Role "${newRole.displayName}" created successfully!`,
+          role: {
+            ...newRole.toObject(),
+            id: newRole._id,
+            assignedCount: 0,
+          },
+        });
+      } catch (error) {
+        console.error('Create role failed:', error);
+        return res.status(500).json({ message: 'Unable to create role' });
+      }
+    },
+  );
+
+  // 3. UPDATE ROLE (Super Admin Only)
+  router.put(
+    '/roles/:id',
+    requireRole('superadmin'),
+    async (req: Request, res: Response) => {
+      try {
+        const caller = (req as AuthenticatedRequest).user;
+        const targetId = String(req.params.id || '').trim();
+        const { displayName, baseRole, description, permissions } = req.body;
+
+        if (!targetId) {
+          return res.status(400).json({ message: 'Role ID or Key is required' });
+        }
+
+        let targetRole: any = null;
+        if (mongoose.isValidObjectId(targetId)) {
+          targetRole = await Role.findById(targetId);
+        }
+        if (!targetRole) {
+          targetRole = await Role.findOne({ roleKey: targetId.toLowerCase() });
+        }
+
+        if (!targetRole) {
+          return res.status(404).json({ message: 'Role not found' });
+        }
+
+        if (typeof displayName === 'string' && displayName.trim()) {
+          targetRole.displayName = displayName.trim();
+        }
+
+        if (typeof description === 'string') {
+          targetRole.description = description.trim();
+        }
+
+        if (!targetRole.isSystem) {
+          const validBaseRoles = ['admin', 'subadmin', 'employee'];
+          if (baseRole && validBaseRoles.includes(baseRole)) {
+            targetRole.baseRole = baseRole;
+          }
+        }
+
+        if (Array.isArray(permissions)) {
+          targetRole.permissions = permissions;
+        }
+
+        await targetRole.save();
+
+        // Sync with existing staff who have this role
+        await Employee.updateMany(
+          { role: targetRole.roleKey },
+          {
+            $set: {
+              baseRole: targetRole.baseRole,
+              ...(targetRole.permissions.length ? { permissions: targetRole.permissions } : {}),
+            },
+          },
+        );
+
+        return res.json({
+          success: true,
+          message: `Role "${targetRole.displayName}" updated successfully!`,
+          role: {
+            ...targetRole.toObject(),
+            id: targetRole._id,
+          },
+        });
+      } catch (error) {
+        console.error('Update role failed:', error);
+        return res.status(500).json({ message: 'Unable to update role' });
+      }
+    },
+  );
+
+  // 4. DELETE CUSTOM ROLE (Super Admin Only)
+  router.delete(
+    '/roles/:id',
+    requireRole('superadmin'),
+    async (req: Request, res: Response) => {
+      try {
+        const caller = (req as AuthenticatedRequest).user;
+        const targetId = String(req.params.id || '').trim();
+
+        if (!targetId) {
+          return res.status(400).json({ message: 'Role ID or Key is required' });
+        }
+
+        let targetRole: any = null;
+        if (mongoose.isValidObjectId(targetId)) {
+          targetRole = await Role.findById(targetId);
+        }
+        if (!targetRole) {
+          targetRole = await Role.findOne({ roleKey: targetId.toLowerCase() });
+        }
+
+        if (!targetRole) {
+          return res.status(404).json({ message: 'Role not found' });
+        }
+
+        if (targetRole.isSystem) {
+          return res.status(400).json({
+            message: `Cannot delete built-in system role "${targetRole.displayName}". Built-in roles are core to system operation.`,
+          });
+        }
+
+        // Check if any staff are assigned this role
+        const staffCount = await Employee.countDocuments({ role: targetRole.roleKey });
+        if (staffCount > 0) {
+          return res.status(400).json({
+            message: `Cannot delete role "${targetRole.displayName}" because ${staffCount} staff member(s) are currently assigned to it. Please reassign their roles first.`,
+          });
+        }
+
+        await Role.findByIdAndDelete(targetRole._id);
+
+        return res.json({
+          success: true,
+          message: `Custom role "${targetRole.displayName}" deleted successfully!`,
+        });
+      } catch (error) {
+        console.error('Delete role failed:', error);
+        return res.status(500).json({ message: 'Unable to delete role' });
+      }
+    },
+  );
 
 export default router;

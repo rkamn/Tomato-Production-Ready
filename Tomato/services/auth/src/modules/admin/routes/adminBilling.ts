@@ -228,11 +228,24 @@ const router = Router();
             partnerEntry.totalOrders += 1;
             const gross = Number(p.totalAmount || 0);
             partnerEntry.grossVolume += gross;
-            partnerEntry.tomatoCommission += Number(p.tomatoCommissionAmount || 0);
-            partnerEntry.gstAmount += Number(p.tax || 0);
-            partnerEntry.discountsFunded += Number(p.partnerDiscountShare || 0);
 
-            const partnerPayout = Number(p.partnerPayoutAmount || 0);
+            // Platform Commission agreement
+            let comm = Number(p.tomatoCommissionAmount || 0);
+            if (!comm && gross > 0) {
+              const agreementPct = partnerEntry.bankDetails?.agreementCommissionPercent ?? (pType === 'shop' ? 12 : 15);
+              comm = Number(((gross * agreementPct) / 100).toFixed(2));
+            }
+            partnerEntry.tomatoCommission += comm;
+
+            // GST value: 18% of agreement commission value
+            const gst = Number((comm * 0.18).toFixed(2));
+            partnerEntry.gstAmount += gst;
+
+            const discounts = Number(p.partnerDiscountShare || 0);
+            partnerEntry.discountsFunded += discounts;
+
+            // Net payout: gross - commission - 18% GST - discounts (GST deducted from restaurant & shop)
+            const partnerPayout = Math.max(0, Number((gross - comm - gst - discounts).toFixed(2)));
             partnerEntry.totalPayable += partnerPayout;
 
             if (p.partnerPayoutStatus === 'approved_paid') {
@@ -259,11 +272,13 @@ const router = Router();
               riderEntry.totalOrders += 1;
               const riderGross = Number(p.deliveryFee || p.riderPayoutAmount || 40);
               riderEntry.grossVolume += riderGross;
-              // GST applied to riders (standard 5% GST rate on delivery)
-              const riderGst = Number((riderGross * 0.05).toFixed(2));
+
+              // GST value: 18% of agreement value (rider delivery payout agreement)
+              const riderGst = Number((riderGross * 0.18).toFixed(2));
               riderEntry.gstAmount += riderGst;
 
-              const riderPayout = Number(p.riderPayoutAmount || 0);
+              // Net rider payout after 18% GST deduction
+              const riderPayout = Math.max(0, Number((riderGross - riderGst).toFixed(2)));
               riderEntry.totalPayable += riderPayout;
 
               if (p.riderPayoutStatus === 'approved_paid') {
@@ -432,15 +447,26 @@ const router = Router();
           }
 
           if (pType === 'deliveryPartner') {
-            const riderAmt = Number(payment.riderPayoutAmount || 0);
+            const riderGross = Number(payment.deliveryFee || payment.riderPayoutAmount || 40);
+            const riderGst = Number((riderGross * 0.18).toFixed(2));
+            const riderAmt = Math.max(0, Number((riderGross - riderGst).toFixed(2)));
             totalDisbursed += riderAmt;
+            payment.riderPayoutAmount = riderAmt;
             payment.riderPayoutStatus = 'approved_paid';
             payment.riderPaidAt = new Date();
             payment.riderPayoutRef = utrCode;
             payment.approvedByAdmin = adminIdentifier;
           } else {
-            const partnerAmt = Number(payment.partnerPayoutAmount || 0);
+            const gross = Number(payment.totalAmount || 0);
+            const comm = Number(
+              payment.tomatoCommissionAmount ||
+              ((gross * (partnerDoc.bankDetails?.agreementCommissionPercent ?? (pType === 'shop' ? 12 : 15))) / 100).toFixed(2)
+            );
+            const gst = Number((comm * 0.18).toFixed(2));
+            const discounts = Number((payment as any).partnerDiscountShare || payment.partnerCouponShare || 0);
+            const partnerAmt = Math.max(0, Number((gross - comm - gst - discounts).toFixed(2)));
             totalDisbursed += partnerAmt;
+            payment.partnerPayoutAmount = partnerAmt;
             payment.partnerPayoutStatus = 'approved_paid';
             payment.partnerPaidAt = new Date();
             payment.partnerPayoutRef = utrCode;

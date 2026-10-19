@@ -26,7 +26,7 @@ export interface IPayment extends Document {
   // Partner (Shop / Restaurant) Settlement
   partnerId?: string;
   partnerCode?: string;
-  partnerRole: 'restaurant' | 'shop';
+  partnerRole: 'restaurant' | 'shop' | 'subadmin' | 'employee' | 'admin';
   partnerName: string;
   agreementCommissionPercent: number;
   tomatoCommissionAmount: number;
@@ -103,7 +103,7 @@ const paymentSchema: Schema<IPayment> = new Schema(
     partnerCode: { type: String, default: '' },
     partnerRole: {
       type: String,
-      enum: ['restaurant', 'shop'],
+      enum: ['restaurant', 'shop', 'subadmin', 'employee', 'admin'],
       default: 'restaurant',
     },
     partnerName: { type: String, default: '' },

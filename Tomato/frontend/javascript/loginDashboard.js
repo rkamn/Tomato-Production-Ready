@@ -35,17 +35,21 @@ window.currentWallet = {
   walletBalance: 0,
   creditPoint: 0,
 };
-const normalizeRole = (r) => {
+const normalizeRole = (r, baseRole) => {
   const val = String(r || 'customer').trim().toLowerCase();
   if (['deliverypartner', 'delivery_partner', 'delivery partner', 'rider'].includes(val)) return 'deliveryPartner';
   if (['restaurant', 'restaurent'].includes(val)) return 'restaurant';
   if (['shop', 'store'].includes(val)) return 'shop';
-  if (['admin', 'subadmin'].includes(val)) return val;
+  if (['superadmin', 'super_admin'].includes(val)) return 'superadmin';
+  if (['admin', 'subadmin', 'employee'].includes(val)) return val;
+  if (baseRole && ['admin', 'subadmin', 'employee'].includes(String(baseRole).trim().toLowerCase())) {
+    return String(baseRole).trim().toLowerCase();
+  }
   return 'customer';
 };
-const role = normalizeRole(user.role);
+const role = normalizeRole(user.role, user.baseRole);
 const userPerms = Array.isArray(user?.permissions) ? user.permissions : [];
-const hasPerm = (p) => role === 'admin' || userPerms.includes(p) || userPerms.includes('*');
+const hasPerm = (p) => role === 'superadmin' || role === 'admin' || userPerms.includes(p) || userPerms.includes('*');
 
 const DEFAULT_TOMATO_PHOTO_URL =
   'https://images.unsplash.com/photo-1592924357228-91a4daadcfea?auto=format&fit=crop&w=800&q=80';
@@ -1229,6 +1233,19 @@ async function fetchUserLocation(cachedAddress = null) {
 
   badge.textContent = `${city}, ${pincode}`;
   badge.title = `${locality ? locality + ', ' : ''}${city}, ${addr?.state || 'KA'} ${pincode}`.trim();
+
+  if (role === 'admin' || role === 'superadmin' || role === 'subadmin') {
+    badge.style.cursor = 'pointer';
+    badge.title = `${locality ? locality + ', ' : ''}${city}, ${addr?.state || 'KA'} ${pincode} • Click to open Control Panel`.trim();
+    if (!badge.dataset.boundClick) {
+      badge.dataset.boundClick = 'true';
+      badge.addEventListener('click', () => {
+        if (typeof switchView === 'function') {
+          switchView('admin-control-panel');
+        }
+      });
+    }
+  }
 }
 
 window.fetchUserLocation = fetchUserLocation;
@@ -1256,10 +1273,14 @@ function getUserIdentifier() {
     rawId = user.riderId || (user._id || user.id ? `ride-${String(user._id || user.id).slice(-4).toLowerCase()}` : '') || user.userId || user.id || user._id || '';
   } else if (role === 'subadmin') {
     rawId = user.subadminId || (user._id || user.id ? `sub-${String(user._id || user.id).slice(-4).toLowerCase()}` : '') || user.userId || user.id || user._id || '';
+  } else if (role === 'employee') {
+    rawId = user.employeeId || (user._id || user.id ? `emp-${String(user._id || user.id).slice(-4).toLowerCase()}` : '') || user.userId || user.id || user._id || '';
+  } else if (role === 'superadmin') {
+    rawId = user.adminId || 'sup-0001';
   } else if (role === 'admin') {
     rawId = user.adminId || (user._id || user.id ? `adm-${String(user._id || user.id).slice(-4).toLowerCase()}` : '') || user.userId || user.id || user._id || 'adm-1001';
   } else {
-    rawId = user.customerId || user.restaurantId || user.riderId || user.subadminId || user.adminId || user.userId || user.id || user._id || '';
+    rawId = user.customerId || user.restaurantId || user.riderId || user.subadminId || user.employeeId || user.adminId || user.userId || user.id || user._id || '';
   }
   return formatUserId(rawId);
 }
@@ -1299,7 +1320,7 @@ window.populateSettingsUserIdBadge = populateSettingsUserIdBadge;
 function initDashboard() {
   const partnerDisplay = formatCleanName(user.displayName || user.name || 'Tomato User');
   document.getElementById('mini-name').textContent = partnerDisplay;
-  const displayRole = role === 'deliveryPartner' ? 'Delivery Partner' : role === 'subadmin' ? (user.adminRoleTitle || 'Sub-Admin') : role.charAt(0).toUpperCase() + role.slice(1);
+  const displayRole = role === 'superadmin' ? '👑 Super Admin' : role === 'deliveryPartner' ? 'Delivery Partner' : role === 'subadmin' ? (user.adminRoleTitle || 'Sub-Admin') : role === 'employee' ? (user.designation || 'Normal Employee') : role.charAt(0).toUpperCase() + role.slice(1);
   document.getElementById('mini-role').textContent = displayRole;
 
   const walletChip = document.getElementById('profile-wallet-chip');
@@ -1307,10 +1328,10 @@ function initDashboard() {
   const walletLabel = document.getElementById('profile-wallet-label');
   if (walletChip) walletChip.style.display = 'inline-flex';
   updateProfileWalletDisplay(window.currentWallet?.walletBalance, window.currentWallet?.creditPoint);
-  if (walletLabel) walletLabel.textContent = role === 'admin' || role === 'subadmin' ? 'W' : 'Wallet';
+  if (walletLabel) walletLabel.textContent = (role === 'superadmin' || role === 'admin' || role === 'subadmin' || role === 'employee') ? 'W' : 'Wallet';
   const creditTransferButton = document.getElementById('admin-credit-transfer-open');
   if (creditTransferButton) {
-    creditTransferButton.style.display = (role === 'admin' || role === 'restaurant' || role === 'shop') ? 'inline-flex' : 'none';
+    creditTransferButton.style.display = (role === 'superadmin' || role === 'admin' || role === 'restaurant' || role === 'shop') ? 'inline-flex' : 'none';
   }
 
 function handleSidebarTransferClick() {
@@ -1356,7 +1377,7 @@ window.handleSidebarTransferClick = handleSidebarTransferClick;
       partnerOverviewReportBtn.classList.add('active');
     }
   }
-  const isAdmin = role === 'admin' || role === 'subadmin';
+  const isAdmin = role === 'superadmin' || role === 'admin' || role === 'subadmin';
   const adminOverviewNotifBtn = document.getElementById('admin-overview-notif-btn');
   if (adminOverviewNotifBtn) {
     adminOverviewNotifBtn.style.display = isAdmin ? 'inline-flex' : 'none';
@@ -1593,6 +1614,7 @@ function buildNav() {
 
   const adminItems = [
     { id: 'overview', icon: '📊', label: 'Dashboard & KPIs' },
+    { id: 'admin-control-panel', icon: '🎛️', label: 'Control Panel' },
     ...(hasPerm('orders_manage') ? [{ id: 'admin-orders', icon: '📦', label: 'Platform Orders' }] : []),
     ...(hasPerm('shops_manage') || hasPerm('restaurants_manage') ? [{ id: 'admin-shops', icon: '🏬', label: 'Shops' }] : []),
     ...(hasPerm('restaurants_manage') ? [{ id: 'admin-restaurants', icon: '🏪', label: 'Restaurants' }] : []),
@@ -1646,8 +1668,14 @@ function buildNav() {
       { id: 'support', icon: '🛟', label: 'Help & Support' },
       { id: 'settings', icon: '⚙️', label: 'Rider Profile' },
     ],
+    superadmin: adminItems,
     admin: adminItems,
     subadmin: adminItems,
+    employee: [
+      { id: 'overview', icon: '🏠', label: 'Overview' },
+      { id: 'support', icon: '🛟', label: 'Help & Support' },
+      { id: 'settings', icon: '⚙️', label: 'Profile & Bank' },
+    ],
   };
 
   const defaultItems = navConfigs[role] || navConfigs.customer;
@@ -1668,6 +1696,27 @@ function buildNav() {
         itemMap.delete(id);
       }
     });
+    // Ensure 'admin-control-panel' sits right below 'overview'
+    if (itemMap.has('admin-control-panel')) {
+      const cpItem = itemMap.get('admin-control-panel');
+      itemMap.delete('admin-control-panel');
+      const ovIdx = items.findIndex((it) => it.id === 'overview');
+      if (ovIdx !== -1) {
+        items.splice(ovIdx + 1, 0, cpItem);
+      } else {
+        items.unshift(cpItem);
+      }
+    } else {
+      // Reposition if it was placed after settings or at the end in a previous session
+      const cpIdx = items.findIndex((it) => it.id === 'admin-control-panel');
+      const ovIdx = items.findIndex((it) => it.id === 'overview');
+      if (cpIdx !== -1 && ovIdx !== -1 && cpIdx !== ovIdx + 1) {
+        const [cpItem] = items.splice(cpIdx, 1);
+        const newOvIdx = items.findIndex((it) => it.id === 'overview');
+        items.splice(newOvIdx + 1, 0, cpItem);
+      }
+    }
+
     // Ensure newly added tabs appear above settings if not in savedOrder (and 'admin-partner-billing' sits right below 'admin-bank')
     ['admin-bank', 'admin-partner-billing', 'admin-coupons', 'partner-coupons', 'partner-bank', 'partner-finance', 'support', 'admin-complaints'].forEach((newId) => {
       if (newId === 'admin-partner-billing' && itemMap.has('admin-partner-billing')) {
@@ -2010,7 +2059,7 @@ function switchView(viewId, filter = null, force = false) {
       } else {
         showOverviewRiderReportView();
       }
-    } else if (role === 'admin' || role === 'subadmin') {
+    } else if (role === 'superadmin' || role === 'admin' || role === 'subadmin') {
       if (typeof overviewAdminSubView !== 'undefined' && overviewAdminSubView === 'notifications') {
         showOverviewNotificationsView();
         loadNotifications();
@@ -2056,6 +2105,10 @@ function switchView(viewId, filter = null, force = false) {
     fetchAdminCustomers();
   } else if (viewId === 'admin-analytics') {
     fetchAdminAnalytics();
+  } else if (viewId === 'admin-control-panel') {
+    if (typeof loadAdminControlPanel === 'function') {
+      loadAdminControlPanel();
+    }
   } else if (viewId === 'admin-subadmins') {
     fetchAdminSubAdmins();
   } else if (viewId === 'admin-complaints') {
@@ -2410,17 +2463,30 @@ async function loadRoleOverview() {
     } catch (e) {
       console.error(e);
     }
-  } else if (role === 'admin' || role === 'subadmin') {
-    kickerEl.textContent = role === 'subadmin' ? `Sub-Admin • ${user.adminRoleTitle || 'Operations'}` : 'Platform Administration';
-    copyEl.textContent = role === 'subadmin'
-      ? 'Access operational tools and manage platform data according to your assigned permissions.'
-      : 'Monitor platform transactions, approve or block partners, manage sub-admins, and view analytics.';
+  } else if (role === 'superadmin' || role === 'admin' || role === 'subadmin') {
+    kickerEl.textContent = role === 'superadmin' ? 'Super Administrator • Supreme Authority' : role === 'subadmin' ? `Sub-Admin • ${user.adminRoleTitle || 'Operations'}` : 'Platform Administration';
+    copyEl.textContent = role === 'superadmin'
+      ? 'Full super administrator authority. Assign default operating locations to admins, configure global platform parameters, and manage staff.'
+      : role === 'subadmin'
+        ? 'Access operational tools and manage platform data according to your assigned permissions.'
+        : 'Monitor platform transactions, approve or block partners, manage sub-admins, and view analytics.';
     try {
       const data = await apiFetch('/api/admin/dashboard').catch(() => ({ kpis: {} }));
       const kpis = data.kpis || {};
 
       const todayRev = kpis.todayRevenue != null ? kpis.todayRevenue : kpis.totalRevenue;
+      const myLoc = user.assignedLocation || {};
+      const locText = (myLoc.city && myLoc.postalCode) ? `${myLoc.city}, ${myLoc.postalCode}` : (document.getElementById('user-location-badge')?.textContent?.trim() || 'Bengaluru, 560001');
+
       statsEl.innerHTML = `
+        <div class="stat-card clickable" onclick="switchView('admin-control-panel')" title="View operating location & regional deployments in Control Panel">
+          <span class="stat-label">Operating Location</span>
+          <div class="stat-value" style="color:#0284c7; font-size:1.18rem; display:flex; align-items:center; gap:0.3rem;">
+            <span>📍</span>
+            <span>${escapeHtml(locText)}</span>
+          </div>
+          <span class="stat-note" style="color:#0284c7; font-weight:700;">${role === 'superadmin' ? 'Super Admin' : 'Admin (Read Only)'} • Control Panel ↗</span>
+        </div>
         <div class="stat-card"><span class="stat-label">Platform GMV (Today)</span><div class="stat-value" style="color:var(--green);">₹${Number(todayRev || 0).toFixed(0)}</div><span class="stat-note">Lifetime: ₹${Number(kpis.totalRevenue || 0).toFixed(0)}</span></div>
         <div class="stat-card clickable" onclick="switchView('admin-orders')"><span class="stat-label">Total Orders</span><div class="stat-value">${kpis.totalOrders || 0}</div><span class="stat-note">${kpis.activeOrders || 0} in progress ↗</span></div>
         <div class="stat-card clickable" onclick="switchView('admin-shops')"><span class="stat-label">Shops</span><div class="stat-value">${kpis.totalShops || 0}</div><span class="stat-note">${kpis.pendingShops || 0} pending review ↗</span></div>
@@ -2430,6 +2496,15 @@ async function loadRoleOverview() {
     } catch (e) {
       console.error(e);
     }
+  } else if (role === 'employee') {
+    kickerEl.textContent = `Staff Member • ${user.designation || 'Tomato Employee'}`;
+    copyEl.textContent = 'Welcome to your employee portal. Check your profile, bank verification status, and monthly salary credits.';
+    const bankStatusText = user.bankDetails?.isApproved ? '✅ Verified & Active' : (user.bankDetails?.accountNumber ? '⏳ Pending Approval' : '⚠️ Not Added');
+    statsEl.innerHTML = `
+      <div class="stat-card"><span class="stat-label">Employee ID</span><div class="stat-value" style="color:var(--tomato); font-size:1.4rem;">${getUserIdentifier()}</div><span class="stat-note">${user.department || 'Operations'}</span></div>
+      <div class="stat-card"><span class="stat-label">Monthly Salary</span><div class="stat-value" style="color:var(--green);">₹${Number(user.salary || 0).toLocaleString('en-IN')}</div><span class="stat-note">Base Payroll</span></div>
+      <div class="stat-card clickable" onclick="switchView('settings')"><span class="stat-label">Bank Payout Status</span><div class="stat-value" style="font-size:1.05rem; color:var(--text);">${bankStatusText}</div><span class="stat-note">Click to view/update ↗</span></div>
+    `;
   }
 
   loadNotifications(1);
@@ -2465,13 +2540,14 @@ async function loadNotifications(targetPage = null) {
   }
 
   try {
-    let endpointRole = role;
+    let endpoint = `/api/${role}/notifications`;
     if (role === 'deliveryPartner' || role === 'rider') {
-      endpointRole = 'rider';
+      endpoint = '/api/rider/notifications';
     } else if (role === 'subadmin') {
-      endpointRole = 'admin';
+      endpoint = '/api/admin/notifications';
+    } else if (role === 'employee') {
+      endpoint = '/api/notifications';
     }
-    const endpoint = `/api/${endpointRole}/notifications`;
     const data = await apiFetch(endpoint);
     currentNotifications = Array.isArray(data.notifications) ? data.notifications : [];
 
@@ -3212,6 +3288,8 @@ function loadProfileSettings() {
   } else {
     riderGroup.style.display = 'none';
   }
+
+  loadStaffBankSettings();
 }
 
 async function saveProfileSettings(e) {
@@ -3277,6 +3355,293 @@ async function saveProfileSettings(e) {
     notice.style.color = 'var(--tomato-dark)';
   }
 }
+
+// =========================================================================
+// STAFF & ADMIN BANK / PAYOUT DETAILS (DIRECT APPROVAL FOR ADMIN)
+// =========================================================================
+let currentStaffBankDetails = null;
+
+async function loadStaffBankSettings() {
+  const wrapper = document.getElementById('settings-bank-btn-wrapper');
+  const pill = document.getElementById('settings-bank-status-pill');
+  const desc = document.getElementById('settings-bank-desc');
+  if (!wrapper) return;
+
+  if (role !== 'admin' && role !== 'subadmin' && role !== 'employee') {
+    wrapper.style.display = 'none';
+    return;
+  }
+
+  wrapper.style.display = 'block';
+
+  if (desc) {
+    if (role === 'admin') {
+      desc.textContent = 'Manage your official platform settlement & disbursement account. Bank details are activated directly without approval.';
+    } else if (role === 'subadmin') {
+      desc.textContent = 'Manage your bank account for monthly remuneration and allowances. Subject to Super Admin approval.';
+    } else {
+      desc.textContent = 'Manage your bank account for monthly salary disbursements. Subject to Super Admin approval.';
+    }
+  }
+
+  if (pill) {
+    pill.textContent = 'Checking status...';
+    pill.style.background = 'rgba(148, 163, 184, 0.15)';
+    pill.style.color = 'var(--muted)';
+  }
+
+  try {
+    const res = await apiFetch('/api/admin/staff-bank-details');
+    currentStaffBankDetails = res.bankDetails || {};
+    const bd = currentStaffBankDetails;
+    const isApproved = Boolean(res.isApproved || bd.isApproved);
+    const hasAccount = Boolean(bd.accountNumber);
+
+    if (pill) {
+      if (role === 'admin') {
+        if (hasAccount) {
+          pill.textContent = '✅ Bank Active (Direct Approval)';
+          pill.style.background = '#f0fdf4';
+          pill.style.color = '#15803d';
+          pill.style.border = '1px solid #bbf7d0';
+        } else {
+          pill.textContent = '⚠️ Add Bank Details';
+          pill.style.background = '#fffbeb';
+          pill.style.color = '#b45309';
+          pill.style.border = '1px solid #fde68a';
+        }
+      } else {
+        if (isApproved) {
+          pill.textContent = '🔒 Approved by Admin';
+          pill.style.background = '#f0fdf4';
+          pill.style.color = '#15803d';
+          pill.style.border = '1px solid #bbf7d0';
+        } else if (hasAccount) {
+          pill.textContent = '⏳ Pending Admin Verification';
+          pill.style.background = '#fffbeb';
+          pill.style.color = '#b45309';
+          pill.style.border = '1px solid #fde68a';
+        } else {
+          pill.textContent = '⚠️ Add Bank Details';
+          pill.style.background = '#fef2f2';
+          pill.style.color = '#b91c1c';
+          pill.style.border = '1px solid #fecaca';
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Unable to load staff bank details:', err);
+    if (pill) {
+      pill.textContent = '⚠️ Setup Bank Details';
+    }
+  }
+}
+
+async function openStaffBankModal() {
+  if (!currentStaffBankDetails) {
+    try {
+      const res = await apiFetch('/api/admin/staff-bank-details');
+      currentStaffBankDetails = res.bankDetails || {};
+    } catch (_) {
+      currentStaffBankDetails = {};
+    }
+  }
+
+  const bd = currentStaffBankDetails || {};
+  const isApproved = Boolean(bd.isApproved);
+  const isLocked = Boolean(bd.isLocked && role !== 'admin'); // Super admin is never locked
+
+  const titleEl = document.getElementById('staff-bank-modal-title');
+  if (titleEl) {
+    if (role === 'admin') {
+      titleEl.textContent = 'Admin Bank & Payout Details';
+    } else if (role === 'subadmin') {
+      titleEl.textContent = 'Sub-Admin Bank & Payout Details';
+    } else {
+      titleEl.textContent = 'Employee Bank & Salary Details';
+    }
+  }
+
+  const bannerEl = document.getElementById('staff-bank-info-banner');
+  if (bannerEl) {
+    if (role === 'admin') {
+      bannerEl.style.background = '#f0fdf4';
+      bannerEl.style.border = '1px solid #bbf7d0';
+      bannerEl.style.color = '#14532d';
+      bannerEl.innerHTML = '🛡️ <strong>Admin Account:</strong> Your bank details are active immediately for platform operations and direct withdrawals without needing approval.';
+    } else if (isApproved && isLocked) {
+      bannerEl.style.background = '#f0fdf4';
+      bannerEl.style.border = '1px solid #bbf7d0';
+      bannerEl.style.color = '#14532d';
+      bannerEl.innerHTML = '🔒 <strong>Bank Details Approved &amp; Locked:</strong> Your bank account and PAN details have been verified and approved by Admin. Edits are locked to prevent unauthorized changes. Contact Admin to request changes.';
+    } else {
+      bannerEl.style.background = '#eff6ff';
+      bannerEl.style.border = '1px solid #bfdbfe';
+      bannerEl.style.color = '#1e40af';
+      bannerEl.innerHTML = 'ℹ️ <strong>Admin Approval Required:</strong> Your bank details will be submitted to Admin for verification. The <strong>Bank Account Holder Name MUST exactly match the Name on your PAN Card</strong>.';
+    }
+  }
+
+  // Pre-fill inputs
+  const fields = [
+    ['staff-bank-holder-name', bd.accountHolderName || user.name || ''],
+    ['staff-pan-holder-name', bd.panHolderName || bd.accountHolderName || user.name || ''],
+    ['staff-pan-number', bd.panNumber || (role === 'admin' ? 'ABCDE1234F' : '')],
+    ['staff-bank-name', bd.bankName || ''],
+    ['staff-bank-account-number', bd.accountNumber || ''],
+    ['staff-bank-ifsc', bd.ifscCode || ''],
+    ['staff-bank-upi', bd.upiId || ''],
+  ];
+
+  fields.forEach(([id, val]) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.value = val;
+      el.disabled = isLocked;
+      el.style.background = isLocked ? '#f1f5f9' : '#fff';
+    }
+  });
+
+  const panHolderStar = document.getElementById('staff-pan-holder-required-star');
+  const panNumStar = document.getElementById('staff-pan-num-required-star');
+  if (role === 'admin') {
+    if (panHolderStar) panHolderStar.style.display = 'none';
+    if (panNumStar) panNumStar.style.display = 'none';
+  } else {
+    if (panHolderStar) panHolderStar.style.display = 'inline';
+    if (panNumStar) panNumStar.style.display = 'inline';
+  }
+
+  const submitBtn = document.getElementById('staff-bank-submit-btn');
+  if (submitBtn) {
+    submitBtn.style.display = isLocked ? 'none' : 'inline-block';
+    submitBtn.textContent = role === 'admin' ? '💾 Save Admin Bank Details' : '📤 Submit for Admin Approval';
+  }
+
+  const notice = document.getElementById('staff-bank-notice');
+  if (notice) notice.textContent = '';
+
+  checkStaffBankNameMatchLive();
+  openModal('staff-bank-modal');
+}
+
+function handleStaffBankHolderInput(val) {
+  const panInput = document.getElementById('staff-pan-holder-name');
+  if (role === 'admin' && panInput && (!panInput.value || panInput.dataset.autoSynced === 'true')) {
+    panInput.value = val;
+    panInput.dataset.autoSynced = 'true';
+  }
+  checkStaffBankNameMatchLive();
+}
+
+function checkStaffBankNameMatchLive() {
+  const bankHolder = (document.getElementById('staff-bank-holder-name')?.value || '').trim();
+  const panHolder = (document.getElementById('staff-pan-holder-name')?.value || '').trim();
+  const indicator = document.getElementById('staff-bank-name-match-indicator');
+  if (!indicator) return;
+
+  if (!bankHolder && !panHolder) {
+    indicator.style.display = 'none';
+    return;
+  }
+  indicator.style.display = 'block';
+  const normBank = bankHolder.toLowerCase().replace(/\s+/g, ' ');
+  const normPan = panHolder.toLowerCase().replace(/\s+/g, ' ');
+
+  if (role === 'admin') {
+    indicator.style.background = '#f0fdf4';
+    indicator.style.border = '1px solid #bbf7d0';
+    indicator.style.color = '#15803d';
+    indicator.innerHTML = '🛡️ Admin Account: Direct activation without external approval.';
+  } else if (normBank && normPan && normBank === normPan) {
+    indicator.style.background = '#f0fdf4';
+    indicator.style.border = '1px solid #bbf7d0';
+    indicator.style.color = '#15803d';
+    indicator.innerHTML = '✅ Bank Account Holder Name matches Name on PAN Card.';
+  } else {
+    indicator.style.background = '#fef2f2';
+    indicator.style.border = '1px solid #fecaca';
+    indicator.style.color = '#dc2626';
+    indicator.innerHTML = '⚠️ Bank Account Holder Name MUST match Name on PAN Card for admin approval.';
+  }
+}
+
+async function saveStaffBankDetails(event) {
+  if (event && event.preventDefault) event.preventDefault();
+  const notice = document.getElementById('staff-bank-notice');
+  const submitBtn = document.getElementById('staff-bank-submit-btn');
+
+  const accountHolderName = (document.getElementById('staff-bank-holder-name')?.value || '').trim();
+  let panHolderName = (document.getElementById('staff-pan-holder-name')?.value || '').trim();
+  let panNumber = (document.getElementById('staff-pan-number')?.value || '').replace(/\s+/g, '').trim().toUpperCase();
+  const bankName = (document.getElementById('staff-bank-name')?.value || '').trim();
+  const accountNumber = (document.getElementById('staff-bank-account-number')?.value || '').replace(/\s+/g, '').trim();
+  const ifscCode = (document.getElementById('staff-bank-ifsc')?.value || '').replace(/\s+/g, '').trim().toUpperCase();
+  const upiId = (document.getElementById('staff-bank-upi')?.value || '').trim();
+
+  if (role === 'admin') {
+    if (!panHolderName && accountHolderName) {
+      panHolderName = accountHolderName;
+    }
+    if (!panNumber) {
+      panNumber = currentStaffBankDetails?.panNumber || 'ABCDE1234F';
+    }
+  }
+
+  if (!accountHolderName || !bankName || !accountNumber || !ifscCode || (!panNumber && role !== 'admin') || (!panHolderName && role !== 'admin')) {
+    if (notice) {
+      notice.textContent = 'Please fill in all required bank fields (Account Holder Name, Bank Name, Account Number, IFSC Code).';
+      notice.style.color = 'var(--tomato)';
+    }
+    return;
+  }
+
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Saving...';
+  }
+
+  try {
+    const res = await apiFetch('/api/admin/staff-bank-details', {
+      method: 'PUT',
+      body: JSON.stringify({
+        accountHolderName,
+        panHolderName,
+        panNumber,
+        bankName,
+        accountNumber,
+        ifscCode,
+        upiId,
+      }),
+    });
+
+    currentStaffBankDetails = res.bankDetails || {};
+    closeModal('staff-bank-modal');
+    alert(res.message || 'Bank details saved successfully!');
+    loadStaffBankSettings();
+    if (typeof fetchAdminBankPartners === 'function') {
+      fetchAdminBankPartners();
+    }
+  } catch (err) {
+    if (notice) {
+      notice.textContent = err.message || 'Failed to save bank details.';
+      notice.style.color = 'var(--tomato)';
+    } else {
+      alert(err.message || 'Failed to save bank details.');
+    }
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = role === 'admin' ? '💾 Save Admin Bank Details' : '📤 Submit for Admin Approval';
+    }
+  }
+}
+
+window.loadStaffBankSettings = loadStaffBankSettings;
+window.openStaffBankModal = openStaffBankModal;
+window.handleStaffBankHolderInput = handleStaffBankHolderInput;
+window.checkStaffBankNameMatchLive = checkStaffBankNameMatchLive;
+window.saveStaffBankDetails = saveStaffBankDetails;
 
 // =========================================================================
 // REAL-TIME GPS ORDER LIVE TRACKING & RIDER TELEMETRY

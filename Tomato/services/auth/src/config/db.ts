@@ -9,6 +9,7 @@ import Shop from "../model/Shop.js";
 import ShopOrder from "../model/ShopOrder.js";
 import WalletCreditTrack from "../model/WalletCreditTrack.js";
 import Wallet from "../model/Wallet.js";
+import Role, { ensureDefaultRoles } from "../model/Role.js";
 import { hashPassword } from "../modules/auth/authController.js";
 
 try {
@@ -140,7 +141,7 @@ export const migrateUsersToEmployeesAndDropUsersTable = async () => {
         }
 
         // Ensure default platform admin exists in employees if empty
-        const adminCount = await Employee.countDocuments({ role: 'admin' });
+        const adminCount = await Employee.countDocuments({ role: { $in: ['admin', 'superadmin'] } });
         if (adminCount === 0) {
             console.log("[DB Migration] No admin found in employees. Creating default Platform Administrator...");
             const defaultPassHash = await hashPassword('Admin@12345');
@@ -149,7 +150,7 @@ export const migrateUsersToEmployeesAndDropUsersTable = async () => {
                 email: 'admin@tomato.com',
                 phone: '+919876543210',
                 role: 'admin',
-                adminRoleTitle: 'Super Administrator',
+                adminRoleTitle: 'Platform Administrator',
                 passwordHash: defaultPassHash,
                 isApproved: true,
                 isBlocked: false,
@@ -159,6 +160,58 @@ export const migrateUsersToEmployeesAndDropUsersTable = async () => {
             });
             console.log("[DB Migration] Default Platform Administrator (admin@tomato.com) created in employees table.");
         }
+
+        // Ensure Super Admin exists with username "super" and password "superadmin"
+        const superPassHash = await hashPassword('superadmin');
+        let superAdmin = await Employee.findOne({
+            $or: [{ username: 'super' }, { email: 'super@tomato.com' }, { role: 'superadmin' }],
+        });
+
+        if (!superAdmin) {
+            console.log("[DB Setup] Creating Super Administrator account (username: super, password: superadmin)...");
+            await Employee.create({
+                name: 'Super Admin',
+                username: 'super',
+                email: 'super@tomato.com',
+                phone: '+919999999999',
+                role: 'superadmin',
+                adminRoleTitle: 'Super Administrator',
+                passwordHash: superPassHash,
+                isApproved: true,
+                isBlocked: false,
+                permissions: ['*'],
+                adminId: 'SUP-0001',
+                createdBy: 'System Init',
+                assignedLocation: {
+                    city: 'Bengaluru',
+                    postalCode: '560001',
+                    state: 'Karnataka',
+                    locality: 'Central HQ',
+                    line1: 'Tomato Operations Headquarters',
+                    label: 'Operations HQ',
+                    location: {
+                        type: 'Point',
+                        coordinates: [77.5946, 12.9716],
+                    },
+                },
+            });
+            console.log("[DB Setup] Super Administrator (username: super, password: superadmin) created successfully.");
+        } else {
+            // Guarantee username is 'super', role is 'superadmin', and password is 'superadmin'
+            superAdmin.username = 'super';
+            superAdmin.role = 'superadmin' as any;
+            superAdmin.adminRoleTitle = 'Super Administrator';
+            superAdmin.passwordHash = superPassHash;
+            superAdmin.isApproved = true;
+            superAdmin.isBlocked = false;
+            superAdmin.permissions = ['*'];
+            await superAdmin.save();
+            console.log("[DB Setup] Super Administrator credentials synchronized (username: super, password: superadmin).");
+        }
+
+        // Initialize default built-in platform roles if not yet seeded
+        await ensureDefaultRoles();
+        console.log("[DB Setup] System and custom platform roles initialized.");
 
         // Migrate records from legacy 'fooditems' or 'food_items' into 'menuitems', then drop old tables
         const menuItemsCol = mongoose.connection.db.collection('menuitems');
@@ -284,6 +337,7 @@ export const migrateCountersAndDropOldCounterTables = async () => {
             { key: 'restaurentId', desc: 'Restaurant Partner ID counter' },
             { key: 'restaurantId', desc: 'Restaurant Partner ID counter alias' },
             { key: 'subadminId', desc: 'Operations Sub-Admin User ID counter' },
+            { key: 'employeeId', desc: 'Staff Employee User ID counter' },
             { key: 'adminId', desc: 'Platform Administrator User ID counter' },
             { key: 'shopId', desc: 'Retail Shop Partner ID counter' },
             { key: 'orderId', desc: 'Platform Order Number ID counter' },
@@ -465,6 +519,7 @@ export const connectDB = async (attempts = 3) => {
             await ensureCollectionIndexes(Employee);
             await ensureIdentifierIndex(Employee, 'adminId');
             await ensureIdentifierIndex(Employee, 'subadminId');
+            await ensureIdentifierIndex(Employee, 'employeeId');
             await ensureCollectionIndexes(Customer);
             await ensureIdentifierIndex(Customer, 'customerId');
             await ensureCollectionIndexes(Restaurant);

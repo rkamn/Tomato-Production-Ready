@@ -1369,11 +1369,17 @@
              ================================================================= -->
         <section id="settings-view" class="view-section">
           <div class="panel">
-            <div class="panel-header">
-              <h2 class="panel-title" style="display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap;">
+            <div class="panel-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem;">
+              <h2 class="panel-title" style="display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap; margin:0;">
                 <span>Account & Profile Settings</span>
                 <span id="settings-user-id-badge" class="settings-id-badge" title="User ID"><span id="settings-user-id-val"></span></span>
               </h2>
+              <div id="settings-bank-btn-wrapper" style="display:none; align-items:center; gap:0.65rem; flex-wrap:wrap;">
+                <button type="button" class="btn btn-outline btn-sm" id="btn-open-staff-bank" onclick="openStaffBankModal()" style="display:inline-flex; align-items:center; gap:0.45rem; font-weight:700; border-color:#2563eb; color:#2563eb; background:#eff6ff;">
+                  <span>🏦</span> <span id="settings-bank-btn-label">Bank & Payout Details</span>
+                </button>
+                <span id="settings-bank-status-pill" class="badge" style="font-size:0.76rem; padding:0.35rem 0.65rem;"></span>
+              </div>
             </div>
             <form id="profile-form" onsubmit="saveProfileSettings(event)">
               <div class="form-row">
@@ -1454,8 +1460,8 @@
           <div class="panel">
             <div class="panel-header" style="flex-wrap:wrap; gap:0.75rem; align-items:center;">
               <div>
-                <h2 class="panel-title" style="margin-bottom:0.2rem;">Sub-Admins &amp; Role-Based Access Control</h2>
-                <p class="food-meta" id="admin-subadmins-meta">Delegate platform administrative duties with custom operational roles and granular permission controls</p>
+                <h2 class="panel-title" style="margin-bottom:0.2rem;">Sub-Admins, Employees &amp; Payroll</h2>
+                <p class="food-meta" id="admin-subadmins-meta">Manage sub-admins, normal employees, permissions, and disburse monthly staff salaries</p>
               </div>
 
               <!-- Controls Toolbar -->
@@ -1463,15 +1469,25 @@
                 <input
                   type="text"
                   id="admin-subadmins-search"
-                  placeholder="Search by sub-admin ID, name, email, or role..."
-                  style="padding:0.42rem 0.75rem; border:1px solid var(--line); border-radius:6px; font-size:0.85rem; min-width:260px;"
+                  placeholder="Search by ID, name, email, or role..."
+                  style="padding:0.42rem 0.75rem; border:1px solid var(--line); border-radius:6px; font-size:0.85rem; min-width:240px;"
                   onkeydown="if(event.key==='Enter') fetchAdminSubAdmins()"
                   oninput="handleAdminSubAdminSearchInput()"
                 />
                 <button class="btn btn-primary btn-sm" onclick="fetchAdminSubAdmins()">🔍 Search</button>
                 <button class="btn btn-outline btn-sm" id="admin-subadmins-clear-btn" style="display:none;" onclick="clearAdminSubAdminsSearch()">✕ Clear</button>
                 <button type="button" class="btn btn-primary btn-sm" onclick="openCreateSubAdminModal()" style="background:var(--green); border-color:var(--green);">➕ Create Sub-Admin</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="openCreateEmployeeModal()" style="background:#0284c7; border-color:#0284c7;">➕ Create Employee</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="openSalaryReleaseModal()" style="background:#7c3aed; border-color:#7c3aed;">💸 Release Salary</button>
               </div>
+            </div>
+
+            <!-- Role Filter Tabs -->
+            <div style="display:flex; gap:0.5rem; margin-bottom:1.2rem; flex-wrap:wrap;">
+              <button type="button" class="btn btn-sm" id="staff-filter-all" onclick="filterStaffRole('all')" style="background:var(--primary); color:#fff; font-weight:700;">All Staff</button>
+              <button type="button" class="btn btn-outline btn-sm" id="staff-filter-admin" onclick="filterStaffRole('admin')">👑 Platform Admins</button>
+              <button type="button" class="btn btn-outline btn-sm" id="staff-filter-subadmin" onclick="filterStaffRole('subadmin')">Sub-Admins</button>
+              <button type="button" class="btn btn-outline btn-sm" id="staff-filter-employee" onclick="filterStaffRole('employee')">Normal Employees</button>
             </div>
 
             <!-- Stats Bar -->
@@ -1485,7 +1501,33 @@
         </section>
 
         <!-- =================================================================
-             16. ADMIN & SUB-ADMIN: COMPLAINT REVIEW PANEL
+             16. CONTROL PANEL: REGIONAL ADDRESS ASSIGNMENTS & ROLE GOVERNANCE
+             ================================================================= -->
+        <section id="admin-control-panel-view" class="view-section">
+          <div class="panel">
+            <div class="panel-header" style="flex-wrap:wrap; gap:0.75rem; align-items:center;">
+              <div>
+                <h2 class="panel-title" style="margin-bottom:0.2rem; display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                  <span>🎛️ Platform Control Panel</span>
+                  <span id="admin-control-panel-badge" class="badge" style="background:#e0f2fe; color:#0369a1; font-size:0.75rem; font-weight:700; padding:0.2rem 0.6rem; border-radius:999px;">Regional Operating Hub</span>
+                </h2>
+                <p class="food-meta">Super Admin assigns default operating addresses &amp; manages platform administrator roles • Platform Administrators can view their own and all regional deployments</p>
+              </div>
+
+              <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                <button class="btn btn-outline btn-sm" type="button" onclick="loadAdminControlPanel(true)">↻ Refresh</button>
+              </div>
+            </div>
+
+            <!-- Dynamic Control Panel Content Container -->
+            <div id="admin-control-panel-container">
+              <!-- Rendered via adminControlPanel.js -->
+            </div>
+          </div>
+        </section>
+
+        <!-- =================================================================
+             17. ADMIN & SUB-ADMIN: COMPLAINT REVIEW PANEL
              ================================================================= -->
         <section id="admin-complaints-view" class="view-section">
           <div class="panel">
@@ -1632,11 +1674,13 @@
                     style="padding:0.2rem 0.4rem; border:1px solid #d9d4c8; border-radius:5px; font-size:0.78rem; height:27px; background:#fff; font-family:inherit; outline:none;"
                     onchange="fetchAdminBankPartners()"
                   >
-                    <option value="all">All Partners</option>
+                    <option value="all">All Partners &amp; Staff</option>
+                    <option value="admin">👑 Platform Admin</option>
                     <option value="restaurant">🏪 Restaurants</option>
                     <option value="shop">🏬 Shops</option>
                     <option value="deliveryPartner">🚴 Riders</option>
                     <option value="subadmin">🛡️ Sub-Admins</option>
+                    <option value="employee">👔 Normal Employees</option>
                   </select>
                 </div>
 
@@ -1752,6 +1796,16 @@
                 >
                   <span>💸 Transfer Funds / Points</span>
                 </button>
+                <button
+                  type="button"
+                  class="btn btn-sm"
+                  id="btn-admin-finance-salary"
+                  onclick="openAdminFinanceSalaryModal()"
+                  style="display:inline-flex; align-items:center; gap:0.35rem; background:#7c3aed; border-color:#7c3aed; color:#fff; font-weight:700;"
+                  title="Manage and release salary of Admin, Sub-Admins, and Normal Employees"
+                >
+                  <span>💼 Salary</span>
+                </button>
               </div>
             </div>
 
@@ -1782,6 +1836,7 @@
                   <option value="deliveryPartner">Riders</option>
                   <option value="customer">Customers</option>
                   <option value="subadmin">Sub-Admins</option>
+                  <option value="employee">Normal Employees</option>
                 </select>
               </div>
 
@@ -2196,6 +2251,7 @@
                 <button type="button" class="btn btn-outline btn-sm" style="font-size:0.76rem; padding:0.28rem 0.65rem;" onclick="openAdminCouponForm('new_user')">🆕 New Users</button>
                 <button type="button" class="btn btn-outline btn-sm" style="font-size:0.76rem; padding:0.28rem 0.65rem;" onclick="openAdminCouponForm('festival')">🪔 Festivals</button>
                 <button type="button" class="btn btn-outline btn-sm" style="font-size:0.76rem; padding:0.28rem 0.65rem;" onclick="openAdminCouponForm('specific_user')">👤 Specific User</button>
+                <button type="button" class="btn btn-outline btn-sm" style="font-size:0.76rem; padding:0.28rem 0.65rem; background:#fefce8; border-color:#fde047; font-weight:700;" onclick="openAdminCouponForm('instant')">⚡ Instant Coupon</button>
                 <button type="button" class="btn btn-outline btn-sm" style="font-size:0.76rem; padding:0.28rem 0.65rem;" onclick="openAdminCouponForm('settlement')">🤝 Settlement</button>
                 <button type="button" class="btn btn-outline btn-sm" style="font-size:0.76rem; padding:0.28rem 0.65rem;" onclick="openAdminCouponForm('special_occasion')">🎉 Special Occasion</button>
                 <button type="button" class="btn btn-outline btn-sm" style="font-size:0.76rem; padding:0.28rem 0.65rem;" onclick="openAdminCouponForm('shop')">🏬 Shop</button>
@@ -2230,6 +2286,7 @@
                   <div class="form-group" style="margin:0;">
                     <label for="adm-coupon-type">Coupon Category / Type <span style="color:var(--tomato);">*</span></label>
                     <select id="adm-coupon-type" required onchange="onAdminCouponTypeChange()" style="width:100%; padding:0.48rem 0.65rem; border:1px solid var(--line); border-radius:6px; background:#fff;">
+                      <option value="instant">⚡ Instant Coupon (One-time, Specific User, Max 15 Days)</option>
                       <option value="restaurant_item_category">🍽️ Restaurant Item Category</option>
                       <option value="category_occasion">🥂 Category Occasion</option>
                       <option value="new_user">🆕 New Users (1st Order)</option>
@@ -2393,6 +2450,7 @@
                 <label for="admin-coupon-type-filter" style="font-size:0.76rem; font-weight:600; color:var(--charcoal); margin:0;">Category:</label>
                 <select id="admin-coupon-type-filter" onchange="renderAdminCouponsTable()" style="padding:0.2rem 0.4rem; border:1px solid #d9d4c8; border-radius:5px; font-size:0.78rem; background:#fff;">
                   <option value="all">All Coupon Types</option>
+                  <option value="instant">⚡ Instant Coupon</option>
                   <option value="restaurant_item_category">🍽️ Restaurant Item Category</option>
                   <option value="category_occasion">🥂 Category Occasion</option>
                   <option value="new_user">🆕 New Users</option>
@@ -3868,6 +3926,17 @@
             </div>
           </div>
 
+          <div class="form-row">
+            <div class="form-group">
+              <label>Base Monthly Salary (₹)</label>
+              <input id="subadm-salary" type="number" min="0" step="500" placeholder="e.g. 35000" value="35000" />
+            </div>
+            <div class="form-group">
+              <label>Date of Birth (DOB)</label>
+              <input id="subadm-dob" type="date" />
+            </div>
+          </div>
+
           <!-- Permission Checkboxes -->
           <div style="background:#faf8f5; border:1px solid var(--line); border-radius:8px; padding:1rem; margin-top:0.5rem; margin-bottom:1.2rem;">
             <strong style="display:block; font-size:0.85rem; margin-bottom:0.6rem; color:var(--ink);">Assigned Platform Permissions:</strong>
@@ -3906,6 +3975,197 @@
           <div style="display:flex; justify-content:flex-end; gap:0.8rem;">
             <button type="button" class="btn btn-secondary" onclick="closeModal('admin-create-subadmin-modal')">Cancel</button>
             <button type="submit" class="btn btn-primary" id="btn-create-subadmin-submit">Create Sub-Admin</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- =====================================================================
+         MODAL: CREATE NORMAL EMPLOYEE (ADMIN)
+         ===================================================================== -->
+    <div id="admin-create-employee-modal" class="modal-overlay">
+      <div class="modal-box" style="max-width:540px;">
+        <div class="modal-header">
+          <div>
+            <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:#0284c7; font-weight:700;">💼 Staff Management</span>
+            <h2 style="font-size:1.35rem; margin-top:0.2rem;">Create Normal Employee</h2>
+          </div>
+          <button class="modal-close" onclick="closeModal('admin-create-employee-modal')">&times;</button>
+        </div>
+
+        <form id="create-employee-form" onsubmit="submitCreateEmployee(event)">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Full Name <span style="color:var(--tomato);">*</span></label>
+              <input id="emp-name" type="text" placeholder="e.g. Rohit Verma" required />
+            </div>
+            <div class="form-group">
+              <label>Job Title / Designation</label>
+              <input id="emp-title" type="text" placeholder="e.g. Operations Staff, Quality Inspector" value="Operations Associate" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Email Address</label>
+              <input id="emp-email" type="email" placeholder="rohit@tomato.com" />
+            </div>
+            <div class="form-group">
+              <label>Mobile Number</label>
+              <input id="emp-phone" type="tel" placeholder="9876543210" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Base Monthly Salary (₹) <span style="color:var(--tomato);">*</span></label>
+              <input id="emp-salary" type="number" min="0" step="500" placeholder="e.g. 25000" value="25000" required />
+            </div>
+            <div class="form-group">
+              <label>Date of Birth (DOB)</label>
+              <input id="emp-dob" type="date" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Login Password <span style="color:var(--tomato);">*</span></label>
+            <input id="emp-password" type="password" placeholder="Min 8 characters" required minlength="8" />
+          </div>
+
+          <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; padding:0.8rem 1rem; margin-bottom:1.2rem; font-size:0.82rem; color:#0369a1;">
+            ℹ️ Normal employees will be issued an <strong>EMP-XXXX</strong> platform ID. They can log in to view their dashboard profile, submit bank details, and receive salary disbursements directly to their bank/wallet.
+          </div>
+
+          <div style="display:flex; justify-content:flex-end; gap:0.8rem;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('admin-create-employee-modal')">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="btn-create-employee-submit" style="background:#0284c7; border-color:#0284c7;">Create Employee</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- =====================================================================
+         MODAL: SALARY RELEASE & DISBURSEMENT (ADMIN)
+         ===================================================================== -->
+    <div id="admin-salary-release-modal" class="modal-overlay">
+      <div class="modal-box" style="max-width:540px;">
+        <div class="modal-header">
+          <div>
+            <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:#7c3aed; font-weight:700;">💸 Staff Payroll Disbursement</span>
+            <h2 style="font-size:1.35rem; margin-top:0.2rem;">Release Staff Salary</h2>
+          </div>
+          <button class="modal-close" onclick="closeModal('admin-salary-release-modal')">&times;</button>
+        </div>
+
+        <form id="salary-release-form" onsubmit="submitSalaryRelease(event)">
+          <div class="form-group">
+            <label>Disbursement Target</label>
+            <select id="salary-target-select" onchange="handleSalaryTargetChange(this.value)">
+              <option value="all">👥 All Active Staff (All Sub-Admins &amp; Employees)</option>
+              <!-- Populated dynamically with staff members -->
+            </select>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Salary Month / Period</label>
+              <input id="salary-month-input" type="text" placeholder="e.g. October 2026" required />
+            </div>
+            <div class="form-group" id="salary-amount-group" style="display:none;">
+              <label>Custom Amount (₹)</label>
+              <input id="salary-amount-input" type="number" min="1" step="100" placeholder="e.g. 25000" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Disbursement Remarks / Purpose</label>
+            <input id="salary-notes-input" type="text" placeholder="e.g. Monthly Salary for Operations Staff" value="Monthly Salary Release" />
+          </div>
+
+          <!-- Payout Preview Card -->
+          <div id="salary-preview-card" style="background:#faf5ff; border:1px solid #e9d5ff; border-radius:10px; padding:1rem; margin-bottom:1.2rem; font-size:0.85rem;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:0.4rem;">
+              <span style="color:#6b21a8;">Staff Members to Disburse:</span>
+              <strong id="salary-preview-count" style="color:#581c87;">Loading...</strong>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:0.4rem;">
+              <span style="color:#6b21a8;">Total Disbursal Amount:</span>
+              <strong id="salary-preview-total" style="color:#581c87; font-size:1.05rem;">₹0</strong>
+            </div>
+            <div style="font-size:0.78rem; color:#7e22ce; margin-top:0.4rem; border-top:1px dashed #d8b4fe; padding-top:0.4rem;">
+              🏦 Funds will be credited directly to each staff member's platform wallet and verified bank account, and deducted from Central Treasury.
+            </div>
+          </div>
+
+          <div style="display:flex; justify-content:flex-end; gap:0.8rem;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('admin-salary-release-modal')">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="btn-submit-salary-release" style="background:#7c3aed; border-color:#7c3aed;">💸 Disburse Salary</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- =====================================================================
+         MODAL: STAFF & ADMIN BANK DETAILS
+         ===================================================================== -->
+    <div id="staff-bank-modal" class="modal-overlay">
+      <div class="modal-box" style="max-width:540px;">
+        <div class="modal-header">
+          <div>
+            <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:#2563eb; font-weight:700;">🏦 Banking &amp; Payouts</span>
+            <h2 style="font-size:1.35rem; margin-top:0.2rem;" id="staff-bank-modal-title">Bank &amp; Payout Details</h2>
+          </div>
+          <button class="modal-close" onclick="closeModal('staff-bank-modal')">&times;</button>
+        </div>
+
+        <div id="staff-bank-info-banner" style="margin:1rem 0; padding:0.85rem 1rem; border-radius:8px; font-size:0.84rem; line-height:1.5;"></div>
+
+        <form id="staff-bank-form" onsubmit="saveStaffBankDetails(event)">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="staff-bank-holder-name">Bank Account Holder Name <span style="color:var(--tomato);">*</span></label>
+              <input id="staff-bank-holder-name" type="text" placeholder="As printed in passbook" required oninput="handleStaffBankHolderInput(this.value)" />
+            </div>
+            <div class="form-group">
+              <label for="staff-pan-holder-name">Name on PAN Card <span id="staff-pan-holder-required-star" style="color:var(--tomato);">*</span></label>
+              <input id="staff-pan-holder-name" type="text" placeholder="Exact name on PAN" oninput="checkStaffBankNameMatchLive()" />
+            </div>
+          </div>
+
+          <div id="staff-bank-name-match-indicator" style="margin-bottom:0.85rem; padding:0.5rem 0.8rem; border-radius:6px; font-size:0.8rem; font-weight:600; display:none;"></div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="staff-pan-number">PAN Card Number <span id="staff-pan-num-required-star" style="color:var(--tomato);">*</span></label>
+              <input id="staff-pan-number" type="text" placeholder="ABCDE1234F" maxlength="10" style="text-transform:uppercase; font-family:monospace;" />
+            </div>
+            <div class="form-group">
+              <label for="staff-bank-name">Bank Name <span style="color:var(--tomato);">*</span></label>
+              <input id="staff-bank-name" type="text" placeholder="e.g. HDFC Bank, SBI, ICICI Bank" required />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="staff-bank-account-number">Bank Account Number <span style="color:var(--tomato);">*</span></label>
+              <input id="staff-bank-account-number" type="text" placeholder="Enter bank account number" required />
+            </div>
+            <div class="form-group">
+              <label for="staff-bank-ifsc">IFSC Code (11 Digits) <span style="color:var(--tomato);">*</span></label>
+              <input id="staff-bank-ifsc" type="text" placeholder="e.g. HDFC0000060" maxlength="11" style="text-transform:uppercase; font-family:monospace;" required />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="staff-bank-upi">UPI ID (Optional for Instant Transfers)</label>
+            <input id="staff-bank-upi" type="text" placeholder="e.g. username@okhdfcbank" />
+          </div>
+
+          <div id="staff-bank-notice" style="margin-bottom:0.8rem; font-size:0.84rem; font-weight:600;"></div>
+
+          <div style="display:flex; justify-content:flex-end; gap:0.8rem;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('staff-bank-modal')">Cancel</button>
+            <button type="submit" id="staff-bank-submit-btn" class="btn btn-primary" style="background:#2563eb; border-color:#2563eb;">💾 Save Bank Details</button>
           </div>
         </form>
       </div>
@@ -4645,6 +4905,292 @@
     </div>
 
     <!-- =====================================================================
+         SUPER ADMIN: ASSIGN DEFAULT OPERATING LOCATION MODAL
+         ===================================================================== -->
+    <div id="assign-admin-location-modal" class="modal-overlay">
+      <div class="modal-box" style="max-width:540px;">
+        <div class="modal-header">
+          <div>
+            <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:#0284c7; font-weight:700;">📍 Super Admin Regional Assignment</span>
+            <h2 style="font-size:1.25rem; margin-top:0.2rem;">Assign Default Operating Location</h2>
+          </div>
+          <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('assign-admin-location-modal')">&times;</button>
+        </div>
+
+        <form id="assign-admin-location-form" onsubmit="submitAssignAdminLocation(event)">
+          <input type="hidden" id="assign-loc-admin-id" value="" />
+
+          <div id="assign-loc-admin-summary" style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:10px; padding:0.75rem 1rem; margin-bottom:1rem; font-size:0.86rem; color:#0369a1;">
+            <!-- Populated via openAssignAdminLocationModal -->
+          </div>
+
+          <!-- Quick presets for major Indian cities -->
+          <div style="margin-bottom:1rem;">
+            <label style="font-size:0.8rem; font-weight:700; color:var(--ink); display:block; margin-bottom:0.4rem;">⚡ Quick City Presets</label>
+            <div style="display:flex; flex-wrap:wrap; gap:0.4rem;">
+              <button type="button" class="btn btn-outline btn-sm" style="font-size:0.75rem; padding:0.2rem 0.5rem;" onclick="applyLocationPreset('Bengaluru', '560001', 'Karnataka', 'Central HQ', 'Tomato Operations Headquarters, MG Road')">Bengaluru (560001)</button>
+              <button type="button" class="btn btn-outline btn-sm" style="font-size:0.75rem; padding:0.2rem 0.5rem;" onclick="applyLocationPreset('Mumbai', '400001', 'Maharashtra', 'Nariman Point', 'Tomato Operations Office, Fort')">Mumbai (400001)</button>
+              <button type="button" class="btn btn-outline btn-sm" style="font-size:0.75rem; padding:0.2rem 0.5rem;" onclick="applyLocationPreset('Delhi', '110001', 'Delhi', 'Connaught Place', 'Tomato Capital Operations HQ, CP')">Delhi (110001)</button>
+              <button type="button" class="btn btn-outline btn-sm" style="font-size:0.75rem; padding:0.2rem 0.5rem;" onclick="applyLocationPreset('Hyderabad', '500001', 'Telangana', 'Hitec City', 'Tomato Deccan Operations, Hitec City')">Hyderabad (500001)</button>
+              <button type="button" class="btn btn-outline btn-sm" style="font-size:0.75rem; padding:0.2rem 0.5rem;" onclick="applyLocationPreset('Chennai', '600001', 'Tamil Nadu', 'George Town', 'Tomato Coastal Operations, George Town')">Chennai (600001)</button>
+              <button type="button" class="btn btn-outline btn-sm" style="font-size:0.75rem; padding:0.2rem 0.5rem;" onclick="applyLocationPreset('Kolkata', '700001', 'West Bengal', 'BBD Bagh', 'Tomato Eastern Operations, BBD Bagh')">Kolkata (700001)</button>
+              <button type="button" class="btn btn-outline btn-sm" style="font-size:0.75rem; padding:0.2rem 0.5rem;" onclick="applyLocationPreset('Pune', '411001', 'Maharashtra', 'Shivaji Nagar', 'Tomato Western Hub, Shivaji Nagar')">Pune (411001)</button>
+              <button type="button" class="btn btn-outline btn-sm" style="font-size:0.75rem; padding:0.2rem 0.5rem;" onclick="applyLocationPreset('Patna', '800001', 'Bihar', 'Gandhi Maidan', 'Tomato Bihar Operations Hub, Gandhi Maidan')">Patna (800001)</button>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.75rem;">
+            <div class="form-group">
+              <label for="assign-loc-city">Operating City *</label>
+              <input type="text" id="assign-loc-city" required placeholder="e.g. Mumbai" />
+            </div>
+            <div class="form-group">
+              <label for="assign-loc-pincode">Pincode (6 Digits) *</label>
+              <input type="text" id="assign-loc-pincode" required pattern="[0-9]{5,6}" maxlength="6" placeholder="e.g. 400001" />
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.75rem;">
+            <div class="form-group">
+              <label for="assign-loc-state">State</label>
+              <input type="text" id="assign-loc-state" placeholder="e.g. Maharashtra" />
+            </div>
+            <div class="form-group">
+              <label for="assign-loc-locality">Locality / Area</label>
+              <input type="text" id="assign-loc-locality" placeholder="e.g. Nariman Point" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="assign-loc-line1">Headquarters / Office Address</label>
+            <input type="text" id="assign-loc-line1" placeholder="e.g. Tomato Operations Office, Nariman Point" />
+          </div>
+
+          <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:0.65rem; margin-top:1.25rem;">
+            <button type="button" class="btn btn-outline" onclick="closeModal('assign-admin-location-modal')">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="assign-loc-submit-btn" style="background:#0284c7; border-color:#0284c7;">📍 Assign &amp; Save Location</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- =====================================================================
+         SUPER ADMIN: CHANGE PLATFORM ROLE MODAL
+         ===================================================================== -->
+    <div id="control-panel-change-role-modal" class="modal-overlay">
+      <div class="modal-box" style="max-width:500px;">
+        <div class="modal-header">
+          <div>
+            <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:#a21caf; font-weight:700;">🛡️ Super Admin Role Governance</span>
+            <h2 style="font-size:1.25rem; margin-top:0.2rem;">Change Platform Staff Role</h2>
+          </div>
+          <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('control-panel-change-role-modal')">&times;</button>
+        </div>
+
+        <form id="control-panel-change-role-form" onsubmit="submitControlPanelChangeRole(event)">
+          <input type="hidden" id="cp-change-role-admin-id" value="" />
+
+          <div id="cp-change-role-admin-summary">
+            <!-- Populated via openControlPanelChangeRoleModal -->
+          </div>
+
+          <div class="form-group" style="margin-bottom:1rem;">
+            <label for="cp-change-role-select">Select New Role *</label>
+            <select id="cp-change-role-select" class="form-control" required style="font-weight:700;">
+              <option value="admin">👑 Platform Administrator (Full system access &amp; regional location)</option>
+              <option value="subadmin">🛡️ Operations Sub-Admin (Delegated RBAC operations)</option>
+              <option value="employee">👔 Normal Employee (Staff view)</option>
+            </select>
+            <small style="display:block; margin-top:0.35rem; font-size:0.78rem; color:var(--muted);">
+              Changing role updates system permissions and security clearance immediately.
+            </small>
+          </div>
+
+          <div class="form-group" style="margin-bottom:1.25rem;">
+            <label for="cp-change-role-title">Designation / Role Title *</label>
+            <input
+              type="text"
+              id="cp-change-role-title"
+              class="form-control"
+              required
+              placeholder="e.g. Platform Administrator, Mumbai Regional Lead, Operations Head"
+            />
+          </div>
+
+          <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:0.65rem;">
+            <button type="button" class="btn btn-outline" onclick="closeModal('control-panel-change-role-modal')">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="cp-change-role-submit-btn" style="background:#a21caf; border-color:#a21caf;">🛡️ Update Platform Role</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- =====================================================================
+         SUPER ADMIN: CREATE NEW ROLE MODAL
+         ===================================================================== -->
+    <div id="control-panel-create-role-modal" class="modal-overlay">
+      <div class="modal-box" style="max-width:580px; max-height:90vh; overflow-y:auto;">
+        <div class="modal-header">
+          <div>
+            <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:#7c3aed; font-weight:700;">🎭 Role Governance Center</span>
+            <h2 style="font-size:1.25rem; margin-top:0.2rem;">Create New Platform Role</h2>
+          </div>
+          <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('control-panel-create-role-modal')">&times;</button>
+        </div>
+
+        <form id="control-panel-create-role-form" onsubmit="submitControlPanelCreateRole(event)">
+          <div style="background:#f5f3ff; border:1px solid #ddd6fe; border-radius:10px; padding:0.75rem 1rem; margin-bottom:1.1rem; font-size:0.84rem; color:#5b21b6;">
+            <strong>👑 Super Admin Authority:</strong> Define custom platform roles with customized access tiers and granular module permissions.
+          </div>
+
+          <div class="form-row" style="display:grid; grid-template-columns:1fr 1fr; gap:0.85rem; margin-bottom:0.9rem;">
+            <div class="form-group">
+              <label for="cp-create-role-display-name">Role Display Name *</label>
+              <input
+                type="text"
+                id="cp-create-role-display-name"
+                class="form-control"
+                required
+                placeholder="e.g. Operations Manager"
+                oninput="handleRoleDisplayNameInput(this.value)"
+              />
+            </div>
+            <div class="form-group">
+              <label for="cp-create-role-key">Role Key / Identifier *</label>
+              <input
+                type="text"
+                id="cp-create-role-key"
+                class="form-control"
+                required
+                placeholder="e.g. operations_manager"
+                style="font-family:monospace;"
+              />
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom:0.9rem;">
+            <label for="cp-create-role-base">Base Clearance Tier *</label>
+            <select id="cp-create-role-base" class="form-control" required style="font-weight:700;" onchange="handleRoleBaseChange(this.value, 'create')">
+              <option value="subadmin">🛡️ Operations Sub-Admin (Delegated RBAC operations &amp; assigned tabs)</option>
+              <option value="admin">👑 Platform Administrator (Full system management &amp; regional operations)</option>
+              <option value="employee">👔 Normal Employee (Staff view &amp; customer assistance)</option>
+            </select>
+          </div>
+
+          <div class="form-group" style="margin-bottom:0.9rem;">
+            <label for="cp-create-role-description">Role Description / Mandate</label>
+            <input
+              type="text"
+              id="cp-create-role-description"
+              class="form-control"
+              placeholder="e.g. Oversees regional logistics, order dispatches, and partner fleet verification."
+            />
+          </div>
+
+          <div class="form-group" style="margin-bottom:1.25rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
+              <label style="font-weight:700; margin-bottom:0;">Assigned Module Permissions *</label>
+              <div style="display:flex; gap:0.4rem;">
+                <button type="button" class="btn btn-outline btn-xs" style="padding:0.15rem 0.45rem; font-size:0.72rem;" onclick="setAllRolePermissions(true, 'cp-create')">Select All</button>
+                <button type="button" class="btn btn-outline btn-xs" style="padding:0.15rem 0.45rem; font-size:0.72rem;" onclick="setAllRolePermissions(false, 'cp-create')">Clear All</button>
+              </div>
+            </div>
+            <div id="cp-create-role-perms-container" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr)); gap:0.45rem; background:#f8fafc; border:1px solid var(--line); border-radius:8px; padding:0.75rem;">
+              <!-- Populated dynamically via JS -->
+            </div>
+          </div>
+
+          <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:0.65rem;">
+            <button type="button" class="btn btn-outline" onclick="closeModal('control-panel-create-role-modal')">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="cp-create-role-submit-btn" style="background:#7c3aed; border-color:#7c3aed;">➕ Create Platform Role</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- =====================================================================
+         SUPER ADMIN: EDIT PLATFORM ROLE MODAL
+         ===================================================================== -->
+    <div id="control-panel-edit-role-modal" class="modal-overlay">
+      <div class="modal-box" style="max-width:580px; max-height:90vh; overflow-y:auto;">
+        <div class="modal-header">
+          <div>
+            <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:#0284c7; font-weight:700;">⚙️ Role Governance Center</span>
+            <h2 style="font-size:1.25rem; margin-top:0.2rem;">Edit Platform Role</h2>
+          </div>
+          <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('control-panel-edit-role-modal')">&times;</button>
+        </div>
+
+        <form id="control-panel-edit-role-form" onsubmit="submitControlPanelEditRole(event)">
+          <input type="hidden" id="cp-edit-role-id" value="" />
+
+          <div id="cp-edit-role-banner" style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:0.75rem 1rem; margin-bottom:1.1rem; font-size:0.84rem; color:#1e40af;">
+            <!-- Populated dynamically -->
+          </div>
+
+          <div class="form-row" style="display:grid; grid-template-columns:1fr 1fr; gap:0.85rem; margin-bottom:0.9rem;">
+            <div class="form-group">
+              <label for="cp-edit-role-display-name">Role Display Name *</label>
+              <input
+                type="text"
+                id="cp-edit-role-display-name"
+                class="form-control"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label for="cp-edit-role-key">Role Key (Identifier)</label>
+              <input
+                type="text"
+                id="cp-edit-role-key"
+                class="form-control"
+                readonly
+                disabled
+                style="background:#f1f5f9; font-family:monospace;"
+              />
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom:0.9rem;">
+            <label for="cp-edit-role-base">Base Clearance Tier *</label>
+            <select id="cp-edit-role-base" class="form-control" required style="font-weight:700;">
+              <option value="subadmin">🛡️ Operations Sub-Admin (Delegated RBAC operations &amp; assigned tabs)</option>
+              <option value="admin">👑 Platform Administrator (Full system management &amp; regional operations)</option>
+              <option value="employee">👔 Normal Employee (Staff view &amp; customer assistance)</option>
+            </select>
+          </div>
+
+          <div class="form-group" style="margin-bottom:0.9rem;">
+            <label for="cp-edit-role-description">Role Description / Mandate</label>
+            <input
+              type="text"
+              id="cp-edit-role-description"
+              class="form-control"
+            />
+          </div>
+
+          <div class="form-group" style="margin-bottom:1.25rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
+              <label style="font-weight:700; margin-bottom:0;">Assigned Module Permissions *</label>
+              <div style="display:flex; gap:0.4rem;">
+                <button type="button" class="btn btn-outline btn-xs" style="padding:0.15rem 0.45rem; font-size:0.72rem;" onclick="setAllRolePermissions(true, 'cp-edit')">Select All</button>
+                <button type="button" class="btn btn-outline btn-xs" style="padding:0.15rem 0.45rem; font-size:0.72rem;" onclick="setAllRolePermissions(false, 'cp-edit')">Clear All</button>
+              </div>
+            </div>
+            <div id="cp-edit-role-perms-container" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr)); gap:0.45rem; background:#f8fafc; border:1px solid var(--line); border-radius:8px; padding:0.75rem;">
+              <!-- Populated dynamically via JS -->
+            </div>
+          </div>
+
+          <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:0.65rem;">
+            <button type="button" class="btn btn-outline" onclick="closeModal('control-panel-edit-role-modal')">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="cp-edit-role-submit-btn" style="background:#0284c7; border-color:#0284c7;">💾 Save Role Changes</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- =====================================================================
          ADMIN: ACTIVE PARTNER FLEET LIST MODAL (RESTAURANTS / SHOPS / RIDERS)
          ===================================================================== -->
     <div id="admin-partner-fleet-modal" class="modal-overlay">
@@ -5013,6 +5559,90 @@
     </div>
 
     <!-- =========================================================================
+         ADMIN: FINANCE SALARY MANAGEMENT & DISBURSAL MODAL
+         ========================================================================= -->
+    <div id="admin-finance-salary-modal" class="modal-overlay">
+      <div class="modal-box" style="max-width:920px; width:95%; background:#ffffff; border:1px solid #e2e8f0; border-radius:14px; box-shadow:0 25px 65px rgba(0,0,0,0.25); padding:1.6rem; color:#0f172a; max-height:90vh; overflow-y:auto;">
+        <div class="modal-header" style="border-bottom:1px solid #e2e8f0; margin-bottom:1.2rem; padding-bottom:0.8rem; display:flex; justify-content:space-between; align-items:flex-start;">
+          <div>
+            <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:#7c3aed; font-weight:700;">💼 Platform Staff &amp; Leadership Payroll</span>
+            <h2 style="font-size:1.35rem; margin-top:0.2rem; color:#0f172a; font-weight:800;">Salary &amp; Payroll Management</h2>
+            <p style="font-size:0.84rem; color:var(--muted); margin:0.2rem 0 0 0;">Manage base monthly salaries and disburse payouts directly to Platform Admin, Sub-Admins, and Normal Employees.</p>
+          </div>
+          <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('admin-finance-salary-modal')">&times;</button>
+        </div>
+
+        <!-- Top Summary Bar & Batch Disbursal Strip -->
+        <div style="background:#faf5ff; border:1px solid #e9d5ff; border-radius:12px; padding:1.1rem 1.25rem; margin-bottom:1.25rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
+          <div>
+            <div style="font-size:0.75rem; font-weight:700; text-transform:uppercase; color:#6b21a8; letter-spacing:0.04em;">Monthly Payroll Commitment</div>
+            <div id="finance-salary-total-commitment" style="font-size:1.5rem; font-weight:800; color:#581c87; margin-top:0.15rem;">₹0 / mo</div>
+            <div id="finance-salary-staff-breakdown" style="font-size:0.8rem; color:#7e22ce;">Loading staff count...</div>
+          </div>
+          <div style="display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap;">
+            <div style="display:inline-flex; align-items:center; gap:0.35rem; background:#fff; border:1px solid #d8b4fe; border-radius:8px; padding:0.25rem 0.6rem;">
+              <label for="finance-salary-batch-month" style="font-size:0.76rem; font-weight:700; color:#581c87; margin:0;">Period:</label>
+              <input type="text" id="finance-salary-batch-month" style="border:none; outline:none; font-size:0.8rem; font-weight:600; width:130px; background:transparent;" />
+            </div>
+            <button type="button" class="btn btn-primary btn-sm" onclick="executeFinanceBatchSalaryRelease()" style="background:#7c3aed; border-color:#7c3aed; font-weight:700; padding:0.45rem 0.9rem; display:inline-flex; align-items:center; gap:0.35rem;">
+              <span>💸 Release All Salaries</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Role Filter Tabs & Search -->
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.6rem; margin-bottom:0.85rem;">
+          <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+            <button type="button" class="btn btn-sm" id="finance-salary-tab-all" onclick="filterFinanceSalaryRole('all')" style="background:var(--primary); color:#fff; font-weight:700; border-radius:20px; padding:0.25rem 0.75rem;">All Staff</button>
+            <button type="button" class="btn btn-outline btn-sm" id="finance-salary-tab-admin" onclick="filterFinanceSalaryRole('admin')" style="border-radius:20px; padding:0.25rem 0.75rem;">👑 Admin</button>
+            <button type="button" class="btn btn-outline btn-sm" id="finance-salary-tab-subadmin" onclick="filterFinanceSalaryRole('subadmin')" style="border-radius:20px; padding:0.25rem 0.75rem;">🛡️ Sub-Admins</button>
+            <button type="button" class="btn btn-outline btn-sm" id="finance-salary-tab-employee" onclick="filterFinanceSalaryRole('employee')" style="border-radius:20px; padding:0.25rem 0.75rem;">👔 Employees</button>
+          </div>
+          <div style="display:inline-flex; align-items:center; gap:0.35rem; background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px; padding:0.25rem 0.6rem; min-width:220px;">
+            <span style="font-size:0.82rem;">🔍</span>
+            <input type="text" id="finance-salary-search-input" placeholder="Search staff name, ID, phone..." oninput="renderFinanceSalaryTable()" style="border:none; outline:none; background:transparent; font-size:0.8rem; width:100%;" />
+          </div>
+        </div>
+
+        <!-- Staff Salary Table Container -->
+        <div id="finance-salary-table-container">
+          <div style="text-align:center; padding:2rem; color:var(--muted);">Loading staff salary records...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- =========================================================================
+         MODAL: EDIT BASE SALARY (ADMIN / SUBADMIN / EMPLOYEE)
+         ========================================================================= -->
+    <div id="admin-edit-staff-salary-modal" class="modal-overlay">
+      <div class="modal-box" style="max-width:440px; width:92%; background:#ffffff; border:1px solid #e2e8f0; border-radius:14px; box-shadow:0 25px 65px rgba(0,0,0,0.25); padding:1.5rem; color:#0f172a;">
+        <div class="modal-header" style="border-bottom:1px solid #e2e8f0; margin-bottom:1rem; padding-bottom:0.75rem;">
+          <div>
+            <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:#7c3aed; font-weight:700;">✏️ Compensation Configuration</span>
+            <h3 style="font-size:1.15rem; margin-top:0.2rem; color:#0f172a;" id="edit-salary-modal-title">Set Base Monthly Salary</h3>
+          </div>
+          <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('admin-edit-staff-salary-modal')">&times;</button>
+        </div>
+
+        <form id="edit-staff-salary-form" onsubmit="submitEditStaffSalary(event)">
+          <input type="hidden" id="edit-salary-user-id" value="" />
+          <div id="edit-salary-staff-info" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:0.75rem; margin-bottom:1rem; font-size:0.85rem;"></div>
+
+          <div class="form-group" style="margin-bottom:1rem;">
+            <label for="edit-salary-amount" style="font-size:0.84rem; font-weight:700;">Base Monthly Salary (₹) *</label>
+            <input type="number" id="edit-salary-amount" class="form-control" min="0" step="500" required placeholder="e.g. 50000" style="font-size:1.05rem; font-weight:700;" />
+            <small style="color:var(--muted); font-size:0.76rem; margin-top:0.3rem; display:block;">This amount will be used as the base default whenever salary is disbursed for this staff member.</small>
+          </div>
+
+          <div style="display:flex; justify-content:flex-end; gap:0.75rem;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal('admin-edit-staff-salary-modal')">Cancel</button>
+            <button type="submit" id="btn-save-staff-salary" class="btn btn-primary btn-sm" style="background:#7c3aed; border-color:#7c3aed; font-weight:700;">💾 Save Salary</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- =========================================================================
          PARTNER: FINANCE TRANSFER MODAL (CREDIT POINTS OR WALLET BALANCE)
          ========================================================================= -->
     <div id="partner-finance-transfer-modal" class="modal-overlay">
@@ -5113,6 +5743,7 @@
     <script src="../javascript/modules/adminCoupons.js"></script>
     <script src="../javascript/modules/adminBank.js"></script>
     <script src="../javascript/modules/adminFinance.js"></script>
+    <script src="../javascript/modules/adminControlPanel.js"></script>
     <script src="../javascript/modules/partnerFinance.js"></script>
     <script src="../javascript/modules/partnerBilling.js"></script>
     <!-- APPLICATION BOOTSTRAP -->

@@ -233,9 +233,17 @@ export const evaluateSingleCoupon = (
 
   if (
     coupon.couponType === 'specific_user' ||
+    coupon.couponType === 'instant' ||
     (coupon.couponType === 'settlement' &&
       String(coupon.targetUserIdentifier || '').trim())
   ) {
+    if (coupon.couponType === 'instant' && !coupon.targetUserIdentifier) {
+      return {
+        eligible: false,
+        reason: `Instant coupon "${coupon.code}" has no assigned user account.`,
+        discountAmount: 0,
+      };
+    }
     const matched = doesUserMatchTargetIdentifier(coupon.targetUserIdentifier, {
       userId: params.userId,
       customerId: params.customerId,
@@ -246,7 +254,7 @@ export const evaluateSingleCoupon = (
     if (!matched) {
       return {
         eligible: false,
-        reason: `Coupon "${coupon.code}" is assigned to a specific user account (${coupon.targetUserIdentifier}).`,
+        reason: `Instant coupon "${coupon.code}" is assigned only to user (${coupon.targetUserIdentifier}) and cannot be used by your account.`,
         discountAmount: 0,
       };
     }
@@ -554,21 +562,29 @@ export const recordCouponRedemptions = async (params: {
 }) => {
   if (!params.appliedCoupons?.length) return;
   for (const ac of params.appliedCoupons) {
-    await Coupon.findOneAndUpdate(
-      { code: ac.code },
-      {
-        $inc: { usedCount: 1 },
-        $push: {
-          usedBy: {
-            userId: params.userId,
-            customerCode: params.customerCode || '',
-            customerName: params.customerName || 'Customer',
-            orderNumber: params.orderNumber,
-            discountAmount: ac.discountAmount,
-            usedAt: new Date(),
+    const coupon = await Coupon.findOne({ code: ac.code });
+    if (!coupon) continue;
+
+    if (coupon.couponType === 'instant' || (coupon as any).isInstant) {
+      // Instant coupon: single-use assigned coupon, after use, coupon will destroy!
+      await Coupon.findByIdAndDelete(coupon._id);
+    } else {
+      await Coupon.findByIdAndUpdate(
+        coupon._id,
+        {
+          $inc: { usedCount: 1 },
+          $push: {
+            usedBy: {
+              userId: params.userId,
+              customerCode: params.customerCode || '',
+              customerName: params.customerName || 'Customer',
+              orderNumber: params.orderNumber,
+              discountAmount: ac.discountAmount,
+              usedAt: new Date(),
+            },
           },
         },
-      },
-    );
+      );
+    }
   }
 };

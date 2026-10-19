@@ -15,7 +15,7 @@ import adminFinanceRoutes from './routes/adminFinance.js';
 
 const createAdminRouter = () => {
   const router = express.Router();
-  router.use(authenticate, requireRole('admin', 'subadmin'));
+  router.use(authenticate, requireRole('admin', 'subadmin', 'employee'));
 
   router.use('/', adminPincodeRoutes);
   router.use('/', adminCouponRoutes);

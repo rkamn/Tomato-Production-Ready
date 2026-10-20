@@ -25,6 +25,7 @@ import Complaint, {
   cleanupExpiredClosedComplaints,
 } from './Complaint.js';
 import Role, { IRole, ensureDefaultRoles } from './Role.js';
+import Session, { ISession } from './Session.js';
 
 export {
   Employee,
@@ -72,6 +73,8 @@ export {
   Role,
   IRole,
   ensureDefaultRoles,
+  Session,
+  ISession,
 };
 
 export default {
@@ -92,4 +95,6 @@ export default {
   Review,
   Complaint,
   Role,
+  Session,
 };
+

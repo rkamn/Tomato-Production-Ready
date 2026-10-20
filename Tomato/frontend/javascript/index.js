@@ -28,6 +28,10 @@
       );
       const resetTokenField = document.getElementById('reset-token-field');
       const resetToken = document.getElementById('reset-token');
+      const codeStatusIndicator = document.getElementById('code-status-indicator');
+      const codeStatusText = document.getElementById('code-status-text');
+      const resendCodeBtn = document.getElementById('resend-code-btn');
+      const passwordSliderBox = document.getElementById('password-slider-box');
       const newPasswordField = document.getElementById('new-password-field');
       const confirmPasswordField = document.getElementById(
         'confirm-password-field',
@@ -35,6 +39,7 @@
       const newPassword = document.getElementById('new-password');
       const confirmPassword = document.getElementById('confirm-password');
       const resetSubmit = document.getElementById('reset-submit');
+      const resetConfirmSubmit = document.getElementById('reset-confirm-submit');
       const cancelReset = document.getElementById('cancel-reset');
 
       fetch(`${API_ROOT}/health`)
@@ -182,86 +187,314 @@
         resetIdentifier.focus();
       });
 
+      let resendTimer = null;
+      let resendCountdown = 30;
+
+      function clearResetState() {
+        if (resendTimer) {
+          clearInterval(resendTimer);
+          resendTimer = null;
+        }
+        resendCountdown = 30;
+        if (resendCodeBtn) {
+          resendCodeBtn.disabled = false;
+          resendCodeBtn.textContent = 'Resend code?';
+        }
+        resetToken.value = '';
+        resetToken.classList.remove('is-valid', 'is-invalid');
+        codeStatusIndicator.className = 'code-status-indicator';
+        codeStatusIndicator.textContent = '';
+        codeStatusText.className = 'code-status-text';
+        codeStatusText.textContent = '';
+        passwordSliderBox.classList.remove('expanded');
+        newPassword.value = '';
+        confirmPassword.value = '';
+        resetToken.required = false;
+        newPassword.required = false;
+        confirmPassword.required = false;
+        resetSubmit.textContent = 'Send verification code';
+        resetSubmit.classList.remove('hidden');
+        resetSubmit.disabled = false;
+        resetConfirmSubmit.textContent = 'Reset password';
+        resetConfirmSubmit.disabled = false;
+      }
+
+      function startResendCooldown() {
+        if (resendTimer) clearInterval(resendTimer);
+        resendCountdown = 30;
+        resendCodeBtn.disabled = true;
+        resendCodeBtn.textContent = `Resend code in ${resendCountdown}s`;
+        resendTimer = setInterval(() => {
+          resendCountdown -= 1;
+          if (resendCountdown <= 0) {
+            clearInterval(resendTimer);
+            resendTimer = null;
+            resendCodeBtn.disabled = false;
+            resendCodeBtn.textContent = 'Resend code?';
+          } else {
+            resendCodeBtn.textContent = `Resend code in ${resendCountdown}s`;
+          }
+        }, 1000);
+      }
+
       cancelReset.addEventListener('click', () => {
         resetForm.classList.add('hidden');
         form.classList.remove('hidden');
         forgotPassword.classList.remove('hidden');
         resetIdentifierField.classList.remove('hidden');
         resetTokenField.classList.add('hidden');
-        newPasswordField.classList.add('hidden');
-        confirmPasswordField.classList.add('hidden');
-        resetToken.value = '';
-        newPassword.value = '';
-        confirmPassword.value = '';
-        resetToken.required = false;
-        newPassword.required = false;
-        confirmPassword.required = false;
-        resetSubmit.textContent = 'Send reset token';
+        clearResetState();
         resetIntro.textContent =
-          'Enter your email or mobile number to start a password reset.';
+          'Enter your email or mobile number to receive a 6-digit verification code.';
         message.textContent = 'Ready to sign you in.';
         message.className = 'message';
       });
 
-      resetForm.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        resetSubmit.disabled = true;
+      // Dynamic validation of 6-digit verification code as user types
+      let verifyDebounce = null;
+      resetToken.addEventListener('input', () => {
+        const cleaned = resetToken.value.replace(/\D/g, '').slice(0, 6);
+        resetToken.value = cleaned;
+
+        if (cleaned.length < 6) {
+          resetToken.classList.remove('is-valid', 'is-invalid');
+          codeStatusIndicator.className = 'code-status-indicator';
+          codeStatusIndicator.textContent = '';
+          codeStatusText.className = 'code-status-text';
+          codeStatusText.textContent = '';
+          passwordSliderBox.classList.remove('expanded');
+          newPassword.required = false;
+          confirmPassword.required = false;
+          return;
+        }
+
+        // When 6 digits entered, verify dynamically
+        if (verifyDebounce) clearTimeout(verifyDebounce);
+        verifyDebounce = setTimeout(async () => {
+          codeStatusIndicator.className = 'code-status-indicator checking';
+          codeStatusIndicator.textContent = '';
+          codeStatusText.className = 'code-status-text';
+          codeStatusText.textContent = 'Verifying code...';
+
+          try {
+            const response = await fetch(
+              `${API_ROOT}/api/auth/password-reset/verify-code`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ resetToken: cleaned }),
+              },
+            );
+            const data = await response.json().catch(() => ({}));
+
+            if (response.ok && data.valid) {
+              // Valid: Green tick mark & slide down new password box
+              resetToken.classList.remove('is-invalid');
+              resetToken.classList.add('is-valid');
+              codeStatusIndicator.className = 'code-status-indicator valid';
+              codeStatusIndicator.textContent = '✓';
+              codeStatusText.className = 'code-status-text valid';
+              codeStatusText.textContent = '✓ Code confirmed! Please provide your new password below.';
+              
+              // Slide down the new box
+              passwordSliderBox.classList.add('expanded');
+              newPassword.required = true;
+              confirmPassword.required = true;
+              setTimeout(() => {
+                newPassword.focus();
+              }, 250);
+            } else {
+              // Invalid: Red cross mark & stay on same page
+              resetToken.classList.remove('is-valid');
+              resetToken.classList.add('is-invalid');
+              codeStatusIndicator.className = 'code-status-indicator invalid';
+              codeStatusIndicator.textContent = '✕';
+              codeStatusText.className = 'code-status-text invalid';
+              codeStatusText.textContent = data.message || '✕ Invalid or expired verification code.';
+              passwordSliderBox.classList.remove('expanded');
+              newPassword.required = false;
+              confirmPassword.required = false;
+            }
+          } catch (err) {
+            resetToken.classList.remove('is-valid');
+            resetToken.classList.add('is-invalid');
+            codeStatusIndicator.className = 'code-status-indicator invalid';
+            codeStatusIndicator.textContent = '✕';
+            codeStatusText.className = 'code-status-text invalid';
+            codeStatusText.textContent = 'Unable to verify code. Please check your connection.';
+            passwordSliderBox.classList.remove('expanded');
+          }
+        }, 150);
+      });
+
+      // Prevent Enter key in resetToken from submitting or re-requesting
+      resetToken.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          if (passwordSliderBox.classList.contains('expanded')) {
+            newPassword.focus();
+          }
+        }
+      });
+
+      // Dynamic resend verification code handler (ONLY explicit user click sends code again)
+      resendCodeBtn.addEventListener('click', async () => {
+        if (resendCodeBtn.disabled) return;
+        resendCodeBtn.disabled = true;
+        const prevText = resendCodeBtn.textContent;
+        resendCodeBtn.textContent = 'Sending...';
         message.textContent = '';
         message.className = 'message';
 
         try {
-          if (resetTokenField.classList.contains('hidden')) {
-            resetSubmit.textContent = 'Requesting...';
+          const response = await fetch(
+            `${API_ROOT}/api/auth/password-reset/request`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                identifier: resetIdentifier.value.trim(),
+                isResend: true,
+              }),
+            },
+          );
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(data.message || 'Unable to resend verification code.');
+          }
+
+          resetToken.value = '';
+          resetToken.classList.remove('is-valid', 'is-invalid');
+          codeStatusIndicator.className = 'code-status-indicator';
+          codeStatusIndicator.textContent = '';
+          codeStatusText.className = 'code-status-text';
+          codeStatusText.textContent = '';
+          passwordSliderBox.classList.remove('expanded');
+
+          message.textContent = data.message || 'A fresh 6-digit verification code has been sent to your email!';
+          message.className = 'message success';
+          startResendCooldown();
+          resetToken.focus();
+        } catch (error) {
+          resendCodeBtn.disabled = false;
+          resendCodeBtn.textContent = prevText;
+          message.textContent = error.message;
+          message.className = 'message error';
+        }
+      });
+
+      // Submit handler for initial code request & form submission
+      let isRequestingCode = false;
+      resetForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+
+        if (resetTokenField.classList.contains('hidden')) {
+          if (isRequestingCode) return;
+          isRequestingCode = true;
+          resetSubmit.disabled = true;
+          resetSubmit.textContent = 'Sending code...';
+          message.textContent = '';
+          message.className = 'message';
+
+          try {
             const response = await fetch(
               `${API_ROOT}/api/auth/password-reset/request`,
               {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ identifier: resetIdentifier.value }),
+                body: JSON.stringify({
+                  identifier: resetIdentifier.value.trim(),
+                  isResend: false,
+                }),
               },
             );
             const data = await response.json().catch(() => ({}));
-            if (!response.ok)
-              throw new Error(
-                data.message || 'Unable to start password reset.',
-              );
-            resetToken.value = data.resetToken || '';
+            if (!response.ok) {
+              throw new Error(data.message || 'Unable to start password reset.');
+            }
+
             resetIdentifierField.classList.add('hidden');
+            resetSubmit.classList.add('hidden');
             resetTokenField.classList.remove('hidden');
-            newPasswordField.classList.remove('hidden');
-            confirmPasswordField.classList.remove('hidden');
+            resetToken.value = '';
             resetToken.required = true;
-            newPassword.required = true;
-            confirmPassword.required = true;
-            resetSubmit.textContent = 'Set new password';
-            resetIntro.textContent = data.message || 'Choose a new password.';
-            message.textContent = 'Reset token ready. Choose a new password.';
+            resetIntro.textContent = 'Enter the 6-digit verification code sent to your registered email.';
+            message.textContent = data.message || '6-digit verification code sent to your email. Valid for 10 minutes.';
             message.className = 'message success';
-            return;
+            startResendCooldown();
+            resetToken.focus();
+          } catch (error) {
+            message.textContent =
+              error instanceof TypeError
+                ? 'The auth service is unavailable. Start it on port 5050.'
+                : error.message;
+            message.className = 'message error';
+          } finally {
+            isRequestingCode = false;
+            resetSubmit.disabled = false;
+            resetSubmit.textContent = 'Send verification code';
           }
+          return;
+        }
 
-          if (newPassword.value !== confirmPassword.value) {
-            throw new Error('The new passwords do not match.');
-          }
+        if (passwordSliderBox.classList.contains('expanded')) {
+          performPasswordReset();
+        }
+      });
 
-          resetSubmit.textContent = 'Saving...';
+      // Submit new password
+      resetConfirmSubmit.addEventListener('click', () => {
+        performPasswordReset();
+      });
+
+      async function performPasswordReset() {
+        const trimmedToken = resetToken.value.trim();
+        if (trimmedToken.length !== 6 || !/^\d{6}$/.test(trimmedToken)) {
+          message.textContent = 'Please enter the valid 6-digit verification code sent to your email.';
+          message.className = 'message error';
+          resetToken.focus();
+          return;
+        }
+
+        if (!newPassword.value || newPassword.value.length < 8) {
+          message.textContent = 'Password must be at least 8 characters long.';
+          message.className = 'message error';
+          newPassword.focus();
+          return;
+        }
+
+        if (newPassword.value !== confirmPassword.value) {
+          message.textContent = 'The new passwords do not match.';
+          message.className = 'message error';
+          confirmPassword.focus();
+          return;
+        }
+
+        resetConfirmSubmit.disabled = true;
+        resetConfirmSubmit.textContent = 'Saving...';
+        message.textContent = '';
+        message.className = 'message';
+
+        try {
           const response = await fetch(
             `${API_ROOT}/api/auth/password-reset/confirm`,
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                resetToken: resetToken.value,
+                resetToken: trimmedToken,
                 password: newPassword.value,
               }),
             },
           );
           const data = await response.json().catch(() => ({}));
-          if (!response.ok)
+          if (!response.ok) {
             throw new Error(data.message || 'Unable to reset password.');
+          }
+
           cancelReset.click();
           message.textContent =
-            'Password reset successful. You can sign in now.';
+            'Password reset successful. You can sign in now with your new password.';
           message.className = 'message success';
         } catch (error) {
           message.textContent =
@@ -270,11 +503,10 @@
               : error.message;
           message.className = 'message error';
         } finally {
-          resetSubmit.disabled = false;
-          if (!resetTokenField.classList.contains('hidden'))
-            resetSubmit.textContent = 'Set new password';
+          resetConfirmSubmit.disabled = false;
+          resetConfirmSubmit.textContent = 'Reset password';
         }
-      });
+      }
 
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -337,6 +569,22 @@
             throw new Error(data.message || 'Unable to sign in.');
           }
 
+          if (mode === 'register' && data.user?.role === 'employee' && data.user?.isApproved === false) {
+            localStorage.removeItem('tomatoToken');
+            localStorage.removeItem('tomatoUser');
+            accountHeading.textContent = 'Registration Received';
+            document.getElementById('account-name').textContent = data.user.displayName || data.user.name;
+            document.getElementById('account-email').textContent = data.user.email || 'Not provided';
+            document.getElementById('account-phone').textContent = data.user.phone || 'Not provided';
+            document.getElementById('account-role').textContent = 'Employee (Pending Approval)';
+            account.classList.add('visible');
+            message.textContent = 'Your employee registration has been submitted and is pending administrator approval and role assignment. You will be able to sign in once approved.';
+            message.className = 'message success';
+            submitButton.disabled = false;
+            submitButton.textContent = 'Create account';
+            return;
+          }
+
           localStorage.setItem('tomatoToken', data.token);
           if (data.user) {
             delete data.user.walletBalance;
@@ -376,3 +624,25 @@
             mode === 'register' ? 'Create account' : 'Sign in';
         }
       });
+
+      // Automatically handle password reset if customer arrives via email link
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlResetToken = urlParams.get('token') || urlParams.get('resetToken');
+        if (urlResetToken && forgotPassword && resetToken) {
+          forgotPassword.click();
+          resetToken.value = urlResetToken;
+          resetIdentifierField.classList.add('hidden');
+          resetTokenField.classList.remove('hidden');
+          newPasswordField.classList.remove('hidden');
+          confirmPasswordField.classList.remove('hidden');
+          resetToken.required = true;
+          newPassword.required = true;
+          confirmPassword.required = true;
+          resetSubmit.textContent = 'Set new password';
+          resetIntro.textContent = 'Enter your new password below.';
+          message.textContent = 'Verification token applied from email link.';
+          message.className = 'message success';
+          if (newPassword) newPassword.focus();
+        }
+      } catch (_) {}

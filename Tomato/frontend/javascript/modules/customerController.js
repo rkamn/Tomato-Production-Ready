@@ -4,22 +4,79 @@
 // =========================================================================
 // CUSTOMER: RESTAURANTS, MENU, CART, PAYMENT GATEWAY & ORDERS
 // =========================================================================
+function sortRestaurantsByDistance(restaurants) {
+  return [...restaurants].sort((a, b) => {
+    const distanceA = Number.isFinite(a.distanceKm) ? a.distanceKm : Number.POSITIVE_INFINITY;
+    const distanceB = Number.isFinite(b.distanceKm) ? b.distanceKm : Number.POSITIVE_INFINITY;
+    return distanceA - distanceB;
+  });
+}
+
+function isStoreBeyondCustomerRange(store) {
+  return typeof store?.distanceKm === 'number' && store.distanceKm > 15.0;
+}
+
 async function loadCustomerMenuSection() {
   try {
+    if (!customerAddresses || !customerAddresses.length) {
+      try {
+        const addrData = await apiFetch('/api/customer/addresses');
+        customerAddresses = addrData.addresses || [];
+      } catch (_) {}
+    }
+
+    const defaultAddr = (Array.isArray(customerAddresses) && customerAddresses.length)
+      ? (customerAddresses.find((a) => a.isDefault) || customerAddresses[0])
+      : null;
+    const customerPin = defaultAddr ? resolveFrontendAddressPincode(defaultAddr) : (user?.pincode || '');
+
+    let custLat = null;
+    let custLng = null;
+    if (defaultAddr?.location?.coordinates && Array.isArray(defaultAddr.location.coordinates) && defaultAddr.location.coordinates.length >= 2) {
+      const cLng = Number(defaultAddr.location.coordinates[0]);
+      const cLat = Number(defaultAddr.location.coordinates[1]);
+      if (!isNaN(cLat) && !isNaN(cLng) && (cLat !== 0 || cLng !== 0)) {
+        custLat = cLat;
+        custLng = cLng;
+      }
+    }
+    if ((custLat === null || custLng === null) && window.currentUserLat && window.currentUserLng) {
+      custLat = window.currentUserLat;
+      custLng = window.currentUserLng;
+    }
+
+    const qParams = new URLSearchParams();
+    if (customerPin) qParams.set('pincode', customerPin);
+    if (defaultAddr?.digipin) qParams.set('digipin', defaultAddr.digipin);
+    if (custLat !== null && custLng !== null) {
+      qParams.set('lat', custLat);
+      qParams.set('lng', custLng);
+    }
+    const pinQuery = qParams.toString() ? `?${qParams.toString()}` : '';
+
+    const restMenuParams = new URLSearchParams(qParams);
+    restMenuParams.set('type', 'restaurant');
+    const menuRestQuery = `?${restMenuParams.toString()}`;
+
+    const shopMenuParams = new URLSearchParams(qParams);
+    shopMenuParams.set('type', 'shop');
+    const menuShopQuery = `?${shopMenuParams.toString()}`;
+
     const [restData, menuData, shopsData, shopItemsData, addrData] = await Promise.all([
-      apiFetch('/api/customer/restaurants'),
-      apiFetch('/api/customer/menu?type=restaurant'),
-      apiFetch('/api/customer/shops').catch(() => ({ shops: [] })),
-      apiFetch('/api/customer/menu?type=shop').catch(() => ({ menu: [] })),
-      apiFetch('/api/customer/addresses').catch(() => ({ addresses: [] })),
+      apiFetch(`/api/customer/restaurants${pinQuery}`),
+      apiFetch(`/api/customer/menu${menuRestQuery}`),
+      apiFetch(`/api/customer/shops${pinQuery}`).catch(() => ({ shops: [] })),
+      apiFetch(`/api/customer/menu${menuShopQuery}`).catch(() => ({ menu: [] })),
+      apiFetch('/api/customer/addresses').catch(() => ({ addresses: customerAddresses || [] })),
     ]);
 
-    allRestaurants = restData.restaurants || [];
+    allRestaurants = sortRestaurantsByDistance(restData.restaurants || []);
     allMenuItems = menuData.menu || [];
-    allShops = shopsData.shops || [];
+    allShops = sortRestaurantsByDistance(shopsData.shops || []);
     allShopItems = shopItemsData.menu || [];
-    customerAddresses = addrData.addresses || [];
+    customerAddresses = addrData.addresses || customerAddresses || [];
     window.cachedPlatformGsnNumber = restData.platformGsnNumber || shopsData.platformGsnNumber || '';
+    window.customerActiveZonePincode = restData.matchedAdminPincode || customerPin;
 
     updateBrowseModeUI();
     renderRestaurantPills();
@@ -264,10 +321,7 @@ function recordVisitedRestaurant(restId, categoryName = null) {
   }
 }
 
-// Returns restaurants ordered by:
-// 1. Favorite/Visited restaurants sorted by last visit (most recently visited first)
-// 2. Unvisited restaurants that sell the same product/category as the visited selection
-// 3. Any remaining restaurants
+// Returns distance-ordered restaurants while retaining visit and product matches for badges.
 function getOrderedRestaurantsByVisitAndProduct() {
   const visitedIds = getVisitedItems('restaurants').map(String);
   const meta = getVisitedRestaurantMeta();
@@ -388,8 +442,8 @@ function getOrderedRestaurantsByVisitAndProduct() {
     visitedRests,
     sameProductRests,
     remainingRests,
-    orderedAll: [...visitedRests, ...sameProductRests, ...remainingRests],
-    pillRests,
+    orderedAll: sortRestaurantsByDistance(allRestaurants),
+    pillRests: sortRestaurantsByDistance(pillRests),
     visitedIdSet,
     sameProductIdSet: new Set(sameProductRests.map((r) => String(r.id || r._id))),
     featuredItemByRestId,
@@ -1129,6 +1183,17 @@ function closeDropdownMenu() {
 }
 
 function selectRestaurantFilter(id) {
+  if (id !== 'all') {
+    const targetRest = Array.isArray(allRestaurants) ? allRestaurants.find((r) => String(r.id || r._id) === String(id)) : null;
+    if (targetRest && isStoreBeyondCustomerRange(targetRest)) {
+      if (typeof showRestaurantTooFarPopup === 'function') {
+        showRestaurantTooFarPopup(targetRest.name || 'Restaurant', targetRest.distanceKm);
+      } else {
+        alert('Restaurant is too far from you');
+      }
+      return;
+    }
+  }
   currentSelectedRestaurantId = id;
   selectedCategory = 'all';
   if (id !== 'all') {
@@ -1144,6 +1209,17 @@ function selectRestaurantCategoryFilter(event, restId, categoryName) {
   if (event) {
     event.stopPropagation();
     event.preventDefault();
+  }
+  if (restId && restId !== 'all') {
+    const targetRest = Array.isArray(allRestaurants) ? allRestaurants.find((r) => String(r.id || r._id) === String(restId)) : null;
+    if (targetRest && isStoreBeyondCustomerRange(targetRest)) {
+      if (typeof showRestaurantTooFarPopup === 'function') {
+        showRestaurantTooFarPopup(targetRest.name || 'Restaurant', targetRest.distanceKm);
+      } else {
+        alert('Restaurant is too far from you');
+      }
+      return;
+    }
   }
   mainCustomerTab = 'all_restaurants';
   currentSelectedRestaurantId = restId || 'all';
@@ -1162,6 +1238,17 @@ function selectRestaurantCategoryFilter(event, restId, categoryName) {
 window.selectRestaurantCategoryFilter = selectRestaurantCategoryFilter;
 
 function selectShopFilter(id) {
+  if (id !== 'all') {
+    const targetShop = Array.isArray(allShops) ? allShops.find((s) => String(s.id || s._id) === String(id)) : null;
+    if (targetShop && isStoreBeyondCustomerRange(targetShop)) {
+      if (typeof showRestaurantTooFarPopup === 'function') {
+        showRestaurantTooFarPopup(targetShop.name || 'Shop', targetShop.distanceKm);
+      } else {
+        alert('Shop is too far from you');
+      }
+      return;
+    }
+  }
   currentSelectedShopId = id;
   if (id !== 'all') {
     recordVisitedItem('shops', id);
@@ -1405,7 +1492,10 @@ function renderRestaurantHistoryTileHtml(rest, featuredItemOverride = null, subt
 
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:0.5rem; z-index:1; position:relative;">
         <div style="min-width:0;">
-          <span style="display:inline-block; font-size:0.68rem; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#fde047; background:rgba(0,0,0,0.45); padding:0.15rem 0.45rem; border-radius:4px; margin-bottom:0.3rem;">${escapeHtml(subtitleBadgeText)}</span>
+          <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap; margin-bottom:0.3rem;">
+            <span style="display:inline-block; font-size:0.68rem; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#fde047; background:rgba(0,0,0,0.45); padding:0.15rem 0.45rem; border-radius:4px;">${escapeHtml(subtitleBadgeText)}</span>
+            ${rest.distanceText ? `<span style="display:inline-block; font-size:0.68rem; font-weight:700; color:#38bdf8; background:rgba(15,23,42,0.65); padding:0.15rem 0.45rem; border-radius:4px; border:1px solid rgba(56,189,248,0.4);">📍 ${escapeHtml(rest.distanceText)}</span>` : ''}
+          </div>
           <div style="display:flex; flex-direction:column; align-items:flex-start; gap:0.2rem;">
             <h3 style="margin:0; font-size:1.18rem; font-weight:800; color:#ffffff; text-shadow:0 2px 6px rgba(0,0,0,0.65); line-height:1.25;">${escapeHtml(restName)}</h3>
             ${categorySlidesHtml}
@@ -1722,6 +1812,14 @@ function addToCart(itemId, name, price, restaurantId, storeType = 'restaurant') 
     const shop = allShops.find((s) => String(s.id || s._id) === String(restaurantId));
     if (shop) {
       storeName = shop.name || 'Shop';
+      if (isStoreBeyondCustomerRange(shop)) {
+        if (typeof showRestaurantTooFarPopup === 'function') {
+          showRestaurantTooFarPopup(storeName, shop.distanceKm);
+        } else {
+          alert('Shop is too far from you');
+        }
+        return;
+      }
       if (shop.isOpen === false || shop.isOnline === false) isClosed = true;
     }
   } else {
@@ -1729,6 +1827,14 @@ function addToCart(itemId, name, price, restaurantId, storeType = 'restaurant') 
     const rest = allRestaurants.find((r) => String(r.id || r._id) === String(restaurantId));
     if (rest) {
       storeName = rest.name || 'Restaurant';
+      if (isStoreBeyondCustomerRange(rest)) {
+        if (typeof showRestaurantTooFarPopup === 'function') {
+          showRestaurantTooFarPopup(storeName, rest.distanceKm);
+        } else {
+          alert('Restaurant is too far from you');
+        }
+        return;
+      }
       if (rest.isOpen === false || rest.isOnline === false) isClosed = true;
     }
   }
@@ -2388,7 +2494,7 @@ async function populateCheckoutAddresses() {
   }
 
   container.innerHTML = `
-    <select id="checkout-address-select" style="width:100%; padding:0.5rem; border:1px solid var(--line); border-radius:6px; font-size:0.85rem; margin-bottom:0.4rem; background:#fff;" onchange="updateCheckoutAddressPreview()">
+    <select id="checkout-address-select" style="width:100%; padding:0.5rem; border:1px solid var(--line); border-radius:6px; font-size:0.85rem; margin-bottom:0.4rem; background:#fff;" onchange="handleCheckoutAddressChange()">
     </select>
     <div id="checkout-address-preview" style="font-size:0.82rem; color:var(--muted); background:#faf8f5; padding:0.5rem 0.7rem; border-radius:6px; line-height:1.4;">
     </div>
@@ -2414,26 +2520,200 @@ async function populateCheckoutAddresses() {
 }
 
 let cachedServiceablePincodes = [];
+let cachedAdminZones = [];
 
 function resolveFrontendAddressPincode(addr) {
   if (!addr) return '';
   const direct = String(addr.postalCode || addr.pincode || '').trim();
   const m1 = direct.match(/\b(\d{5,6})\b/);
   if (m1) return m1[1];
+
+  if (addr.digipin) {
+    const dPin = String(addr.digipin).trim().toUpperCase();
+    const dgpPinMatch = dPin.match(/\b(\d{6})\b/);
+    if (dgpPinMatch) return dgpPinMatch[1];
+    if (dPin.includes('1857') || dPin.includes('7369')) return '411057';
+    if (dPin.includes('2664') || dPin.includes('8490')) return '845401';
+    if (dPin.includes('1297') || dPin.includes('7759')) return '560001';
+  }
+
+  let lat = null, lng = null;
+  if (Array.isArray(addr.location?.coordinates) && addr.location.coordinates.length >= 2) {
+    lng = Number(addr.location.coordinates[0]);
+    lat = Number(addr.location.coordinates[1]);
+  } else if (addr.lat && addr.lng) {
+    lat = Number(addr.lat);
+    lng = Number(addr.lng);
+  }
+  if (lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng)) {
+    if (typeof calculateDistanceKm === 'function') {
+      if (calculateDistanceKm(lat, lng, 18.5707, 73.6908) <= 25) return '411057';
+      if (calculateDistanceKm(lat, lng, 26.6471, 84.9085) <= 25) return '845401';
+      if (calculateDistanceKm(lat, lng, 12.9716, 77.5946) <= 25) return '560001';
+    }
+  }
+
   const combined = `${addr.line1 || ''} ${addr.line2 || ''} ${addr.city || ''}`;
   const m2 = combined.match(/\b(\d{5,6})\b/);
   return m2 ? m2[1] : '';
+}
+
+function isMatchingAdminZone(customerPin, storePin, adminZones) {
+  if (!customerPin || !storePin) return false;
+  const cPin = String(customerPin).trim();
+  const sPin = String(storePin).trim();
+  const zones = Array.isArray(adminZones) && adminZones.length > 0
+    ? adminZones
+    : (Array.isArray(window.cachedGlobalAdminZones) ? window.cachedGlobalAdminZones : []);
+
+  if (zones.length > 0) {
+    for (const adm of zones) {
+      if (Array.isArray(adm.pincodes) && adm.pincodes.includes(cPin) && adm.pincodes.includes(sPin)) {
+        return true;
+      }
+    }
+    if (cPin === sPin) {
+      for (const adm of zones) {
+        if (Array.isArray(adm.pincodes) && adm.pincodes.includes(cPin)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+  return cPin === sPin;
 }
 
 async function fetchCustomerServiceablePincodes() {
   try {
     const res = await apiFetch('/api/customer/serviceable-pincodes');
     if (Array.isArray(res.pincodes)) cachedServiceablePincodes = res.pincodes;
+    if (Array.isArray(res.adminZones)) cachedAdminZones = res.adminZones;
   } catch (_) {}
   return cachedServiceablePincodes;
 }
 
-function updateCheckoutAddressPreview() {
+function resolveFrontendCoordinatesFromDigipin(digipin) {
+  if (!digipin || typeof digipin !== 'string') return null;
+  const clean = digipin.trim().toUpperCase();
+  const dgpMatch = clean.match(/DGP-(\d{3,4})-(\d{3,4})/i);
+  if (dgpMatch && dgpMatch[1] && dgpMatch[2]) {
+    const latVal = parseInt(dgpMatch[1], 10) / 100;
+    const lngVal = parseInt(dgpMatch[2], 10) / 100;
+    if (!isNaN(latVal) && !isNaN(lngVal) && latVal > 0 && lngVal > 0) {
+      return { lat: latVal, lng: lngVal };
+    }
+  }
+  const pinMatch = clean.match(/\b\d{6}\b/);
+  if (pinMatch) {
+    return resolveFrontendCoordinatesFromPincode(pinMatch[0]);
+  }
+  return null;
+}
+
+function resolveFrontendCoordinatesFromPincode(pin) {
+  if (!pin) return null;
+  const clean = String(pin).trim();
+  if (clean === '411057') return { lat: 18.5707, lng: 73.6908 };
+  if (clean === '845401') return { lat: 26.6471, lng: 84.9085 };
+  if (clean === '560001') return { lat: 12.9716, lng: 77.5946 };
+  return null;
+}
+
+function getAddressCoordinates(addr) {
+  if (!addr) return null;
+  if (Array.isArray(addr.location?.coordinates) && addr.location.coordinates.length >= 2) {
+    const lng = Number(addr.location.coordinates[0]);
+    const lat = Number(addr.location.coordinates[1]);
+    if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) return { lat, lng };
+  }
+  if (addr.lat && addr.lng) {
+    const lat = Number(addr.lat);
+    const lng = Number(addr.lng);
+    if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
+  }
+  if (addr.digipin) {
+    const dgp = resolveFrontendCoordinatesFromDigipin(addr.digipin);
+    if (dgp) return dgp;
+  }
+  const pin = resolveFrontendAddressPincode(addr);
+  return resolveFrontendCoordinatesFromPincode(pin);
+}
+
+function getStoreFrontendCoordinates(store) {
+  if (!store) return null;
+  if (store.location && typeof store.location.lat === 'number' && typeof store.location.lng === 'number') {
+    return { lat: store.location.lat, lng: store.location.lng };
+  }
+  if (Array.isArray(store.location?.coordinates) && store.location.coordinates.length >= 2) {
+    const lng = Number(store.location.coordinates[0]);
+    const lat = Number(store.location.coordinates[1]);
+    if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) return { lat, lng };
+  }
+  if (store.digipin) {
+    const dgp = resolveFrontendCoordinatesFromDigipin(store.digipin);
+    if (dgp) return dgp;
+  }
+  const pin = store.pincode || store.postalCode || resolveFrontendAddressPincode({ line1: store.restaurantAddress || store.shopAddress || store.address || '' });
+  return resolveFrontendCoordinatesFromPincode(pin);
+}
+
+function checkAddressDeliverableToStore(addr, store) {
+  if (!addr) return { deliverable: false, reason: 'No address selected', distanceKm: null };
+  const custPin = resolveFrontendAddressPincode(addr);
+  const hasPinList = Array.isArray(cachedServiceablePincodes) && cachedServiceablePincodes.length > 0;
+  if (hasPinList && (!custPin || !cachedServiceablePincodes.includes(custPin))) {
+    return {
+      deliverable: false,
+      reason: `Pincode ${custPin || 'N/A'} is not in serviceable pincodes.`,
+      distanceKm: null,
+      custPin,
+    };
+  }
+
+  if (store) {
+    // 1. Distance Check (<= 15.0 km)
+    const addrCoords = getAddressCoordinates(addr);
+    const storeCoords = getStoreFrontendCoordinates(store);
+    let distanceKm = null;
+    if (addrCoords && storeCoords && typeof calculateDistanceKm === 'function') {
+      distanceKm = Number(calculateDistanceKm(addrCoords.lat, addrCoords.lng, storeCoords.lat, storeCoords.lng).toFixed(2));
+      if (distanceKm > 15.0) {
+        return {
+          deliverable: false,
+          reason: `Distance (${distanceKm} km) exceeds maximum delivery radius of 15.0 km.`,
+          distanceKm,
+          custPin,
+        };
+      }
+    }
+
+    // 2. Admin Zone Match Check
+    const storePin = store.pincode || store.postalCode || resolveFrontendAddressPincode({ line1: store.restaurantAddress || store.shopAddress || store.address || '' });
+    if (storePin && custPin) {
+      const isStoreAdminMatch = isMatchingAdminZone(custPin, storePin, cachedAdminZones);
+      if (!isStoreAdminMatch) {
+        return {
+          deliverable: false,
+          reason: `Selected address belongs to a different administrative delivery zone than ${store.name || 'this store'}.`,
+          distanceKm,
+          custPin,
+        };
+      }
+    }
+    return { deliverable: true, distanceKm, custPin };
+  }
+
+  return { deliverable: true, distanceKm: null, custPin };
+}
+
+function handleCheckoutAddressChange() {
+  updateCheckoutAddressPreview({ isUserChange: true });
+}
+window.handleCheckoutAddressChange = handleCheckoutAddressChange;
+
+function updateCheckoutAddressPreview(options = {}) {
+  const isUserChange = Boolean(options && options.isUserChange);
   const select = document.getElementById('checkout-address-select');
   const preview = document.getElementById('checkout-address-preview');
   const defaultPrompt = document.getElementById('checkout-default-prompt');
@@ -2448,23 +2728,41 @@ function updateCheckoutAddressPreview() {
     return;
   }
 
-  const custPin = resolveFrontendAddressPincode(addr);
-  const hasPinList = Array.isArray(cachedServiceablePincodes) && cachedServiceablePincodes.length > 0;
-  const isPinServiceable = !hasPinList || (custPin && cachedServiceablePincodes.includes(custPin));
+  const isShop = cart[0]?.storeType === 'shop' || customerBrowseMode === 'shop';
+  const store = cart.length > 0 && cart[0].restaurantId
+    ? (isShop
+        ? (Array.isArray(allShops) ? allShops.find((s) => String(s.id || s._id) === String(cart[0].restaurantId)) : null)
+        : (Array.isArray(allRestaurants) ? allRestaurants.find((r) => String(r.id || r._id) === String(cart[0].restaurantId)) : null))
+    : null;
+
+  const status = checkAddressDeliverableToStore(addr, store);
+  const isAreaDeliverable = status.deliverable;
+  const custPin = status.custPin || resolveFrontendAddressPincode(addr);
+
+  // If user changed the address in checkout dropdown and it is out of current restaurant deliverable range, popup alert
+  if (!isAreaDeliverable && isUserChange) {
+    if (typeof showDeliverableRangeAlert === 'function') {
+      showDeliverableRangeAlert('your oder is out of deliverable range, please update your address', custPin, status.distanceKm);
+    } else if (typeof showServiceableAreaPopup === 'function') {
+      showServiceableAreaPopup(custPin, cachedServiceablePincodes, 'customer', 'your oder is out of deliverable range, please update your address');
+    } else {
+      alert("your oder is out of deliverable range, please update your address");
+    }
+  }
 
   preview.innerHTML = `
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.2rem; flex-wrap:wrap; gap:0.35rem;">
       <strong>📍 ${escapeHtml(addr.label || 'Home')}</strong>
       <div style="display:flex; gap:0.35rem; align-items:center;">
-        ${!isPinServiceable
-          ? `<span class="badge badge-blocked" style="padding:2px 7px; font-size:0.7rem;">✕ Out of Serviceable Range (${escapeHtml(custPin || 'No Pincode')})</span>`
+        ${!isAreaDeliverable
+          ? `<span class="badge badge-blocked" style="padding:2px 7px; font-size:0.7rem;">✕ Out of Deliverable Range (${escapeHtml(custPin || 'No Pincode')})</span>`
           : ''}
         ${addr.isDefault ? '<span class="badge badge-delivered" style="padding:2px 7px; font-size:0.72rem;">✓ Default Address</span>' : '<span style="font-size:0.72rem; color:var(--muted);">Alternate Address</span>'}
       </div>
     </div>
-    <div style="color:var(--ink);">${escapeHtml(addr.line1)}${addr.line2 ? ', ' + escapeHtml(addr.line2) : ''}, ${escapeHtml(addr.city)}, ${escapeHtml(addr.state || '')} - <strong>${escapeHtml(addr.postalCode || '')}</strong></div>
+    <div style="color:var(--ink);">${escapeHtml(addr.line1)}${addr.line2 ? ', ' + escapeHtml(addr.line2) : ''}, ${escapeHtml(addr.city)}, ${escapeHtml(addr.state || '')} - <strong>${escapeHtml(addr.postalCode || '')}</strong>${addr.digipin ? ` &nbsp;•&nbsp; <span style="display:inline-flex; align-items:center; background:#eff6ff; color:#1d4ed8; padding:0.1rem 0.4rem; border-radius:4px; font-weight:700; font-size:0.73rem; border:1px solid #bfdbfe;">📍 DigiPIN: ${escapeHtml(addr.digipin)}</span>` : ''}</div>
     <div style="margin-top:0.2rem; font-size:0.78rem; color:var(--muted);">📞 Delivery Contact: <strong>${escapeHtml(addr.phone || user.phone || 'N/A')}</strong></div>
-    ${!isPinServiceable ? `<div style="margin-top:0.4rem; padding:0.4rem 0.6rem; border-radius:6px; background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; font-size:0.78rem; font-weight:600;">⚠️ Your area (Pincode: ${escapeHtml(custPin || 'N/A')}) is out of serviceable range. Active delivery pincodes: ${escapeHtml(cachedServiceablePincodes.join(', '))}</div>` : ''}
+    ${!isAreaDeliverable ? `<div style="margin-top:0.4rem; padding:0.4rem 0.6rem; border-radius:6px; background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; font-size:0.78rem; font-weight:600;">⚠️ your oder is out of deliverable range, please update your address</div>` : ''}
   `;
 
   if (defaultPrompt && makeDefaultCb) {
@@ -2706,7 +3004,9 @@ async function openPaymentGatewayModal() {
   const discountAmt = typeof getActiveCartDiscountAmount === 'function' ? getActiveCartDiscountAmount(subtotal) : 0;
   const totalAmount = Number(Math.max(1, subtotal + tax + 40 - discountAmt).toFixed(2));
 
-  const upiUrl = `upi://pay?pa=tomato.official@hdfcbank&pn=Tomato%20Official%20Treasury&am=${totalAmount.toFixed(2)}&cu=INR&tn=Order%20Payment`;
+  const officialUpi = cachedPaymentConfig?.tomatoOfficialBank?.upiId || 'tomato.official@hdfcbank';
+  const officialPayee = cachedPaymentConfig?.tomatoOfficialBank?.accountHolderName || cachedPaymentConfig?.tomatoOfficialBank?.companyName || 'Tomato Official Treasury';
+  const upiUrl = `upi://pay?pa=${encodeURIComponent(officialUpi)}&pn=${encodeURIComponent(officialPayee)}&am=${totalAmount.toFixed(2)}&cu=INR&tn=Order%20Payment`;
   const qrImg = document.getElementById('gw-dynamic-upi-qr');
   if (qrImg) {
     qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(upiUrl)}`;
@@ -2772,6 +3072,7 @@ async function placeOrderAfterPayment(txnId, method, chosenAddr) {
     city: chosenAddr.city,
     state: chosenAddr.state || '',
     postalCode: chosenAddr.postalCode || '',
+    digipin: chosenAddr.digipin || '',
     coordinates: chosenAddr.location?.coordinates || [77.5946, 12.9716],
   };
 
@@ -2806,9 +3107,13 @@ async function placeOrderAfterPayment(txnId, method, chosenAddr) {
     ? `\nCoupon Savings: -₹${Number(orderRes.order.discountAmount).toFixed(2)} (${(orderRes.order.couponCodes || []).join(', ')})`
     : '';
 
+  const bankInfo = cachedPaymentConfig?.tomatoOfficialBank;
+  const officialBankName = bankInfo?.bankName || 'HDFC Bank Limited';
+  const officialAcNum = bankInfo?.accountNumber || '50200088991122';
+
   const settlementNotice = method === 'cod'
     ? '\nDoorstep Collection: Physical Cash / Doorstep QR upon delivery.'
-    : '\nOfficial Inflow: Credited directly to Tomato Treasury (HDFC Bank Limited A/c 50200088991122).';
+    : `\nOfficial Inflow: Credited directly to Tomato Treasury (${officialBankName} A/c ${officialAcNum}).`;
 
   alert(`🎉 ${storeLabel} Placed Successfully!\n\nOrder Number: ${orderRes.order.orderNumber}${discountLine}\nFinal Paid: ₹${Number(orderRes.order.totalAmount || 0).toFixed(2)}\nDelivering To: ${chosenAddr.label} (${chosenAddr.line1}, ${chosenAddr.city})\nPayment Mode: ${method.toUpperCase()}\nTransaction Ref: ${txnId}${settlementNotice}`);
 
@@ -2833,11 +3138,29 @@ async function executePaymentAndOrder() {
     return;
   }
 
-  // Enforce Admin Serviceable Pincode Check before initiating payment
+  // Enforce Admin Serviceable Location & Zone Matching Checks
   const activePincodes = await fetchCustomerServiceablePincodes();
-  const custPincode = resolveFrontendAddressPincode(chosenAddr);
-  if (!custPincode || (activePincodes.length > 0 && !activePincodes.includes(custPincode))) {
-    alert(`Cannot place order: Your area${custPincode ? ` (Pincode: ${custPincode})` : ''} is out of serviceable range.\n\nDelivery services are currently available only in pincodes: ${activePincodes.join(', ') || 'None'}.`);
+  const defaultAddr = customerAddresses.find((a) => a.isDefault) || customerAddresses[0];
+  const defaultPincode = defaultAddr ? resolveFrontendAddressPincode(defaultAddr) : (user?.pincode || '');
+  const custPincode = resolveFrontendAddressPincode(chosenAddr) || defaultPincode;
+
+  const isShop = cart[0]?.storeType === 'shop' || customerBrowseMode === 'shop';
+  const store = cart.length > 0 && cart[0].restaurantId
+    ? (isShop
+        ? (Array.isArray(allShops) ? allShops.find((s) => String(s.id || s._id) === String(cart[0].restaurantId)) : null)
+        : (Array.isArray(allRestaurants) ? allRestaurants.find((r) => String(r.id || r._id) === String(cart[0].restaurantId)) : null))
+    : null;
+
+  // Deliverable range check
+  const deliverableStatus = checkAddressDeliverableToStore(chosenAddr, store);
+  if (!deliverableStatus.deliverable) {
+    if (typeof showDeliverableRangeAlert === 'function') {
+      showDeliverableRangeAlert('your oder is out of deliverable range, please update your address', custPincode, deliverableStatus.distanceKm);
+    } else if (typeof showServiceableAreaPopup === 'function') {
+      showServiceableAreaPopup(custPincode || defaultPincode || 'Not Set', activePincodes, 'customer', 'your oder is out of deliverable range, please update your address');
+    } else {
+      alert("your oder is out of deliverable range, please update your address");
+    }
     return;
   }
 
@@ -3051,7 +3374,23 @@ async function executePaymentAndOrder() {
 
     await placeOrderAfterPayment(txnId, selectedPaymentMethod, chosenAddr);
   } catch (e) {
-    alert(`Payment & Order Error: ${e.message}`);
+    if (e.message && (e.message.toLowerCase().includes('servicable range') || e.message.toLowerCase().includes('deliverable range') || e.code === 'AREA_OUT_OF_SERVICEABLE_RANGE' || e.code === 'ADMIN_ZONE_MISMATCH' || e.code === 'STORE_OUT_OF_SERVICEABLE_RANGE')) {
+      if (typeof showDeliverableRangeAlert === 'function') {
+        showDeliverableRangeAlert('your oder is out of deliverable range, please update your address', custPincode);
+      } else if (typeof showServiceableAreaPopup === 'function') {
+        showServiceableAreaPopup(custPincode || defaultPincode || 'Not Set', activePincodes, 'customer', 'your oder is out of deliverable range, please update your address');
+      } else {
+        alert("your oder is out of deliverable range, please update your address");
+      }
+    } else if (typeof showRestaurantTooFarPopup === 'function' && (e.code === 'STORE_TOO_FAR' || (e.message && e.message.toLowerCase().includes('too far from you')))) {
+      if (typeof showDeliverableRangeAlert === 'function') {
+        showDeliverableRangeAlert('your oder is out of deliverable range, please update your address', custPincode, e.distanceKm);
+      } else {
+        showRestaurantTooFarPopup(cart[0]?.name || (cart[0]?.storeType === 'shop' ? 'Shop' : 'Restaurant'), e.distanceKm);
+      }
+    } else {
+      alert(`Payment & Order Error: ${e.message}`);
+    }
   } finally {
     payBtn.disabled = false;
     loadingEl.style.display = 'none';
@@ -3962,6 +4301,7 @@ async function setAsDefaultAddress(addressId) {
     await apiFetch(`/api/customer/addresses/${addressId}/default`, { method: 'POST' });
     await fetchCustomerAddresses();
     await fetchUserLocation();
+    await loadCustomerMenuSection();
     if (cart.length) {
       renderCart();
     }
@@ -4001,7 +4341,7 @@ async function fetchCustomerAddresses() {
               : '<span class="badge badge-ready" style="font-size:0.75rem;">Saved Address</span>'}
           </div>
           <p style="margin:0.2rem 0; font-size:0.9rem; color:var(--ink); font-weight:500;">${escapeHtml(a.line1)}${a.line2 ? `, ${escapeHtml(a.line2)}` : ''}</p>
-          <p style="margin:0.2rem 0; font-size:0.84rem; color:var(--muted);">${escapeHtml(a.city)}, ${escapeHtml(a.state || '')} - <strong>${escapeHtml(a.postalCode || '')}</strong></p>
+          <p style="margin:0.2rem 0; font-size:0.84rem; color:var(--muted);">${escapeHtml(a.city)}, ${escapeHtml(a.state || '')} - <strong>${escapeHtml(a.postalCode || '')}</strong>${a.digipin ? ` &nbsp;•&nbsp; <span style="display:inline-flex; align-items:center; gap:0.25rem; background:#eff6ff; color:#1d4ed8; padding:0.12rem 0.45rem; border-radius:4px; font-weight:700; font-size:0.75rem; border:1px solid #bfdbfe;">📍 DigiPIN: ${escapeHtml(a.digipin)}</span>` : ''}</p>
           <div style="font-size:0.82rem; color:var(--muted); margin-top:0.3rem;">📞 Contact: <strong>${escapeHtml(a.phone || user.phone || 'N/A')}</strong></div>
         </div>
         <div style="display:flex; gap:0.5rem; flex-wrap:wrap; justify-content:flex-end;">
@@ -4031,6 +4371,8 @@ function showNewAddressForm() {
   document.getElementById('addr-city').value = 'Bengaluru';
   document.getElementById('addr-state').value = 'Karnataka';
   document.getElementById('addr-pincode').value = '560001';
+  const digipinInput = document.getElementById('addr-digipin');
+  if (digipinInput) digipinInput.value = '';
   document.getElementById('addr-default').checked = customerAddresses.length === 0;
   document.getElementById('address-edit-form').style.display = 'block';
   document.getElementById('addr-line1').focus();
@@ -4047,6 +4389,8 @@ function editAddress(id) {
   document.getElementById('addr-city').value = addr.city || '';
   document.getElementById('addr-state').value = addr.state || '';
   document.getElementById('addr-pincode').value = addr.postalCode || '';
+  const digipinInput = document.getElementById('addr-digipin');
+  if (digipinInput) digipinInput.value = addr.digipin || '';
   document.getElementById('addr-default').checked = Boolean(addr.isDefault);
   document.getElementById('address-edit-form').style.display = 'block';
   document.getElementById('addr-line1').focus();
@@ -4067,6 +4411,7 @@ async function saveCustomerAddress(e) {
     city: document.getElementById('addr-city').value.trim(),
     state: document.getElementById('addr-state').value.trim(),
     postalCode: document.getElementById('addr-pincode').value.trim(),
+    digipin: (document.getElementById('addr-digipin')?.value || '').trim().toUpperCase(),
     isDefault: document.getElementById('addr-default').checked,
   };
 
@@ -4079,6 +4424,7 @@ async function saveCustomerAddress(e) {
     cancelAddressEdit();
     await fetchCustomerAddresses();
     await fetchUserLocation();
+    await loadCustomerMenuSection();
     if (cart.length) {
       renderCart();
     }
@@ -4093,6 +4439,7 @@ async function deleteAddress(id) {
     await apiFetch(`/api/customer/addresses/${id}`, { method: 'DELETE' });
     await fetchCustomerAddresses();
     await fetchUserLocation();
+    await loadCustomerMenuSection();
     if (cart.length) {
       renderCart();
     }
@@ -4266,4 +4613,3 @@ document.addEventListener("click", (e) => {
 window.handleInlineRestaurantSearchFocus = handleInlineRestaurantSearchFocus;
 window.handleInlineRestaurantSearchInput = handleInlineRestaurantSearchInput;
 window.closeInlineRestaurantSearchDropdown = closeInlineRestaurantSearchDropdown;
-

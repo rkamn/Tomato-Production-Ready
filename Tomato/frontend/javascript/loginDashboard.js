@@ -1060,6 +1060,14 @@ async function toggleDutyStatus() {
   const nextState = !isDutyActive;
   btn.disabled = true;
 
+  if (nextState === true) {
+    const isServiceable = await verifyUserOperatingServiceableArea(true);
+    if (!isServiceable) {
+      btn.disabled = false;
+      return;
+    }
+  }
+
   try {
     const endpoint = role === 'restaurant' ? '/api/restaurant/status' : role === 'shop' ? '/api/shop/status' : '/api/rider/status';
     const payload = (role === 'restaurant' || role === 'shop')
@@ -1231,6 +1239,20 @@ async function fetchUserLocation(cachedAddress = null) {
     pincode = '560001';
   }
 
+  // CRITICAL: For Restaurant and Shop roles, the pincode on the right corner of the dashboard
+  // MUST always be identical to the pincode configured in Account & Profile Settings!
+  if (role === 'restaurant' || role === 'shop') {
+    const settingsInput = document.getElementById('set-restaurant-pincode');
+    const settingsVal = settingsInput && settingsInput.value ? settingsInput.value.trim() : '';
+    const partnerPin = settingsVal || (typeof resolveFrontendPartnerPincode === 'function' ? resolveFrontendPartnerPincode(user) : '') || (user && user.pincode) || pincode;
+    if (partnerPin) {
+      pincode = partnerPin;
+      if (settingsInput && !settingsInput.value) {
+        settingsInput.value = partnerPin;
+      }
+    }
+  }
+
   badge.textContent = `${city}, ${pincode}`;
   badge.title = `${locality ? locality + ', ' : ''}${city}, ${addr?.state || 'KA'} ${pincode}`.trim();
 
@@ -1245,8 +1267,34 @@ async function fetchUserLocation(cachedAddress = null) {
         }
       });
     }
+  } else if (role === 'restaurant' || role === 'shop') {
+    badge.style.cursor = 'pointer';
+    badge.title = `${locality ? locality + ', ' : ''}${city}, ${addr?.state || 'KA'} ${pincode} • Click to open ${role === 'shop' ? 'Shop Profile' : 'Restaurant Profile'}`.trim();
+    if (!badge.dataset.boundClick) {
+      badge.dataset.boundClick = 'true';
+      badge.addEventListener('click', () => {
+        if (typeof switchView === 'function') {
+          switchView('settings');
+        }
+      });
+    }
   }
 }
+
+function syncTopbarPincode(pincode) {
+  const badge = document.getElementById('user-location-badge');
+  if (!badge || !pincode) return;
+  const pin = String(pincode).trim();
+  const current = badge.textContent || '';
+  const commaIdx = current.indexOf(',');
+  if (commaIdx !== -1) {
+    const city = current.substring(0, commaIdx).trim();
+    badge.textContent = `${city}, ${pin}`;
+  } else {
+    badge.textContent = `Bengaluru, ${pin}`;
+  }
+}
+window.syncTopbarPincode = syncTopbarPincode;
 
 window.fetchUserLocation = fetchUserLocation;
 
@@ -1313,8 +1361,172 @@ function populateSettingsUserIdBadge() {
   }
 }
 
-window.getUserIdentifier = getUserIdentifier;
-window.populateSettingsUserIdBadge = populateSettingsUserIdBadge;
+// =========================================================================
+// ADMIN SERVICEABLE DELIVERY AREA VALIDATION & POPUP ALERT SYSTEM
+// =========================================================================
+let cachedGlobalServiceablePincodes = null;
+let cachedGlobalAdminZones = [];
+window.cachedGlobalAdminZones = cachedGlobalAdminZones;
+
+async function fetchGlobalServiceablePincodes(forceRefresh = false) {
+  if (cachedGlobalServiceablePincodes && !forceRefresh) {
+    return cachedGlobalServiceablePincodes;
+  }
+  try {
+    const res = await apiFetch('/api/auth/serviceable-pincodes').catch(() => null)
+      || await apiFetch('/api/customer/serviceable-pincodes').catch(() => null)
+      || await apiFetch('/api/admin/serviceable-pincodes').catch(() => null);
+    if (res && Array.isArray(res.pincodes)) {
+      cachedGlobalServiceablePincodes = res.pincodes;
+    }
+    if (res && Array.isArray(res.adminZones)) {
+      cachedGlobalAdminZones = res.adminZones;
+      window.cachedGlobalAdminZones = res.adminZones;
+    }
+  } catch (_) {}
+  return cachedGlobalServiceablePincodes || [];
+}
+window.fetchGlobalServiceablePincodes = fetchGlobalServiceablePincodes;
+
+function showServiceableAreaPopup(currentPincode, serviceableList = [], targetRole = role, customMessage = null) {
+  const modal = document.getElementById('serviceable-area-alert-modal');
+  const alertText = customMessage || 'your oder is out of deliverable range, please update your address';
+  if (!modal) {
+    alert(alertText);
+    return;
+  }
+  const msgEl = document.getElementById('serviceable-area-alert-message');
+  if (msgEl) {
+    msgEl.textContent = alertText;
+  }
+  const detailsEl = document.getElementById('serviceable-area-alert-details');
+  if (detailsEl) {
+    const roleName = targetRole === 'customer' ? 'Customer Delivery' : targetRole === 'restaurant' ? 'Restaurant' : targetRole === 'shop' ? 'Shop' : targetRole === 'deliveryPartner' ? 'Rider' : 'Operating';
+    const pinStr = currentPincode ? `Your ${roleName} Area Pincode: <strong>${escapeHtml(currentPincode)}</strong>` : `Your ${roleName} Area Pincode: <strong>Not Set</strong>`;
+    const listStr = Array.isArray(serviceableList) && serviceableList.length > 0
+      ? `Admin Serviceable Delivery Pincodes: <strong>${serviceableList.join(', ')}</strong>`
+      : 'Admin Serviceable Delivery Pincodes: <strong>None currently configured</strong>';
+    detailsEl.innerHTML = `${pinStr}<br><span style="margin-top:0.35rem; display:inline-block;">${listStr}</span>`;
+  }
+  openModal('serviceable-area-alert-modal');
+}
+window.showServiceableAreaPopup = showServiceableAreaPopup;
+
+function showDeliverableRangeAlert(customMessage, currentPincode, distanceKm) {
+  const alertText = customMessage || 'your oder is out of deliverable range, please update your address';
+  const modal = document.getElementById('serviceable-area-alert-modal');
+  if (!modal) {
+    alert(alertText);
+    return;
+  }
+  const msgEl = document.getElementById('serviceable-area-alert-message');
+  if (msgEl) {
+    msgEl.textContent = alertText;
+  }
+  const detailsEl = document.getElementById('serviceable-area-alert-details');
+  if (detailsEl) {
+    const pinStr = currentPincode ? `Your Delivery Area Pincode: <strong>${escapeHtml(currentPincode)}</strong>` : '';
+    const distStr = typeof distanceKm === 'number' ? `Distance to Store: <strong>${distanceKm} km</strong> (Deliverable Radius: 15.0 km)` : '';
+    const infoParts = [pinStr, distStr].filter(Boolean).join(' &nbsp;•&nbsp; ');
+    detailsEl.innerHTML = `${infoParts ? `<div>${infoParts}</div>` : ''}<span style="margin-top:0.4rem; display:inline-block; color:#dc2626; font-weight:600;">The selected delivery address is outside the deliverable range of the chosen store. Please select another address or update your address.</span>`;
+  }
+  openModal('serviceable-area-alert-modal');
+}
+window.showDeliverableRangeAlert = showDeliverableRangeAlert;
+
+function handleServiceableAreaRedirect() {
+  closeModal('serviceable-area-alert-modal');
+  closeModal('restaurant-too-far-modal');
+  closeModal('payment-gateway-modal');
+  if (role === 'customer') {
+    if (typeof switchView === 'function') {
+      switchView('customer-address');
+    }
+  } else {
+    if (typeof switchView === 'function') {
+      switchView('settings');
+      setTimeout(() => {
+        if (role === 'restaurant' || role === 'shop') {
+          const pinInput = document.getElementById('set-restaurant-pincode');
+          if (pinInput) pinInput.focus();
+        } else if (role === 'deliveryPartner') {
+          const rPinInput = document.getElementById('set-rider-pincode');
+          if (rPinInput) rPinInput.focus();
+        }
+      }, 200);
+    }
+  }
+}
+window.handleServiceableAreaRedirect = handleServiceableAreaRedirect;
+
+function showRestaurantTooFarPopup(storeName = 'Restaurant', distanceKm = null) {
+  const modal = document.getElementById('restaurant-too-far-modal');
+  const titleEl = document.getElementById('restaurant-too-far-title');
+  const msgEl = document.getElementById('restaurant-too-far-message');
+  const detailsEl = document.getElementById('restaurant-too-far-details');
+  const isShop = /shop|grocery|store/i.test(storeName);
+  const displayTitle = isShop ? 'Shop is too far from you' : 'Restaurant is too far from you';
+
+  if (!modal) {
+    alert(`${displayTitle}${distanceKm ? ` (${distanceKm} km away)` : ''}. Maximum delivery radius is 15.0 km.`);
+    return;
+  }
+
+  if (titleEl) {
+    titleEl.textContent = displayTitle;
+  }
+  if (msgEl) {
+    msgEl.textContent = `${storeName || (isShop ? 'Shop' : 'Restaurant')} is too far from you. Maximum delivery distance is 15.0 km.`;
+  }
+  if (detailsEl) {
+    const distText = (distanceKm !== null && distanceKm !== undefined && !isNaN(Number(distanceKm)))
+      ? `Distance to ${escapeHtml(storeName)}: <strong>${Number(distanceKm).toFixed(1)} km</strong> (Allowed limit: 15.0 km)`
+      : `Distance exceeds the maximum delivery limit of 15.0 km.`;
+    detailsEl.innerHTML = `<span>${distText}</span><br><span style="margin-top:0.35rem; display:inline-block; color:#64748b;">Please choose another store near your location to place your order.</span>`;
+  }
+  openModal('restaurant-too-far-modal');
+}
+window.showRestaurantTooFarPopup = showRestaurantTooFarPopup;
+
+async function verifyUserOperatingServiceableArea(showAlert = true) {
+  const checkRoles = ['restaurant', 'shop', 'deliveryPartner'];
+  if (!checkRoles.includes(role)) return true;
+
+  const activePincodes = await fetchGlobalServiceablePincodes();
+  if (!Array.isArray(activePincodes) || activePincodes.length === 0) {
+    return true;
+  }
+
+  let userPincode = '';
+  if (role === 'restaurant' || role === 'shop') {
+    userPincode = (typeof resolveFrontendPartnerPincode === 'function' ? resolveFrontendPartnerPincode(user) : '') || user.pincode || user.postalCode || '';
+  } else if (role === 'deliveryPartner') {
+    userPincode = user.pincode || user.postalCode || user.assignedLocation?.postalCode || '';
+    if (!userPincode && user.address) {
+      const m = String(user.address).match(/\b\d{5,6}\b/);
+      if (m) userPincode = m[0];
+    }
+  }
+
+  const isServiceable = Boolean(userPincode && activePincodes.includes(userPincode));
+
+  if (!isServiceable) {
+    showStatusBanner('your area is not in servicable range for now, update your address and pincode for orders.', 'warning');
+    if (showAlert) {
+      showServiceableAreaPopup(userPincode, activePincodes, role);
+    }
+    if (role === 'restaurant' || role === 'shop' || role === 'deliveryPartner') {
+      isDutyActive = false;
+      user.isOpen = false;
+      user.isOnline = false;
+      renderDutyToggleUI();
+    }
+    return false;
+  }
+
+  return true;
+}
+window.verifyUserOperatingServiceableArea = verifyUserOperatingServiceableArea;
 
 // Initialize Dashboard
 function initDashboard() {
@@ -1452,6 +1664,9 @@ window.handleSidebarTransferClick = handleSidebarTransferClick;
         const miniNameEl = document.getElementById('mini-name');
         if (miniNameEl) miniNameEl.textContent = formatCleanName(user.displayName || user.name || 'Tomato User');
         populateSettingsUserIdBadge();
+        if (role === 'restaurant' || role === 'shop') {
+          fetchUserLocation();
+        }
       }
     })
     .catch(() => {});
@@ -1465,6 +1680,9 @@ window.handleSidebarTransferClick = handleSidebarTransferClick;
   } else if ((role === 'restaurant' || role === 'shop' || role === 'deliveryPartner') && user.isApproved === false) {
     showStatusBanner('Your account is awaiting Admin approval. Some operations may be limited until verified.', 'warning');
   }
+
+  // Serviceable Delivery Area Verification for Customer, Restaurant, Shop, Rider
+  verifyUserOperatingServiceableArea(true);
 
   // Build navigation per role
   buildNav();
@@ -1527,6 +1745,18 @@ function executeSignOut() {
   closeModal('sign-out-confirm-modal');
   if (notificationEventSource) {
     try { notificationEventSource.close(); } catch (_) {}
+  }
+  // Immediately inform backend to revoke active session from DB and cache
+  if (token) {
+    try {
+      fetch(`${API_ROOT}/api/auth/logout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      }).catch(() => {});
+    } catch (_) {}
   }
   localStorage.removeItem('tomatoToken');
   localStorage.removeItem('tomatoUser');
@@ -2852,8 +3082,59 @@ function loadSupportPanel() {
 
   renderSupportTicketsList();
   renderSupportFAQs();
+  fetchAndApplySupportContactInfo();
 }
 window.loadSupportPanel = loadSupportPanel;
+
+async function fetchAndApplySupportContactInfo() {
+  // First apply cached info immediately to avoid layout shift
+  try {
+    const raw = localStorage.getItem('tomato_support_contact');
+    if (raw) {
+      const cached = JSON.parse(raw);
+      if (cached.priorityEmail) {
+        const emailLink = document.getElementById('support-priority-email-link');
+        const emailDisplay = document.getElementById('support-priority-email-display');
+        if (emailLink) emailLink.href = `mailto:${cached.priorityEmail}`;
+        if (emailDisplay) emailDisplay.textContent = cached.priorityEmail;
+      }
+      if (cached.helpline) {
+        const helplineLink = document.getElementById('support-helpline-link');
+        const helplineDisplay = document.getElementById('support-helpline-display');
+        if (helplineLink) helplineLink.href = `tel:${String(cached.helpline).replace(/\s+/g, '')}`;
+        if (helplineDisplay) helplineDisplay.textContent = cached.helpline;
+      }
+    }
+  } catch (_) {}
+
+  try {
+    const res = await apiFetch('/api/support/contact-info');
+    if (res && res.success) {
+      const email = res.priorityEmail || 'lightbits.infotech@gmail.com';
+      const helpline = res.helpline || '9523654737';
+
+      const emailLink = document.getElementById('support-priority-email-link');
+      const emailDisplay = document.getElementById('support-priority-email-display');
+      if (emailLink) emailLink.href = `mailto:${email}`;
+      if (emailDisplay) emailDisplay.textContent = email;
+
+      const helplineLink = document.getElementById('support-helpline-link');
+      const helplineDisplay = document.getElementById('support-helpline-display');
+      if (helplineLink) helplineLink.href = `tel:${helpline.replace(/\s+/g, '')}`;
+      if (helplineDisplay) helplineDisplay.textContent = helpline;
+
+      try {
+        localStorage.setItem(
+          'tomato_support_contact',
+          JSON.stringify({ priorityEmail: email, helpline })
+        );
+      } catch (_) {}
+    }
+  } catch (err) {
+    console.warn('Failed to load support contact info from server:', err);
+  }
+}
+window.fetchAndApplySupportContactInfo = fetchAndApplySupportContactInfo;
 
 async function submitSupportTicket(e) {
   if (e && e.preventDefault) e.preventDefault();
@@ -3272,11 +3553,30 @@ function loadProfileSettings() {
     if (addrLabel) addrLabel.textContent = role === 'shop' ? 'Shop Address' : 'Restaurant Address';
     const pinLabel = document.getElementById('set-restaurant-pincode-label');
     if (pinLabel) pinLabel.textContent = role === 'shop' ? 'Shop Pincode (Serviceable Area)' : 'Restaurant Pincode (Serviceable Area)';
+    const digipinLabel = document.getElementById('set-restaurant-digipin-label');
+    if (digipinLabel) digipinLabel.textContent = role === 'shop' ? 'Shop DIGIPIN' : 'Restaurant DIGIPIN';
     const cuisineLabel = document.getElementById('set-cuisine-label');
     if (cuisineLabel) cuisineLabel.textContent = role === 'shop' ? 'Shop Category / Speciality' : 'Cuisines Served';
     document.getElementById('set-restaurant-address').value = user.shopAddress || user.restaurantAddress || '';
     const pinInput = document.getElementById('set-restaurant-pincode');
-    if (pinInput) pinInput.value = resolveFrontendPartnerPincode(user);
+    if (pinInput) {
+      const partnerPin = (typeof resolveFrontendPartnerPincode === 'function' ? resolveFrontendPartnerPincode(user) : '') || user.pincode || '';
+      pinInput.value = partnerPin;
+      if (partnerPin) {
+        syncTopbarPincode(partnerPin);
+      }
+      if (!pinInput.dataset.boundSync) {
+        pinInput.dataset.boundSync = 'true';
+        pinInput.addEventListener('input', () => {
+          const val = pinInput.value.trim();
+          if (val) syncTopbarPincode(val);
+        });
+      }
+    }
+    const digipinInput = document.getElementById('set-restaurant-digipin');
+    if (digipinInput) {
+      digipinInput.value = user.digipin || '';
+    }
     document.getElementById('set-cuisine').value = user.category || user.cuisine || '';
   } else {
     restGroup.style.display = 'none';
@@ -3284,6 +3584,25 @@ function loadProfileSettings() {
 
   if (role === 'deliveryPartner') {
     riderGroup.style.display = 'block';
+    const riderAddrInput = document.getElementById('set-rider-address');
+    if (riderAddrInput) {
+      riderAddrInput.value = user.address || (user.assignedLocation && user.assignedLocation.locality) || '';
+    }
+    const riderPinInput = document.getElementById('set-rider-pincode');
+    if (riderPinInput) {
+      const riderPin = user.pincode || user.postalCode || (user.assignedLocation && user.assignedLocation.postalCode) || '';
+      riderPinInput.value = riderPin;
+      if (riderPin) {
+        syncTopbarPincode(riderPin);
+      }
+      if (!riderPinInput.dataset.boundSync) {
+        riderPinInput.dataset.boundSync = 'true';
+        riderPinInput.addEventListener('input', () => {
+          const val = riderPinInput.value.trim();
+          if (val) syncTopbarPincode(val);
+        });
+      }
+    }
     document.getElementById('set-vehicle').value = user.deliveryVehicle || '';
   } else {
     riderGroup.style.display = 'none';
@@ -3316,15 +3635,19 @@ async function saveProfileSettings(e) {
   if (role === 'restaurant') {
     formData.append('restaurantAddress', document.getElementById('set-restaurant-address').value.trim());
     formData.append('pincode', (document.getElementById('set-restaurant-pincode')?.value || '').trim());
+    formData.append('digipin', (document.getElementById('set-restaurant-digipin')?.value || '').trim().toUpperCase());
     formData.append('cuisine', document.getElementById('set-cuisine').value.trim());
   }
   if (role === 'shop') {
     formData.append('shopAddress', document.getElementById('set-restaurant-address').value.trim());
     formData.append('pincode', (document.getElementById('set-restaurant-pincode')?.value || '').trim());
+    formData.append('digipin', (document.getElementById('set-restaurant-digipin')?.value || '').trim().toUpperCase());
     formData.append('category', document.getElementById('set-cuisine').value.trim());
   }
   if (role === 'deliveryPartner') {
     formData.append('deliveryVehicle', document.getElementById('set-vehicle').value.trim());
+    formData.append('address', (document.getElementById('set-rider-address')?.value || '').trim());
+    formData.append('pincode', (document.getElementById('set-rider-pincode')?.value || '').trim());
   }
 
   const photoInput = document.getElementById('set-photo');
@@ -3345,6 +3668,14 @@ async function saveProfileSettings(e) {
 
     // Update local storage
     Object.assign(user, data.user || {});
+    const savedPin = (role === 'deliveryPartner'
+      ? (document.getElementById('set-rider-pincode')?.value || '')
+      : (document.getElementById('set-restaurant-pincode')?.value || '')
+    ).trim();
+    if (savedPin) {
+      user.pincode = savedPin;
+      syncTopbarPincode(savedPin);
+    }
     localStorage.setItem('tomatoUser', JSON.stringify(user));
 
     notice.textContent = 'Profile successfully updated!';

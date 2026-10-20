@@ -237,12 +237,13 @@ function renderStaffMembersTable() {
                   <button type="button" class="btn btn-outline btn-sm" style="background:#eff6ff; border-color:#93c5fd; color:#1d4ed8; font-weight:600; padding:0.25rem 0.55rem;" onclick="openAssignAdminLocationModal('${s._id || s.id}')" title="Assign default operating location">📍 Location</button>
                   <button type="button" class="btn btn-sm" style="background:#7c3aed; color:#fff; border:1px solid #7c3aed; font-weight:600; padding:0.25rem 0.55rem;" onclick="openSalaryReleaseModal('${s._id}')" title="Disburse salary">💸 Salary</button>
                   ${!isEmployee && !isAdmin ? `<button class="btn btn-outline btn-sm" onclick="openEditSubAdminModal('${s._id}')" title="Configure permissions">⚙️ Perms</button>` : ''}
+                  ${!isSuper ? `<button type="button" class="btn btn-outline btn-sm" style="background:#fdf4ff; border-color:#f0abfc; color:#a21caf; font-weight:600; padding:0.25rem 0.55rem;" onclick="openControlPanelChangeRoleModal('${s._id || s.id}')" title="Assign role or designation">🛡️ Role</button>` : ''}
                   <button type="button" class="btn btn-outline btn-sm" style="background:#fff7ed; border-color:#fdba74; color:#c2410c; font-weight:600; padding:0.25rem 0.55rem;" onclick="openAdminResetPasswordModal('${s._id}', '${escapeHtml(formatCleanName(s.name || s.displayName || 'Staff Member'))}', '${s.role}', '${escapeHtml(s.dob || '')}', '${escapeHtml(s.email || s.phone || s.username || '')}')" title="Reset password">🔑 Password</button>
                   ${!isAdmin ? `
-                    <button class="btn btn-outline btn-sm" style="${isBlocked ? 'color:var(--green); border-color:var(--green);' : 'color:var(--tomato); border-color:var(--tomato);'} padding:0.25rem 0.5rem;" onclick="toggleSubAdminStatus('${s._id}', ${isBlocked})">
+                    <button class="btn btn-outline btn-sm" style="${isBlocked ? 'color:var(--green); border-color:var(--green);' : 'color:var(--tomato); border-color:var(--tomato);'} padding:0.25rem 0.5rem;" onclick="toggleSubAdminStatus('${s._id}', ${isBlocked}, '${s.role}')" title="${isBlocked ? 'Enable / Unblock ' : 'Disable / Block '}${isEmployee ? 'employee' : 'sub-admin'}">
                       ${isBlocked ? '✓' : '🚫'}
                     </button>
-                    <button class="btn btn-sm" style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; padding:0.25rem 0.5rem;" onclick="deleteSubAdmin('${s._id}', '${escapeHtml(s.name)}')" title="Delete staff member">🗑️</button>
+                    <button class="btn btn-sm" style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; padding:0.25rem 0.5rem;" onclick="deleteSubAdmin('${s._id}', '${escapeHtml(s.name)}', '${s.role}')" title="Delete ${isEmployee ? 'employee' : 'sub-admin'}">🗑️</button>
                   ` : ''}
                 </td>
               </tr>
@@ -461,33 +462,43 @@ async function submitEditSubAdminPermissions(e) {
   }
 }
 
-async function toggleSubAdminStatus(subAdminId, currentlyBlocked) {
+async function toggleSubAdminStatus(subAdminId, currentlyBlocked, staffRole = 'staff') {
+  const isEmp = staffRole === 'employee';
+  const roleName = isEmp ? 'employee' : staffRole === 'subadmin' ? 'sub-administrator' : 'staff member';
   const action = currentlyBlocked ? 'unblock' : 'block';
-  if (!confirm(`Are you sure you want to ${action} this sub-administrator?`)) return;
+  if (!confirm(`Are you sure you want to ${action} this ${roleName}?`)) return;
 
   try {
-    const res = await apiFetch(`/api/admin/subadmins/${subAdminId}/status`, {
+    const res = await apiFetch(`/api/admin/employees/${subAdminId}/status`, {
       method: 'PUT',
       body: JSON.stringify({ isBlocked: !currentlyBlocked }),
     });
 
-    alert(res.message || `Sub-admin ${action}ed successfully`);
+    alert(res.message || `${roleName.charAt(0).toUpperCase() + roleName.slice(1)} ${action}ed successfully`);
     fetchAdminSubAdmins();
+    if (typeof loadAdminControlPanel === 'function') {
+      loadAdminControlPanel(true);
+    }
   } catch (err) {
     alert(`Error: ${err.message}`);
   }
 }
 
-async function deleteSubAdmin(subAdminId, name) {
-  if (!confirm(`⚠️ Warning: Are you sure you want to permanently delete sub-administrator "${name}"? This action cannot be undone.`)) return;
+async function deleteSubAdmin(subAdminId, name, staffRole = 'staff') {
+  const isEmp = staffRole === 'employee';
+  const roleName = isEmp ? 'employee' : staffRole === 'subadmin' ? 'sub-administrator' : 'staff member';
+  if (!confirm(`⚠️ Warning: Are you sure you want to permanently delete ${roleName} "${name}"? This action cannot be undone.`)) return;
 
   try {
-    const res = await apiFetch(`/api/admin/subadmins/${subAdminId}`, {
+    const res = await apiFetch(`/api/admin/employees/${subAdminId}`, {
       method: 'DELETE',
     });
 
-    alert(res.message || 'Sub-admin deleted permanently');
+    alert(res.message || `${roleName.charAt(0).toUpperCase() + roleName.slice(1)} deleted permanently`);
     fetchAdminSubAdmins();
+    if (typeof loadAdminControlPanel === 'function') {
+      loadAdminControlPanel(true);
+    }
   } catch (err) {
     alert(`Error: ${err.message}`);
   }

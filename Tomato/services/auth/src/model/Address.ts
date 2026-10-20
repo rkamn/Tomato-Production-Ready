@@ -10,6 +10,7 @@ export interface IAddress extends Document {
   city: string;
   state?: string;
   postalCode?: string;
+  digipin?: string;
   isDefault: boolean;
   location?: {
     type: 'Point';
@@ -30,6 +31,7 @@ const addressSchema: Schema<IAddress> = new Schema(
     city: { type: String, required: true, trim: true },
     state: { type: String, trim: true, default: '' },
     postalCode: { type: String, trim: true, default: '' },
+    digipin: { type: String, trim: true, default: '' },
     isDefault: { type: Boolean, default: false },
     location: {
       type: {

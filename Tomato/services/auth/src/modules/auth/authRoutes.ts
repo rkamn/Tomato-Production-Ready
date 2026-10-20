@@ -6,9 +6,14 @@ import {
   loginUser,
   registerUser,
   requestPasswordReset,
+  verifyResetCode,
   resetPassword,
   updateProfile,
   userResponse,
+  logoutUser,
+  logoutAllSessions,
+  getActiveSessions,
+  revokeSingleSession,
 } from './authController.js';
 import {
   authenticate,
@@ -17,8 +22,10 @@ import {
 import Address from '../../model/Address.js';
 import Customer from '../../model/Customer.js';
 import Restaurant from '../../model/Restaurant.js';
+import Shop from '../../model/Shop.js';
 import Rider from '../../model/Rider.js';
 import Employee from '../../model/Employee.js';
+import { resolvePartnerPincode, getServiceablePincodes, getAdminPincodeMap } from '../../utils/bankHelpers.js';
 import {
   getWalletBalances,
   WalletServiceError,
@@ -26,6 +33,19 @@ import {
 
 const createAuthRouter = (upload: multer.Multer) => {
   const router = express.Router();
+
+  router.get('/serviceable-pincodes', async (_req, res) => {
+    try {
+      const [pincodes, adminZones] = await Promise.all([
+        getServiceablePincodes(),
+        getAdminPincodeMap(),
+      ]);
+      return res.json({ pincodes, adminZones });
+    } catch (error) {
+      console.error('Serviceable pincodes fetch failed:', error);
+      return res.status(500).json({ message: 'Unable to fetch serviceable pincodes' });
+    }
+  });
 
   router.post('/register', registerUser);
   router.post('/login', loginUser);
@@ -125,6 +145,7 @@ const createAuthRouter = (upload: multer.Multer) => {
         if (currentUser.role === 'restaurant') {
           const rest = await Restaurant.findById(currentUser.userId).lean();
           const parsed = parseAddressString(rest?.restaurantAddress);
+          const partnerPin = (rest as any)?.pincode || resolvePartnerPincode(rest) || parsed.postalCode;
           defaultAddress = {
             userId: currentUser.userId,
             label: 'Restaurant Location',
@@ -132,13 +153,34 @@ const createAuthRouter = (upload: multer.Multer) => {
             locality: parsed.locality,
             city: parsed.city,
             state: parsed.state,
-            postalCode: parsed.postalCode,
+            postalCode: partnerPin,
             isDefault: true,
             location: {
               type: 'Point',
               coordinates: [
                 rest?.restaurantLocation?.lng ?? 77.5946,
                 rest?.restaurantLocation?.lat ?? 12.9716,
+              ],
+            },
+          };
+        } else if (currentUser.role === 'shop') {
+          const shop = await Shop.findById(currentUser.userId).lean();
+          const parsed = parseAddressString(shop?.shopAddress);
+          const partnerPin = (shop as any)?.pincode || resolvePartnerPincode(shop) || parsed.postalCode;
+          defaultAddress = {
+            userId: currentUser.userId,
+            label: 'Shop Location',
+            line1: shop?.shopAddress || parsed.line1,
+            locality: parsed.locality,
+            city: parsed.city,
+            state: parsed.state,
+            postalCode: partnerPin,
+            isDefault: true,
+            location: {
+              type: 'Point',
+              coordinates: [
+                shop?.shopLocation?.lng ?? 77.6408,
+                shop?.shopLocation?.lat ?? 12.9784,
               ],
             },
           };
@@ -233,6 +275,20 @@ const createAuthRouter = (upload: multer.Multer) => {
             },
           };
         }
+      } else if (defaultAddress) {
+        if (currentUser.role === 'restaurant') {
+          const rest = await Restaurant.findById(currentUser.userId).lean();
+          const partnerPin = (rest as any)?.pincode || resolvePartnerPincode(rest);
+          if (partnerPin) {
+            defaultAddress.postalCode = partnerPin;
+          }
+        } else if (currentUser.role === 'shop') {
+          const shop = await Shop.findById(currentUser.userId).lean();
+          const partnerPin = (shop as any)?.pincode || resolvePartnerPincode(shop);
+          if (partnerPin) {
+            defaultAddress.postalCode = partnerPin;
+          }
+        }
       }
 
       return res.json({ address: defaultAddress || null });
@@ -253,6 +309,8 @@ const createAuthRouter = (upload: multer.Multer) => {
         user = await Customer.findById(currentUser.userId).lean();
       } else if (currentUser.role === 'restaurant') {
         user = await Restaurant.findById(currentUser.userId).lean();
+      } else if (currentUser.role === 'shop') {
+        user = await Shop.findById(currentUser.userId).lean();
       } else if (currentUser.role === 'deliveryPartner' || (currentUser.role as string) === 'rider') {
         user = await Rider.findById(currentUser.userId).lean();
       } else {
@@ -271,7 +329,14 @@ const createAuthRouter = (upload: multer.Multer) => {
   });
   router.put('/profile', authenticate, upload.single('photo'), updateProfile);
   router.post('/password-reset/request', requestPasswordReset);
+  router.post('/password-reset/verify-code', verifyResetCode);
   router.post('/password-reset/confirm', resetPassword);
+
+  // Active Session Management & Server-Side Revocation
+  router.post('/logout', authenticate, logoutUser);
+  router.post('/logout-all', authenticate, logoutAllSessions);
+  router.get('/sessions', authenticate, getActiveSessions);
+  router.delete('/sessions/:sessionId', authenticate, revokeSingleSession);
 
   return router;
 };

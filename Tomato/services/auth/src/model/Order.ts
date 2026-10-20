@@ -16,6 +16,7 @@ export interface IOrderAddress {
   city: string;
   state?: string;
   postalCode?: string;
+  digipin?: string;
   coordinates?: [number, number]; // [lng, lat]
 }
 
@@ -56,6 +57,7 @@ export interface IOrder extends Document {
   customerId: mongoose.Types.ObjectId;
   customerName?: string;
   customerPhone?: string;
+  customerEmail?: string;
   restaurantId?: mongoose.Types.ObjectId;
   restaurantCode?: string;
   digipin?: string;
@@ -78,6 +80,7 @@ export interface IOrder extends Document {
   appliedCoupons?: IAppliedOrderCoupon[];
   totalAmount: number;
   deliveryAddress?: IOrderAddress;
+  serviceablePincode?: string;
   paymentStatus: PaymentStatus;
   paymentMethod: PaymentMethod;
   paymentTransactionId?: string;
@@ -118,6 +121,7 @@ const orderAddressSchema: Schema<IOrderAddress> = new Schema(
     city: { type: String, default: '' },
     state: { type: String, default: '' },
     postalCode: { type: String, default: '' },
+    digipin: { type: String, default: '' },
     coordinates: { type: [Number], default: [77.5946, 12.9716] },
   },
   { _id: false },
@@ -160,6 +164,11 @@ const orderSchema: Schema<IOrder> = new Schema(
     customerPhone: {
       type: String,
       default: '',
+    },
+    customerEmail: {
+      type: String,
+      default: '',
+      trim: true,
     },
     restaurantId: {
       type: Schema.Types.ObjectId,
@@ -254,6 +263,12 @@ const orderSchema: Schema<IOrder> = new Schema(
     deliveryAddress: {
       type: orderAddressSchema,
       default: () => ({}),
+    },
+    serviceablePincode: {
+      type: String,
+      default: '',
+      trim: true,
+      index: true,
     },
     paymentStatus: {
       type: String,

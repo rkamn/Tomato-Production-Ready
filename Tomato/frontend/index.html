@@ -113,11 +113,11 @@
                   <button
                     class="role-option"
                     type="button"
-                    data-role="admin"
-                    data-label="Admin"
+                    data-role="employee"
+                    data-label="Employee"
                     role="menuitem"
                   >
-                    Admin<small>Platform management account</small>
+                    Employee<small>Staff &amp; operations account</small>
                   </button>
                 </div>
               </div>
@@ -208,36 +208,56 @@
               />
             </div>
             <div id="reset-token-field" class="field hidden">
-              <label for="reset-token">Reset token</label>
-              <input
-                id="reset-token"
-                type="text"
-                autocomplete="one-time-code"
-              />
-              <small class="reset-token"
-                >For this local development flow, the token is returned here
-                automatically.</small
-              >
+              <label for="reset-token">Enter Verification Code sent on your mail</label>
+              <div class="code-input-container">
+                <input
+                  id="reset-token"
+                  type="text"
+                  maxlength="6"
+                  pattern="[0-9]{6}"
+                  inputmode="numeric"
+                  autocomplete="one-time-code"
+                  placeholder="&lt;6-Digit Verification Code&gt;"
+                  class="code-input"
+                />
+                <span id="code-status-indicator" class="code-status-indicator" aria-live="polite"></span>
+              </div>
+              <div id="code-status-text" class="code-status-text"></div>
+              <div class="resend-row">
+                <span class="resend-prompt">Didn't receive the email? </span>
+                <button type="button" id="resend-code-btn" class="resend-link-btn">Resend code?</button>
+              </div>
             </div>
-            <div id="new-password-field" class="field hidden">
-              <label for="new-password">New password</label>
-              <input
-                id="new-password"
-                type="password"
-                minlength="8"
-                autocomplete="new-password"
-              />
+
+            <!-- Slide-down box to provide your new password -->
+            <div id="password-slider-box" class="password-slider-box">
+              <div class="slider-title">
+                <h4>Provide your new password</h4>
+              </div>
+              <div id="new-password-field" class="field">
+                <label for="new-password">New password</label>
+                <input
+                  id="new-password"
+                  type="password"
+                  minlength="8"
+                  autocomplete="new-password"
+                  placeholder="At least 8 characters"
+                />
+              </div>
+              <div id="confirm-password-field" class="field">
+                <label for="confirm-password">Confirm new password</label>
+                <input
+                  id="confirm-password"
+                  type="password"
+                  minlength="8"
+                  autocomplete="new-password"
+                  placeholder="Re-enter new password"
+                />
+              </div>
+              <button id="reset-confirm-submit" type="button" class="confirm-reset-btn">Reset password</button>
             </div>
-            <div id="confirm-password-field" class="field hidden">
-              <label for="confirm-password">Confirm new password</label>
-              <input
-                id="confirm-password"
-                type="password"
-                minlength="8"
-                autocomplete="new-password"
-              />
-            </div>
-            <button id="reset-submit" type="submit">Send reset token</button>
+
+            <button id="reset-submit" type="submit">Send verification code</button>
             <button id="cancel-reset" class="reset-link" type="button">
               Back to sign in
             </button>

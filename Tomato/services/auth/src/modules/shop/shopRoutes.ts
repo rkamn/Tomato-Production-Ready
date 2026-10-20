@@ -15,7 +15,11 @@ import { formatBill, resolveAdminGsnNumber } from '../../utils/orderHelpers.js';
 import Order, { OrderStatus } from '../../model/Order.js';
 import notificationService from '../notification/notificationService.js';
 import { productImageUpload } from '../../middleware/upload.js';
-import { validateBankAndPanDetails } from '../../utils/bankHelpers.js';
+import {
+  validateBankAndPanDetails,
+  resolvePartnerPincode,
+  getServiceablePincodes,
+} from '../../utils/bankHelpers.js';
 import Payment from '../../model/Payment.js';
 import Coupon, {
   COUPON_TYPES,
@@ -93,6 +97,20 @@ const createShopRouter = () => {
       const rawVal =
         req.body?.isOpen !== undefined ? req.body.isOpen : req.body?.isOnline;
       const isOpen = Boolean(rawVal);
+
+      if (isOpen) {
+        const shopDoc = await Shop.findById(user.userId).lean();
+        const shopPin = resolvePartnerPincode(shopDoc);
+        const serviceablePincodes = await getServiceablePincodes();
+        if (!shopPin || !serviceablePincodes.includes(shopPin)) {
+          return res.status(400).json({
+            message: 'your area is not in servicable range for now, update your address and pincode for orders.',
+            code: 'AREA_NOT_SERVICEABLE',
+            pincode: shopPin,
+            serviceablePincodes,
+          });
+        }
+      }
 
       const updated = await Shop.findByIdAndUpdate(
         user.userId,
@@ -189,8 +207,85 @@ const createShopRouter = () => {
     }
   });
 
+  // 4b. Categories Management
+  router.get(
+    ['/items/categories', '/menu/categories'],
+    async (req: Request, res: Response) => {
+      try {
+        const distinctCategories: string[] =
+          await FoodItem.distinct('category').exec();
+
+        const defaultCategories = [
+          'Groceries & Staples',
+          'Daily Essentials',
+          'Dairy & Bakery',
+          'Beverages & Cold Drinks',
+          'Snacks & Munchies',
+          'Packaged Food',
+          'Personal Care',
+          'Household & Cleaning',
+          'Spices & Masalas',
+          'Oils & Ghee',
+          'Atta, Rice & Dal',
+          'Chocolates & Sweets',
+          'Fruits & Vegetables',
+          'Stationery & Office',
+          'Health & Wellness',
+        ];
+
+        const categoryMap = new Map<string, string>();
+        defaultCategories.forEach((cat) => {
+          if (cat && cat.trim())
+            categoryMap.set(cat.trim().toLowerCase(), cat.trim());
+        });
+
+        distinctCategories.forEach((cat) => {
+          if (typeof cat === 'string' && cat.trim()) {
+            const trimmed = cat.trim();
+            categoryMap.set(trimmed.toLowerCase(), trimmed);
+          }
+        });
+
+        const categories = Array.from(categoryMap.values()).sort((a, b) =>
+          a.localeCompare(b, undefined, { sensitivity: 'base' }),
+        );
+
+        return res.json({ categories });
+      } catch (error) {
+        console.error('Shop categories fetch failed:', error);
+        return res
+          .status(500)
+          .json({ message: 'Unable to fetch item categories' });
+      }
+    },
+  );
+
+  router.post(
+    ['/items/categories', '/menu/categories'],
+    async (req: Request, res: Response) => {
+      try {
+        const categoryName =
+          typeof req.body?.category === 'string'
+            ? req.body.category.trim()
+            : '';
+        if (!categoryName) {
+          return res.status(400).json({ message: 'Category name is required' });
+        }
+        return res.status(201).json({
+          message: 'Category created successfully',
+          category: categoryName,
+        });
+      } catch (error) {
+        console.error('Shop category create error:', error);
+        return res
+          .status(500)
+          .json({ message: 'Unable to create shop category' });
+      }
+    },
+  );
+
   // 5. Manage Shop Items / Inventory
-  router.get('/items', async (req: Request, res: Response) => {
+  router.get(['/items', '/menu'], async (req: Request, res: Response) => {
     try {
       const user = (req as AuthenticatedRequest).user;
       if (!user?.userId)
@@ -198,14 +293,14 @@ const createShopRouter = () => {
       const items = await FoodItem.find({
         restaurantId: new mongoose.Types.ObjectId(user.userId),
       }).sort({ createdAt: -1 });
-      return res.json({ items });
+      return res.json({ items, menu: items });
     } catch (error) {
       console.error('Shop items fetch failed:', error);
       return res.status(500).json({ message: 'Unable to fetch shop items' });
     }
   });
 
-  router.post('/items', async (req: Request, res: Response) => {
+  router.post(['/items', '/menu'], async (req: Request, res: Response) => {
     try {
       const user = (req as AuthenticatedRequest).user;
       if (!user?.userId)
@@ -283,7 +378,7 @@ const createShopRouter = () => {
     }
   });
 
-  router.put('/items/:itemId', async (req: Request, res: Response) => {
+  router.put(['/items/:itemId', '/menu/:itemId'], async (req: Request, res: Response) => {
     try {
       const user = (req as AuthenticatedRequest).user;
       if (!user?.userId)
@@ -328,7 +423,7 @@ const createShopRouter = () => {
     }
   });
 
-  router.delete('/items/:itemId', async (req: Request, res: Response) => {
+  router.delete(['/items/:itemId', '/menu/:itemId'], async (req: Request, res: Response) => {
     try {
       const user = (req as AuthenticatedRequest).user;
       if (!user?.userId)
@@ -551,6 +646,14 @@ const createShopRouter = () => {
           return res.status(400).json({
             message:
               'Your shop is currently CLOSED. Please toggle your status to OPEN in the sidebar to accept orders.',
+          });
+        }
+        const shopPin = resolvePartnerPincode(shopUser);
+        const serviceablePincodes = await getServiceablePincodes();
+        if (!shopPin || !serviceablePincodes.includes(shopPin)) {
+          return res.status(400).json({
+            message: 'your area is not in servicable range for now, update your address and pincode for orders.',
+            code: 'AREA_NOT_SERVICEABLE',
           });
         }
       }

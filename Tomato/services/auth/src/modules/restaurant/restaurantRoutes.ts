@@ -21,7 +21,11 @@ import {
   createNotificationForRole,
 } from '../../utils/orderHelpers.js';
 import { productImageUpload } from '../../middleware/upload.js';
-import { validateBankAndPanDetails } from '../../utils/bankHelpers.js';
+import {
+  validateBankAndPanDetails,
+  resolvePartnerPincode,
+  getServiceablePincodes,
+} from '../../utils/bankHelpers.js';
 import Payment from '../../model/Payment.js';
 import Coupon, {
   COUPON_TYPES,
@@ -96,6 +100,20 @@ const createRestaurantRouter = () => {
       const rawVal =
         req.body?.isOpen !== undefined ? req.body.isOpen : req.body?.isOnline;
       const isOpen = Boolean(rawVal);
+
+      if (isOpen) {
+        const restDoc = await Restaurant.findById(user.userId).lean();
+        const restPin = resolvePartnerPincode(restDoc);
+        const serviceablePincodes = await getServiceablePincodes();
+        if (!restPin || !serviceablePincodes.includes(restPin)) {
+          return res.status(400).json({
+            message: 'your area is not in servicable range for now, update your address and pincode for orders.',
+            code: 'AREA_NOT_SERVICEABLE',
+            pincode: restPin,
+            serviceablePincodes,
+          });
+        }
+      }
 
       const updated = await Restaurant.findByIdAndUpdate(
         user.userId,
@@ -194,6 +212,67 @@ const createRestaurantRouter = () => {
   });
 
   // 2. Manage Menu: List, Add, Edit, Delete
+  router.get('/menu/categories', async (req: Request, res: Response) => {
+    try {
+      const distinctCategories: string[] = await FoodItem.distinct('category').exec();
+
+      const defaultCategories = [
+        'Main Course',
+        'Starters',
+        'Snacks',
+        'Desserts',
+        'Beverages',
+        'Fast Food',
+        'Breads & Rice',
+        'Soups',
+        'Salads',
+        'Combos',
+        'Breakfast',
+        'Thali & Meals',
+        'Chinese',
+        'Biryani',
+        'Pizza & Pasta',
+      ];
+
+      const categoryMap = new Map<string, string>();
+      defaultCategories.forEach((cat) => {
+        if (cat && cat.trim()) categoryMap.set(cat.trim().toLowerCase(), cat.trim());
+      });
+
+      distinctCategories.forEach((cat) => {
+        if (typeof cat === 'string' && cat.trim()) {
+          const trimmed = cat.trim();
+          categoryMap.set(trimmed.toLowerCase(), trimmed);
+        }
+      });
+
+      const categories = Array.from(categoryMap.values()).sort((a, b) =>
+        a.localeCompare(b, undefined, { sensitivity: 'base' })
+      );
+
+      return res.json({ categories });
+    } catch (error) {
+      console.error('Restaurant menu categories fetch failed:', error);
+      return res
+        .status(500)
+        .json({ message: 'Unable to fetch menu categories' });
+    }
+  });
+
+  router.post('/menu/categories', async (req: Request, res: Response) => {
+    try {
+      const categoryName = typeof req.body?.category === 'string' ? req.body.category.trim() : '';
+      if (!categoryName) {
+        return res.status(400).json({ message: 'Valid category name is required' });
+      }
+
+      return res.status(201).json({ message: 'Category added successfully', category: categoryName });
+    } catch (error) {
+      console.error('Restaurant add category failed:', error);
+      return res.status(500).json({ message: 'Unable to add category' });
+    }
+  });
+
   router.get('/menu', async (req: Request, res: Response) => {
     try {
       const user = (req as AuthenticatedRequest).user;
@@ -222,7 +301,7 @@ const createRestaurantRouter = () => {
       const category =
         typeof req.body?.category === 'string'
           ? req.body.category.trim()
-          : 'Main Course';
+          : 'Chinese';
       const description =
         typeof req.body?.description === 'string'
           ? req.body.description.trim()
@@ -333,6 +412,7 @@ const createRestaurantRouter = () => {
 
       if (!updated)
         return res.status(404).json({ message: 'Menu item not found' });
+
       return res.json({ message: 'Menu item updated', item: updated });
     } catch (error) {
       console.error('Menu item update failed:', error);
@@ -447,6 +527,14 @@ const createRestaurantRouter = () => {
           return res.status(400).json({
             message:
               'Your restaurant is currently CLOSED. Please toggle your status to OPEN in the sidebar to accept orders.',
+          });
+        }
+        const restPin = resolvePartnerPincode(restUser);
+        const serviceablePincodes = await getServiceablePincodes();
+        if (!restPin || !serviceablePincodes.includes(restPin)) {
+          return res.status(400).json({
+            message: 'your area is not in servicable range for now, update your address and pincode for orders.',
+            code: 'AREA_NOT_SERVICEABLE',
           });
         }
       }

@@ -2,8 +2,16 @@ import { Response } from 'express';
 import mongoose from 'mongoose';
 import Notification, { INotification } from '../../model/Notification.js';
 import Rider from '../../model/Rider.js';
+import Customer from '../../model/Customer.js';
+import Employee from '../../model/Employee.js';
 import { IOrder } from '../../model/Order.js';
 import arattaiNotificationService from './arattaiService.js';
+import mailService from '../../services/mailService.js';
+import {
+  resolveRiderPincode,
+  resolveAddressPincode,
+  resolvePartnerPincode,
+} from '../../utils/bankHelpers.js';
 
 export interface NearbyRiderCandidate {
   riderId: string;
@@ -215,18 +223,29 @@ class NotificationService {
 
     const rejectedIds = (order.rejectedByRiders || []).map((id) => String(id));
 
+    // Resolve order's serviceable delivery location pincode
+    const orderLocationPincode =
+      (order as any).serviceablePincode ||
+      resolveAddressPincode(order.deliveryAddress) ||
+      resolvePartnerPincode(order);
+
     // Query active and approved riders who have not rejected this order
     const activeRiders = await Rider.find({
       isBlocked: { $ne: true },
       isApproved: { $ne: false },
       _id: { $nin: rejectedIds },
     })
-      .select('_id name phone currentLocation isOnline')
+      .select('_id name phone currentLocation isOnline address pincode postalCode assignedLocation')
       .lean();
+
+    // Filter riders whose operating pincode strictly matches the order's serviceable location pincode
+    const locationMatchedRiders = orderLocationPincode
+      ? activeRiders.filter((r) => resolveRiderPincode(r) === orderLocationPincode)
+      : activeRiders;
 
     const candidates: NearbyRiderCandidate[] = [];
 
-    for (const rider of activeRiders) {
+    for (const rider of locationMatchedRiders) {
       const riderLat = rider.currentLocation?.lat ?? restaurantLat;
       const riderLng = rider.currentLocation?.lng ?? restaurantLng;
 
@@ -249,7 +268,7 @@ class NotificationService {
       return withinRadius;
     }
 
-    // Fallback: If no rider is currently within 2km, take closest available riders so order isn't stranded
+    // Fallback: If no rider is currently within 2km, take closest available riders from this location's pool
     return candidates.slice(0, 3);
   }
 
@@ -508,6 +527,55 @@ class NotificationService {
             amount: order.totalAmount,
           })
           .catch((err) => console.error('[Arattai Order Delivered Alert Error]:', err));
+      }
+
+      // Trigger order delivered confirmation email to the customer
+      try {
+        let customerEmail = (order as any).customerEmail;
+        let customerName = order.customerName;
+        if (order.customerId) {
+          const cust = await Customer.findById(order.customerId).lean();
+          if (cust) {
+            customerEmail = cust.email || customerEmail;
+            if (cust.name) customerName = cust.name;
+          } else {
+            const emp = await Employee.findById(order.customerId).lean();
+            if (emp) {
+              customerEmail = emp.email || customerEmail;
+              if (emp.name) customerName = emp.name;
+            }
+          }
+        }
+
+        if (customerEmail) {
+          mailService
+            .sendOrderDeliveredMail({
+              customerEmail,
+              customerName: customerName || 'Valued Customer',
+              orderNumber: order.orderNumber,
+              billNumber: order.billNumber,
+              storeName: order.restaurantName || 'Tomato Partner Store',
+              storeAddress: order.restaurantAddress,
+              isShopOrder: order.orderNumber?.startsWith('SHOP'),
+              riderName: order.riderName,
+              riderPhone: order.riderPhone,
+              items: (order.items || []).map((it) => ({
+                name: it.name,
+                quantity: it.quantity,
+                price: it.price,
+                totalPrice: it.totalPrice || it.price * it.quantity,
+              })),
+              totalAmount: order.totalAmount,
+              paymentMethod: order.paymentMethod,
+              deliveryAddress: order.deliveryAddress,
+              deliveredAt: new Date(),
+            })
+            .catch((mailErr) =>
+              console.error('[Mail Service] Order delivered email error:', mailErr),
+            );
+        }
+      } catch (custErr) {
+        console.error('[Mail Service] Error resolving customer for delivered email:', custErr);
       }
     }
 

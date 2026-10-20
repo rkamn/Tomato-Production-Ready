@@ -21,6 +21,10 @@ import {
 import {
   validateBankAndPanDetails,
   syncOrderToTomatoPayment,
+  resolveRiderPincode,
+  resolveAddressPincode,
+  resolvePartnerPincode,
+  getServiceablePincodes,
 } from '../../utils/bankHelpers.js';
 import {
   handleRiderLocationRealtimeUpdate,
@@ -131,6 +135,20 @@ const createRiderRouter = () => {
         req.body?.isOnline !== undefined ? req.body.isOnline : req.body?.isOpen;
       const isOnline = Boolean(rawVal);
 
+      if (isOnline) {
+        const riderDoc = await Rider.findById(user.userId).lean();
+        const riderPin = resolveRiderPincode(riderDoc);
+        const serviceablePincodes = await getServiceablePincodes();
+        if (!riderPin || !serviceablePincodes.includes(riderPin)) {
+          return res.status(400).json({
+            message: 'your area is not in servicable range for now, update your address and pincode for orders.',
+            code: 'AREA_NOT_SERVICEABLE',
+            pincode: riderPin,
+            serviceablePincodes,
+          });
+        }
+      }
+
       const updated: any = await Rider.findByIdAndUpdate(
         user.userId,
         {
@@ -197,7 +215,7 @@ const createRiderRouter = () => {
           : null;
 
       const riderDoc = user?.userId
-        ? await Rider.findById(user.userId).select('isOnline').lean()
+        ? await Rider.findById(user.userId).lean()
         : null;
       if (riderDoc && riderDoc.isOnline === false) {
         return res.json({
@@ -208,9 +226,15 @@ const createRiderRouter = () => {
         });
       }
 
+      const riderPincode = resolveRiderPincode(riderDoc);
+
       const filter: Record<string, unknown> = {
-        status: { $in: ['accepted', 'preparing', 'ready_for_pickup'] },
-        $or: [{ riderId: { $exists: false } }, { riderId: null }],
+        status: { $in: ['accepted', 'preparing', 'ready_for_pickup', 'placed'] },
+        $or: [
+          { riderId: { $exists: false } },
+          { riderId: null },
+          ...(riderObjId ? [{ riderId: riderObjId }] : []),
+        ],
       };
 
       if (riderObjId) {
@@ -219,7 +243,17 @@ const createRiderRouter = () => {
 
       const orders = await Order.find(filter).sort({ createdAt: -1 });
 
-      return res.json({ orders, isOnline: true });
+      const filteredOrders = riderPincode
+        ? orders.filter((o) => {
+            const orderPin =
+              (o as any).serviceablePincode ||
+              resolveAddressPincode(o.deliveryAddress) ||
+              resolvePartnerPincode(o);
+            return !orderPin || orderPin === riderPincode;
+          })
+        : orders;
+
+      return res.json({ orders: filteredOrders, isOnline: true });
     } catch (error) {
       console.error('Fetch available orders failed:', error);
       return res
@@ -306,6 +340,28 @@ const createRiderRouter = () => {
               'You are currently OFFLINE. Please toggle your duty status to ONLINE in the sidebar to accept orders.',
           });
         }
+
+        const riderPincode = resolveRiderPincode(riderUser);
+        const serviceablePincodes = await getServiceablePincodes();
+        if (!riderPincode || !serviceablePincodes.includes(riderPincode)) {
+          return res.status(400).json({
+            message: 'your area is not in servicable range for now, update your address and pincode for orders.',
+            code: 'AREA_NOT_SERVICEABLE',
+          });
+        }
+
+        const orderPincode =
+          (order as any).serviceablePincode ||
+          resolveAddressPincode(order.deliveryAddress) ||
+          resolvePartnerPincode(order);
+
+        if (riderPincode && orderPincode && riderPincode !== orderPincode) {
+          return res.status(400).json({
+            message: 'your area is not in servicable range for now, update your address and pincode for orders.',
+            code: 'AREA_NOT_SERVICEABLE',
+          });
+        }
+
         const riderCode = riderUser?.riderId || '';
         const riderDisplayName = riderUser ? riderUser.name : 'Tomato Rider';
 

@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { promisify } from 'node:util';
-import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomInt, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import Employee, { IEmployee, USER_ROLES, UserRole } from '../../model/Employee.js';
 import Restaurant, { IRestaurant } from '../../model/Restaurant.js';
@@ -8,6 +8,7 @@ import Customer, { ICustomer } from '../../model/Customer.js';
 import Rider, { IRider } from '../../model/Rider.js';
 import Shop, { IShop } from '../../model/Shop.js';
 import Notification from '../../model/Notification.js';
+import Address from '../../model/Address.js';
 import Counter, { getNextCounterValue, generateIdFromCounter } from '../../model/Counter.js';
 import { AuthenticatedRequest } from '../../middleware/authenticate.js';
 import {
@@ -16,6 +17,13 @@ import {
 	getServiceablePincodes,
 } from '../../utils/bankHelpers.js';
 import { getOrCreateUserWallet } from '../wallet/walletService.js';
+import {
+	createSession,
+	revokeSession,
+	revokeAllUserSessions,
+	getUserActiveSessions,
+} from '../../services/sessionService.js';
+import mailService from '../../services/mailService.js';
 
 const getPublicBaseUrl = () => process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 5050}`;
 
@@ -101,6 +109,7 @@ export const createToken = (user: {
 	_id: { toString: () => string };
 	email?: string;
 	phone?: string;
+	name?: string;
 	role: string;
 	permissions?: string[];
 	adminRoleTitle?: string;
@@ -111,16 +120,18 @@ export const createToken = (user: {
 	adminId?: string;
 	employeeId?: string;
 	shopId?: string;
-}) => {
+}, sessionId?: string) => {
 	const jwtSecret = process.env.JWT_SECRET || 'tomato-local-development-secret';
 
 	return jwt.sign(
 		{
+			...(sessionId ? { sessionId } : {}),
 			userId: user._id.toString(),
 			id: user._id.toString(),
 			_id: user._id.toString(),
 			email: user.email,
 			phone: user.phone,
+			name: user.name,
 			role: user.role,
 			permissions: user.permissions || [],
 			adminRoleTitle: user.adminRoleTitle || '',
@@ -207,6 +218,8 @@ export const userResponse = (user: {
 		image: user.image || '',
 		role: user.role,
 		isApproved: user.isApproved ?? true,
+		approvalStatus: (user as any).approvalStatus || (user.isApproved === false ? 'pending' : 'approved'),
+		rejectionReason: (user as any).rejectionReason || '',
 		restaurantId,
 		shopId,
 		riderId,
@@ -244,8 +257,8 @@ export const registerUser = async (req: Request, res: Response) => {
 	const password = typeof req.body?.password === 'string' ? req.body.password : '';
 	const requestedRole = typeof req.body?.role === 'string' ? req.body.role : 'customer';
 
-	if (requestedRole === 'subadmin' || requestedRole === 'employee' || requestedRole === 'admin') {
-		return res.status(403).json({ message: 'Administrative and staff accounts can only be created by an administrator' });
+	if (requestedRole === 'subadmin' || requestedRole === 'admin') {
+		return res.status(403).json({ message: 'Administrative accounts can only be created by an administrator' });
 	}
 
 	const role = USER_ROLES.includes(requestedRole as UserRole) ? requestedRole as UserRole : null;
@@ -348,9 +361,11 @@ export const registerUser = async (req: Request, res: Response) => {
 				type: 'service',
 			});
 
+			const { token, session } = await createSession(shop as any, req);
 			return res.status(201).json({
-				token: createToken(shop as any),
+				token,
 				user: userResponse(shop as any),
+				session: { sessionId: session.sessionId, expiresAt: session.expiresAt },
 				message: 'Registration received. Awaiting admin approval.',
 			});
 		}
@@ -388,9 +403,11 @@ export const registerUser = async (req: Request, res: Response) => {
 				type: 'service',
 			});
 
+			const { token, session } = await createSession(restaurant as any, req);
 			return res.status(201).json({
-				token: createToken(restaurant as any),
+				token,
 				user: userResponse(restaurant as any),
+				session: { sessionId: session.sessionId, expiresAt: session.expiresAt },
 				message: 'Registration received. Awaiting admin approval.',
 			});
 		}
@@ -419,9 +436,11 @@ export const registerUser = async (req: Request, res: Response) => {
 				type: 'service',
 			});
 
+			const { token, session } = await createSession(customer as any, req);
 			return res.status(201).json({
-				token: createToken(customer as any),
+				token,
 				user: userResponse(customer as any),
+				session: { sessionId: session.sessionId, expiresAt: session.expiresAt },
 				message: 'Registration successful',
 			});
 		}
@@ -460,27 +479,34 @@ export const registerUser = async (req: Request, res: Response) => {
 				type: 'service',
 			});
 
+			const { token, session } = await createSession(rider as any, req);
 			return res.status(201).json({
-				token: createToken(rider as any),
+				token,
 				user: userResponse(rider as any),
+				session: { sessionId: session.sessionId, expiresAt: session.expiresAt },
 				message: 'Registration received. Awaiting admin approval.',
 			});
 		}
 
-		const isApproved = true;
+		const isEmployee = role === 'employee';
+		const isApproved = !isEmployee; // Employee accounts require admin/superadmin approval!
+		const approvalStatus = isEmployee ? 'pending' : 'approved';
 		const adminId = role === 'admin' ? await generateAdminId() : undefined;
 		const subadminId = role === 'subadmin' ? await generateSubAdminId() : undefined;
+		const employeeId = isEmployee ? await generateEmployeeId() : undefined;
 		const employeePayload: Record<string, unknown> = {
 			name,
 			...registrationData,
 			passwordHash: await hashPassword(password),
 			role,
-			adminRoleTitle: role === 'admin' ? 'Platform Administrator' : 'Operations Sub-Admin',
+			adminRoleTitle: role === 'admin' ? 'Platform Administrator' : role === 'subadmin' ? 'Operations Sub-Admin' : 'Employee (Pending Role Assignment)',
 			isApproved,
+			approvalStatus,
 			isBlocked: false,
-			permissions: role === 'admin' ? ['*'] : ['orders_manage'],
+			permissions: role === 'admin' ? ['*'] : role === 'subadmin' ? ['orders_manage'] : [],
 			...(adminId ? { adminId } : {}),
 			...(subadminId ? { subadminId } : {}),
+			...(employeeId ? { employeeId } : {}),
 		};
 
 		const employee = await Employee.create(employeePayload);
@@ -490,14 +516,20 @@ export const registerUser = async (req: Request, res: Response) => {
 			userId: String(employee._id),
 			role: employee.role,
 			title: 'Welcome to Tomato',
-			message: `Your ${employee.role} account is ready.`,
+			message: isEmployee
+				? 'Your employee registration has been submitted and is pending administrator approval and role assignment.'
+				: `Your ${employee.role} account is ready.`,
 			type: 'service',
 		});
 
+		const { token, session } = await createSession(employee as any, req);
 		return res.status(201).json({
-			token: createToken(employee as any),
+			token,
 			user: userResponse(employee as any),
-			message: 'Registration successful',
+			session: { sessionId: session.sessionId, expiresAt: session.expiresAt },
+			message: isEmployee
+				? 'Employee registration submitted successfully. Awaiting administrator approval and role assignment.'
+				: 'Registration successful',
 		});
 	} catch (error) {
 		console.error('Registration failed:', error);
@@ -580,7 +612,33 @@ export const loginUser = async (req: Request, res: Response) => {
 			return res.status(403).json({ message: 'This account has been blocked by an administrator. Please contact support.' });
 		}
 
-		return res.status(200).json({ token: createToken(user), user: userResponse(user) });
+		if (user.role === 'employee' && user.isApproved === false) {
+			if ((user as any).approvalStatus === 'rejected') {
+				return res.status(403).json({
+					message: 'Your employee registration has been rejected by an administrator. Please contact support.',
+					isApproved: false,
+					approvalStatus: 'rejected',
+				});
+			}
+			return res.status(403).json({
+				message: 'Your employee account is pending approval and role assignment by an administrator. Please wait for approval before signing in.',
+				isApproved: false,
+				approvalStatus: 'pending',
+			});
+		}
+
+		const { token, session } = await createSession(user, req);
+		return res.status(200).json({
+			token,
+			user: userResponse(user),
+			session: {
+				sessionId: session.sessionId,
+				deviceType: session.deviceType,
+				browser: session.browser,
+				os: session.os,
+				expiresAt: session.expiresAt,
+			},
+		});
 	} catch (error) {
 		console.error('Login failed:', error);
 		return res.status(500).json({ message: 'Unable to log in' });
@@ -606,11 +664,11 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
 			const emailClean = rawValue.toLowerCase();
 			const escaped = emailClean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 			const emailQuery = { email: { $regex: new RegExp(`^${escaped}$`, 'i') } };
-			user = await Customer.findOne(emailQuery);
-			if (!user) user = await Rider.findOne(emailQuery);
-			if (!user) user = await Restaurant.findOne(emailQuery);
-			if (!user) user = await Shop.findOne(emailQuery);
-			if (!user) user = await Employee.findOne(emailQuery);
+			user = await Customer.findOne(emailQuery).select('+resetPasswordExpiresAt');
+			if (!user) user = await Rider.findOne(emailQuery).select('+resetPasswordExpiresAt');
+			if (!user) user = await Restaurant.findOne(emailQuery).select('+resetPasswordExpiresAt');
+			if (!user) user = await Shop.findOne(emailQuery).select('+resetPasswordExpiresAt');
+			if (!user) user = await Employee.findOne(emailQuery).select('+resetPasswordExpiresAt');
 		} else {
 			const digits = rawValue.replace(/\D/g, '');
 			const phoneVariants = new Set<string>();
@@ -633,29 +691,106 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
 					{ email: { $regex: new RegExp(`^${rawValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } },
 				],
 			};
-			user = await Customer.findOne(phoneQuery);
-			if (!user) user = await Rider.findOne(phoneQuery);
-			if (!user) user = await Restaurant.findOne(phoneQuery);
-			if (!user) user = await Shop.findOne(phoneQuery);
-			if (!user) user = await Employee.findOne(phoneQuery);
+			user = await Customer.findOne(phoneQuery).select('+resetPasswordExpiresAt');
+			if (!user) user = await Rider.findOne(phoneQuery).select('+resetPasswordExpiresAt');
+			if (!user) user = await Restaurant.findOne(phoneQuery).select('+resetPasswordExpiresAt');
+			if (!user) user = await Shop.findOne(phoneQuery).select('+resetPasswordExpiresAt');
+			if (!user) user = await Employee.findOne(phoneQuery).select('+resetPasswordExpiresAt');
 		}
 
 		if (!user) {
 			return res.status(404).json({ message: 'No account found for that email or mobile number' });
 		}
 
-		const resetToken = randomBytes(32).toString('hex');
-		user.resetPasswordTokenHash = hashResetToken(resetToken);
-		user.resetPasswordExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
+		const isResend = Boolean(req.body?.isResend);
+		const now = Date.now();
+		const hasActiveCode =
+			user.resetPasswordExpiresAt &&
+			new Date(user.resetPasswordExpiresAt).getTime() > now;
+
+		// Do not automatically send the verification code a 2nd time until user explicitly asks to resend it
+		if (hasActiveCode && !isResend) {
+			const recipientEmail = user.email || (rawValue.includes('@') ? rawValue : undefined);
+			return res.status(200).json({
+				message: recipientEmail
+					? `A 6-digit verification code has already been sent to ${recipientEmail}. It is valid for 10 minutes. Click 'Resend code?' if you need a new code.`
+					: 'A 6-digit verification code is already active. Please enter it or click Resend code.',
+				emailSent: false,
+				expiresInMinutes: 10,
+			});
+		}
+
+		// Generate cryptographically secure 6-digit random number
+		const sixDigitCode = randomInt(100000, 1000000).toString();
+		user.resetPasswordTokenHash = hashResetToken(sixDigitCode);
+		// Validity: 10 minutes
+		user.resetPasswordExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
 		await user.save();
 
+		// Construct secure frontend reset URL
+		const frontendOrigin = req.headers.origin || req.headers.referer || process.env.FRONTEND_URL || 'http://127.0.0.1:3000';
+		const cleanFrontendUrl = String(frontendOrigin).replace(/\/$/, '');
+		const resetUrl = `${cleanFrontendUrl}/index.html?action=reset-password&token=${sixDigitCode}`;
+
+		// Send secure password reset email with 6-digit code if customer email exists
+		const recipientEmail = user.email || (rawValue.includes('@') ? rawValue : undefined);
+		if (recipientEmail) {
+			mailService.sendPasswordResetMail({
+				customerEmail: recipientEmail,
+				customerName: user.name || 'Tomato User',
+				resetToken: sixDigitCode,
+				resetUrl,
+				expiresInMinutes: 10,
+			}).catch((err) => console.error('[Mail Service] Password reset mail error:', err));
+		}
+
 		return res.status(200).json({
-			message: 'Reset token created. In production, deliver this token by email or SMS.',
-			resetToken,
+			message: recipientEmail
+				? `A 6-digit verification code has been sent to ${recipientEmail}. It is valid for 10 minutes.`
+				: 'A 6-digit verification code has been generated. It is valid for 10 minutes.',
+			emailSent: Boolean(recipientEmail),
+			expiresInMinutes: 10,
 		});
 	} catch (error) {
 		console.error('Password reset request failed:', error);
 		return res.status(500).json({ message: 'Unable to start password reset' });
+	}
+};
+
+export const verifyResetCode = async (req: Request, res: Response) => {
+	const token = typeof req.body?.resetToken === 'string' ? req.body.resetToken.trim() : '';
+
+	if (!token || token.length !== 6 || !/^\d{6}$/.test(token)) {
+		return res.status(400).json({ valid: false, message: 'A 6-digit verification code is required.' });
+	}
+
+	try {
+		const hashed = hashResetToken(token);
+		const filter = {
+			resetPasswordTokenHash: hashed,
+			resetPasswordExpiresAt: { $gt: new Date() },
+		};
+
+		let user: any = await Customer.findOne(filter).select('_id name email');
+		if (!user) user = await Rider.findOne(filter).select('_id name email');
+		if (!user) user = await Restaurant.findOne(filter).select('_id name email');
+		if (!user) user = await Shop.findOne(filter).select('_id name email');
+		if (!user) user = await Employee.findOne(filter).select('_id name email');
+
+		if (!user) {
+			return res.status(400).json({
+				valid: false,
+				message: 'Invalid or expired 6-digit verification code. Please request a new code.',
+			});
+		}
+
+		return res.status(200).json({
+			valid: true,
+			message: 'Verification code confirmed.',
+		});
+	} catch (error) {
+		console.error('Password reset code verification failed:', error);
+		return res.status(500).json({ valid: false, message: 'Unable to verify verification code.' });
 	}
 };
 
@@ -664,7 +799,7 @@ export const resetPassword = async (req: Request, res: Response) => {
 	const password = typeof req.body?.password === 'string' ? req.body.password : '';
 
 	if (!token || !password) {
-		return res.status(400).json({ message: 'Reset token and new password are required' });
+		return res.status(400).json({ message: '6-digit verification code and new password are required' });
 	}
 
 	if (password.length < 8) {
@@ -706,13 +841,25 @@ export const resetPassword = async (req: Request, res: Response) => {
 		}
 
 		if (!user) {
-			return res.status(400).json({ message: 'Reset token is invalid or expired' });
+			return res.status(400).json({ message: 'Invalid or expired 6-digit verification code. Please request a new code.' });
 		}
 
 		user.passwordHash = await hashPassword(password);
 		user.set('resetPasswordTokenHash', undefined);
 		user.set('resetPasswordExpiresAt', undefined);
 		await user.save();
+
+		// Revoke all existing sessions across devices on password reset
+		await revokeAllUserSessions(String(user._id), 'password_reset').catch(() => {});
+
+		// Send password changed security alert email
+		if (user.email) {
+			mailService.sendPasswordChangedMail({
+				customerEmail: user.email,
+				customerName: user.name || 'Tomato User',
+				changedAt: new Date(),
+			}).catch((err) => console.error('[Mail Service] Password changed alert error:', err));
+		}
 
 		return res.status(200).json({ message: 'Password reset successful' });
 	} catch (error) {
@@ -738,7 +885,9 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 		? req.body.restaurantAddress.trim()
 		: typeof req.body?.shopAddress === 'string'
 			? req.body.shopAddress.trim()
-			: undefined;
+			: typeof req.body?.address === 'string'
+				? req.body.address.trim()
+				: undefined;
 	const nextPincode = typeof req.body?.pincode === 'string' ? req.body.pincode.trim() : undefined;
 	const nextCuisine = typeof req.body?.cuisine === 'string'
 		? req.body.cuisine.trim()
@@ -750,8 +899,11 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 	const nextGsn = typeof req.body?.gsnNumber === 'string'
 		? (req.body.gsnNumber.trim().toUpperCase() || 'NA')
 		: undefined;
+	const nextDigipin = typeof req.body?.digipin === 'string'
+		? req.body.digipin.trim().toUpperCase()
+		: undefined;
 
-	if (!nextName && !nextEmail && !nextPhone && !nextImage && !nextAddress && nextPincode === undefined && !nextCuisine && !nextVehicle && nextDob === undefined && nextGsn === undefined) {
+	if (!nextName && !nextEmail && !nextPhone && !nextImage && !nextAddress && nextPincode === undefined && !nextCuisine && !nextVehicle && nextDob === undefined && nextGsn === undefined && nextDigipin === undefined) {
 		return res.status(400).json({
 			message: 'No profile changes provided',
 		});
@@ -769,16 +921,20 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 		if (nextImage) updates.image = nextImage;
 		if (nextDob !== undefined) updates.dob = nextDob;
 		if (nextGsn !== undefined) updates.gsnNumber = nextGsn;
+		if (nextDigipin !== undefined) updates.digipin = nextDigipin;
 		if (nextAddress !== undefined) {
 			updates.restaurantAddress = nextAddress;
 			updates.shopAddress = nextAddress;
+			updates.address = nextAddress;
 		}
 		if (nextPincode !== undefined || nextAddress !== undefined) {
 			const resolvedPin = extractPincodeFromText(nextPincode || nextAddress || '');
 			if (resolvedPin) {
 				updates.pincode = resolvedPin;
+				updates.postalCode = resolvedPin;
 			} else if (nextPincode !== undefined) {
 				updates.pincode = nextPincode;
+				updates.postalCode = nextPincode;
 			}
 		}
 		if (nextCuisine !== undefined) {
@@ -839,6 +995,15 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 				{ returnDocument: 'after', runValidators: true },
 			).lean();
 		} else if (userRole === 'deliveryPartner' || (userRole as string) === 'rider') {
+			if (updates.pincode || updates.address) {
+				const pin = String(updates.pincode || '');
+				const addr = String(updates.address || '');
+				updates.assignedLocation = {
+					postalCode: pin,
+					locality: addr,
+					city: 'Bengaluru',
+				};
+			}
 			user = await Rider.findByIdAndUpdate(
 				userId,
 				updates,
@@ -856,6 +1021,13 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 			return res.status(404).json({ message: 'User not found' });
 		}
 
+		if (updates.pincode) {
+			await Address.updateMany(
+				{ userId: String(userId) },
+				{ $set: { postalCode: String(updates.pincode) } },
+			).catch(() => {});
+		}
+
 		return res.status(200).json({
 			message: 'Profile updated successfully',
 			user: userResponse(user as any),
@@ -866,5 +1038,72 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 			return res.status(409).json({ message: 'An account with that email or mobile number already exists' });
 		}
 		return res.status(500).json({ message: 'Unable to update profile' });
+	}
+};
+
+export const logoutUser = async (req: AuthenticatedRequest, res: Response) => {
+	try {
+		const sessionId = req.user?.sessionId;
+		if (sessionId) {
+			await revokeSession(sessionId, 'user_logout');
+		}
+		return res.status(200).json({ message: 'Signed out successfully' });
+	} catch (error) {
+		console.error('Logout failed:', error);
+		return res.status(500).json({ message: 'Unable to sign out' });
+	}
+};
+
+export const logoutAllSessions = async (req: AuthenticatedRequest, res: Response) => {
+	try {
+		const userId = req.user?.userId;
+		if (!userId) {
+			return res.status(401).json({ message: 'Authentication required' });
+		}
+		const count = await revokeAllUserSessions(userId, 'user_logout_all');
+		return res.status(200).json({ message: `Successfully signed out of ${count} active session(s)` });
+	} catch (error) {
+		console.error('Logout all sessions failed:', error);
+		return res.status(500).json({ message: 'Unable to sign out of all sessions' });
+	}
+};
+
+export const getActiveSessions = async (req: AuthenticatedRequest, res: Response) => {
+	try {
+		const userId = req.user?.userId;
+		if (!userId) {
+			return res.status(401).json({ message: 'Authentication required' });
+		}
+		const sessions = await getUserActiveSessions(userId, req.user?.sessionId);
+		return res.status(200).json({ sessions });
+	} catch (error) {
+		console.error('Get active sessions failed:', error);
+		return res.status(500).json({ message: 'Unable to retrieve active sessions' });
+	}
+};
+
+export const revokeSingleSession = async (req: AuthenticatedRequest, res: Response) => {
+	try {
+		const userId = req.user?.userId;
+		const rawSessionId = req.params.sessionId;
+		const sessionId = Array.isArray(rawSessionId) ? rawSessionId[0] : rawSessionId;
+		if (!userId) {
+			return res.status(401).json({ message: 'Authentication required' });
+		}
+		if (!sessionId || typeof sessionId !== 'string') {
+			return res.status(400).json({ message: 'Session ID is required' });
+		}
+
+		const sessions = await getUserActiveSessions(userId);
+		const targetSession = sessions.find((s) => s.sessionId === sessionId);
+		if (!targetSession) {
+			return res.status(404).json({ message: 'Session not found or already expired' });
+		}
+
+		await revokeSession(sessionId, 'user_revoked');
+		return res.status(200).json({ message: 'Session revoked successfully' });
+	} catch (error) {
+		console.error('Revoke session failed:', error);
+		return res.status(500).json({ message: 'Unable to revoke session' });
 	}
 };

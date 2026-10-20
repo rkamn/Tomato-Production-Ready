@@ -668,3 +668,168 @@
           letter-spacing: 0.12em;
         }
       }
+
+      /* Dynamic Verification Code & Password Reset Box */
+      .code-input-container {
+        position: relative;
+        display: flex;
+        align-items: center;
+        width: 100%;
+      }
+
+      .code-input {
+        width: 100%;
+        letter-spacing: 4px;
+        font-weight: 700;
+        font-size: 1.15rem;
+        text-align: center;
+        padding-right: 2.8rem !important;
+        transition: border-color 0.25s ease, background-color 0.25s ease, box-shadow 0.25s ease;
+      }
+
+      .code-input::placeholder {
+        letter-spacing: 1px;
+        font-weight: 400;
+        font-size: 0.88rem;
+        color: #94a3b8;
+      }
+
+      .code-input.is-valid {
+        border-color: #10b981 !important;
+        background-color: #f0fdf4 !important;
+        box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18) !important;
+      }
+
+      .code-input.is-invalid {
+        border-color: #ef4444 !important;
+        background-color: #fef2f2 !important;
+        box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.18) !important;
+      }
+
+      .code-status-indicator {
+        position: absolute;
+        right: 0.85rem;
+        top: 50%;
+        transform: translateY(-50%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.6rem;
+        height: 1.6rem;
+        border-radius: 50%;
+        pointer-events: none;
+        font-size: 0.95rem;
+        font-weight: 700;
+        transition: all 0.25s ease;
+      }
+
+      .code-status-indicator.valid {
+        background: #10b981;
+        color: #ffffff;
+        box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
+      }
+
+      .code-status-indicator.invalid {
+        background: #ef4444;
+        color: #ffffff;
+        box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4);
+      }
+
+      .code-status-indicator.checking {
+        width: 1.2rem;
+        height: 1.2rem;
+        border: 2px solid #cbd5e1;
+        border-top-color: var(--tomato);
+        border-radius: 50%;
+        animation: spinCode 0.6s linear infinite;
+      }
+
+      @keyframes spinCode {
+        to { transform: translateY(-50%) rotate(360deg); }
+      }
+
+      .code-status-text {
+        font-size: 0.78rem;
+        margin-top: 0.35rem;
+        min-height: 1.1rem;
+        transition: color 0.2s ease;
+      }
+
+      .code-status-text.valid {
+        color: #059669;
+        font-weight: 600;
+      }
+
+      .code-status-text.invalid {
+        color: #dc2626;
+        font-weight: 600;
+      }
+
+      .resend-row {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        margin-top: 0.6rem;
+        font-size: 0.82rem;
+        color: var(--muted);
+      }
+
+      .resend-link-btn {
+        all: unset;
+        cursor: pointer;
+        color: var(--tomato);
+        font-weight: 700;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+        transition: color 0.2s ease, opacity 0.2s ease;
+      }
+
+      .resend-link-btn:hover:not(:disabled) {
+        color: var(--tomato-dark);
+      }
+
+      .resend-link-btn:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+        text-decoration: none;
+        color: var(--muted);
+      }
+
+      /* Slide-down box for 'Provide your new password' */
+      .password-slider-box {
+        max-height: 0;
+        opacity: 0;
+        overflow: hidden;
+        transform: translateY(-8px);
+        transition: max-height 0.45s cubic-bezier(0.4, 0, 0.2, 1),
+                    opacity 0.35s ease,
+                    transform 0.35s ease,
+                    margin 0.35s ease,
+                    padding 0.35s ease;
+        margin-top: 0;
+        padding-top: 0;
+        border-top: 1px dashed transparent;
+      }
+
+      .password-slider-box.expanded {
+        max-height: 480px;
+        opacity: 1;
+        transform: translateY(0);
+        margin-top: 1.2rem;
+        padding-top: 1.2rem;
+        border-top: 1px dashed var(--line);
+      }
+
+      .slider-title h4 {
+        margin: 0 0 0.85rem;
+        font-size: 1.05rem;
+        font-weight: 600;
+        color: var(--ink);
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+      }
+
+      .confirm-reset-btn {
+        margin-top: 0.5rem;
+      }

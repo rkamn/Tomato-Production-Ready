@@ -44,6 +44,8 @@ export interface IEmployee extends Document {
   resetPasswordTokenHash?: string;
   resetPasswordExpiresAt?: Date;
   isApproved: boolean;
+  approvalStatus?: 'pending' | 'approved' | 'rejected';
+  rejectionReason?: string;
   isBlocked: boolean;
   adminRoleTitle: string;
   permissions: string[];
@@ -92,6 +94,12 @@ const schema: Schema<IEmployee> = new Schema(
     resetPasswordTokenHash: { type: String, select: false },
     resetPasswordExpiresAt: { type: Date, select: false },
     isApproved: { type: Boolean, default: true },
+    approvalStatus: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected'],
+      default: 'approved',
+    },
+    rejectionReason: { type: String, default: '' },
     isBlocked: { type: Boolean, default: false },
     adminRoleTitle: { type: String, default: 'Platform Admin' },
     permissions: { type: [String], default: [] },

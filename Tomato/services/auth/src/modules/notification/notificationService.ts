@@ -4,6 +4,11 @@ import Notification, { INotification } from '../../model/Notification.js';
 import Rider from '../../model/Rider.js';
 import { IOrder } from '../../model/Order.js';
 import arattaiNotificationService from './arattaiService.js';
+import {
+  resolveRiderPincode,
+  resolveAddressPincode,
+  resolvePartnerPincode,
+} from '../../utils/bankHelpers.js';
 
 export interface NearbyRiderCandidate {
   riderId: string;
@@ -215,18 +220,29 @@ class NotificationService {
 
     const rejectedIds = (order.rejectedByRiders || []).map((id) => String(id));
 
+    // Resolve order's serviceable delivery location pincode
+    const orderLocationPincode =
+      (order as any).serviceablePincode ||
+      resolveAddressPincode(order.deliveryAddress) ||
+      resolvePartnerPincode(order);
+
     // Query active and approved riders who have not rejected this order
     const activeRiders = await Rider.find({
       isBlocked: { $ne: true },
       isApproved: { $ne: false },
       _id: { $nin: rejectedIds },
     })
-      .select('_id name phone currentLocation isOnline')
+      .select('_id name phone currentLocation isOnline address pincode postalCode assignedLocation')
       .lean();
+
+    // Filter riders whose operating pincode strictly matches the order's serviceable location pincode
+    const locationMatchedRiders = orderLocationPincode
+      ? activeRiders.filter((r) => resolveRiderPincode(r) === orderLocationPincode)
+      : activeRiders;
 
     const candidates: NearbyRiderCandidate[] = [];
 
-    for (const rider of activeRiders) {
+    for (const rider of locationMatchedRiders) {
       const riderLat = rider.currentLocation?.lat ?? restaurantLat;
       const riderLng = rider.currentLocation?.lng ?? restaurantLng;
 
@@ -249,7 +265,7 @@ class NotificationService {
       return withinRadius;
     }
 
-    // Fallback: If no rider is currently within 2km, take closest available riders so order isn't stranded
+    // Fallback: If no rider is currently within 2km, take closest available riders from this location's pool
     return candidates.slice(0, 3);
   }
 

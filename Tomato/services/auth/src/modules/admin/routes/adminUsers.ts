@@ -13,6 +13,8 @@ import Wallet from '../../../model/Wallet.js';
 import WalletCreditTrack from '../../../model/WalletCreditTrack.js';
 import Payment from '../../../model/Payment.js';
 import Role, { ensureDefaultRoles } from '../../../model/Role.js';
+import Counter from '../../../model/Counter.js';
+import { getSupportContactConfig, SUPPORT_CONTACT_CONFIG_DOC_ID } from '../../../utils/bankHelpers.js';
 import { AuthenticatedRequest, requireRole, requirePermission } from '../../../middleware/authenticate.js';
 import {
   hashPassword,
@@ -1986,110 +1988,116 @@ const router = Router();
     },
   );
 
-  // Toggle sub-admin block/unblock status
-  router.put(
-    '/subadmins/:id/status',
-    requirePermission('subadmins_manage'),
-    async (req: Request, res: Response) => {
-      try {
-        const currentUser = (req as AuthenticatedRequest).user;
-        if (currentUser?.role !== 'admin' && currentUser?.role !== 'superadmin') {
-          return res.status(403).json({
-            message: 'Access denied. Only the platform administrator can change sub-admin status.',
-          });
-        }
-
-        const subAdminId = req.params.id;
-        if (!mongoose.isValidObjectId(subAdminId)) {
-          return res.status(400).json({ message: 'Invalid sub-admin ID' });
-        }
-
-        if (currentUser?.userId === subAdminId) {
-          return res
-            .status(400)
-            .json({
-              message: 'You cannot block your own administrator account',
-            });
-        }
-
-        const target = await Employee.findById(subAdminId);
-        if (!target)
-          return res.status(404).json({ message: 'Sub-admin not found' });
-        if (target.role !== 'subadmin' && target.role !== 'employee') {
-          return res
-            .status(403)
-            .json({
-              message: 'Access denied. Cannot modify status of administrator accounts.',
-            });
-        }
-
-        const nextBlocked =
-          req.body.isBlocked !== undefined
-            ? Boolean(req.body.isBlocked)
-            : !target.isBlocked;
-        target.isBlocked = nextBlocked;
-        await target.save();
-
-        return res.json({
-          message: `Staff account ${nextBlocked ? 'blocked' : 'unblocked'} successfully`,
-          subadmin: userResponse(target),
+  // Toggle sub-admin / employee block/unblock status
+  const handleToggleStaffStatus = async (req: Request, res: Response) => {
+    try {
+      const currentUser = (req as AuthenticatedRequest).user;
+      if (currentUser?.role !== 'admin' && currentUser?.role !== 'superadmin') {
+        return res.status(403).json({
+          message: 'Access denied. Only the platform administrator can change staff status.',
         });
-      } catch (error) {
-        console.error('Toggle sub-admin status failed:', error);
+      }
+
+      const staffId = String(req.params.id || '');
+      if (!mongoose.isValidObjectId(staffId)) {
+        return res.status(400).json({ message: 'Invalid staff ID' });
+      }
+
+      if (currentUser?.userId === staffId) {
         return res
-          .status(500)
-          .json({ message: 'Unable to change sub-admin status' });
-      }
-    },
-  );
-
-  // Delete sub-admin permanently
-  router.delete(
-    '/subadmins/:id',
-    requirePermission('subadmins_manage'),
-    async (req: Request, res: Response) => {
-      try {
-        const currentUser = (req as AuthenticatedRequest).user;
-        if (currentUser?.role !== 'admin' && currentUser?.role !== 'superadmin') {
-          return res.status(403).json({
-            message: 'Access denied. Only the platform administrator can delete staff accounts.',
+          .status(400)
+          .json({
+            message: 'You cannot block your own administrator account',
           });
-        }
-
-        const subAdminId = req.params.id;
-        if (!mongoose.isValidObjectId(subAdminId)) {
-          return res.status(400).json({ message: 'Invalid staff ID' });
-        }
-
-        if (currentUser?.userId === subAdminId) {
-          return res
-            .status(400)
-            .json({
-              message: 'You cannot delete your own account',
-            });
-        }
-
-        const target = await Employee.findById(subAdminId);
-        if (!target)
-          return res.status(404).json({ message: 'Staff member not found' });
-        if (target.role === 'admin' || target.role === 'superadmin') {
-          return res
-            .status(403)
-            .json({ message: 'Access denied. Platform Administrator accounts cannot be deleted.' });
-        }
-
-        await Employee.findByIdAndDelete(subAdminId);
-
-        return res.json({
-          message: `Sub-admin "${target.name}" deleted successfully`,
-          deletedId: subAdminId,
-        });
-      } catch (error) {
-        console.error('Delete sub-admin failed:', error);
-        return res.status(500).json({ message: 'Unable to delete sub-admin' });
       }
-    },
-  );
+
+      const target = await Employee.findById(staffId);
+      if (!target)
+        return res.status(404).json({ message: 'Staff member not found' });
+      if (target.role === 'admin' || target.role === 'superadmin') {
+        return res
+          .status(403)
+          .json({
+            message: 'Access denied. Cannot modify status of administrator accounts.',
+          });
+      }
+
+      const nextBlocked =
+        req.body.isBlocked !== undefined
+          ? Boolean(req.body.isBlocked)
+          : !target.isBlocked;
+      target.isBlocked = nextBlocked;
+      await target.save();
+
+      const label = target.role === 'employee' ? 'Employee' : 'Sub-admin';
+      return res.json({
+        success: true,
+        message: `${label} account ${nextBlocked ? 'blocked' : 'unblocked'} successfully`,
+        subadmin: userResponse(target),
+        employee: userResponse(target),
+        isBlocked: nextBlocked,
+      });
+    } catch (error) {
+      console.error('Toggle staff status failed:', error);
+      return res
+        .status(500)
+        .json({ message: 'Unable to change staff status' });
+    }
+  };
+
+  router.put('/subadmins/:id/status', requireRole('admin', 'superadmin'), handleToggleStaffStatus);
+  router.put('/employees/:id/status', requireRole('admin', 'superadmin'), handleToggleStaffStatus);
+
+  // Delete sub-admin / employee permanently
+  const handleDeleteStaff = async (req: Request, res: Response) => {
+    try {
+      const currentUser = (req as AuthenticatedRequest).user;
+      if (currentUser?.role !== 'admin' && currentUser?.role !== 'superadmin') {
+        return res.status(403).json({
+          message: 'Access denied. Only the platform administrator can delete staff accounts.',
+        });
+      }
+
+      const staffId = String(req.params.id || '');
+      if (!mongoose.isValidObjectId(staffId)) {
+        return res.status(400).json({ message: 'Invalid staff ID' });
+      }
+
+      if (currentUser?.userId === staffId) {
+        return res
+          .status(400)
+          .json({
+            message: 'You cannot delete your own account',
+          });
+      }
+
+      const target = await Employee.findById(staffId);
+      if (!target)
+        return res.status(404).json({ message: 'Staff member not found' });
+      if (target.role === 'admin' || target.role === 'superadmin') {
+        return res
+          .status(403)
+          .json({ message: 'Access denied. Platform Administrator accounts cannot be deleted.' });
+      }
+
+      await Employee.findByIdAndDelete(staffId);
+      await Wallet.deleteMany({ userId: staffId }).catch(() => {});
+      await Notification.deleteMany({ userId: staffId }).catch(() => {});
+
+      const label = target.role === 'employee' ? 'Employee' : 'Sub-admin';
+      return res.json({
+        success: true,
+        message: `${label} "${target.name}" deleted successfully`,
+        deletedId: staffId,
+      });
+    } catch (error) {
+      console.error('Delete staff failed:', error);
+      return res.status(500).json({ message: 'Unable to delete staff member' });
+    }
+  };
+
+  router.delete('/subadmins/:id', requireRole('admin', 'superadmin'), handleDeleteStaff);
+  router.delete('/employees/:id', requireRole('admin', 'superadmin'), handleDeleteStaff);
 
   // =========================================================================
   // CONTROL PANEL: SUMMARY & DIRECTORY OF ADMINS & OPERATING ADDRESSES
@@ -2133,6 +2141,8 @@ const router = Router();
           assignedCount: roleCounts[r.roleKey] || 0,
         }));
 
+        const supportContact = await getSupportContactConfig();
+
         return res.json({
           success: true,
           isSuperAdmin,
@@ -2148,10 +2158,68 @@ const router = Router();
           },
           admins: admins.map((a: any) => userResponse(a)),
           roles: rolesWithCounts,
+          supportContact,
         });
       } catch (error) {
         console.error('Fetch control panel data failed:', error);
         return res.status(500).json({ message: 'Unable to load control panel data' });
+      }
+    },
+  );
+
+  // =========================================================================
+  // SUPER ADMIN ONLY: CONFIGURE SUPPORT PRIORITY EMAIL & 24/7 HELPLINE
+  // =========================================================================
+  router.put(
+    '/control-panel/support-contact',
+    requireRole('superadmin'),
+    async (req: Request, res: Response) => {
+      try {
+        const caller = (req as AuthenticatedRequest).user;
+        const { priorityEmail, helpline } = req.body;
+
+        const cleanEmail = typeof priorityEmail === 'string' ? priorityEmail.trim().toLowerCase() : '';
+        const cleanHelpline = typeof helpline === 'string' ? helpline.trim() : '';
+
+        if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+          return res.status(400).json({ message: 'Valid priority support email address is required' });
+        }
+
+        if (!cleanHelpline || cleanHelpline.length < 5) {
+          return res.status(400).json({ message: 'Valid 24/7 helpline phone number is required' });
+        }
+
+        const callerName = (caller as any)?.name || (caller as any)?.username || 'Super Admin';
+
+        const updatedConfig = await Counter.findOneAndUpdate(
+          { _id: SUPPORT_CONTACT_CONFIG_DOC_ID },
+          {
+            $set: {
+              name: SUPPORT_CONTACT_CONFIG_DOC_ID,
+              counterType: 'settings',
+              description: callerName,
+              metadata: {
+                priorityEmail: cleanEmail,
+                helpline: cleanHelpline,
+              },
+            },
+          },
+          { upsert: true, returnDocument: 'after' }
+        );
+
+        return res.json({
+          success: true,
+          message: 'Support Priority Email and 24/7 Helpline updated successfully',
+          supportContact: {
+            priorityEmail: cleanEmail,
+            helpline: cleanHelpline,
+            updatedAt: updatedConfig?.updatedAt || new Date(),
+            updatedBy: callerName,
+          },
+        });
+      } catch (error) {
+        console.error('Update support contact config failed:', error);
+        return res.status(500).json({ message: 'Unable to update support contact configuration' });
       }
     },
   );
@@ -2260,11 +2328,11 @@ const router = Router();
   router.put('/subadmins/:id/location', requireRole('superadmin'), handleAdminLocationAssignment);
 
   // =========================================================================
-  // SUPER ADMIN ONLY: CHANGE ADMIN / STAFF ROLE & DESIGNATION
+  // ADMIN & SUPER ADMIN: CHANGE ADMIN / STAFF ROLE & DESIGNATION
   // =========================================================================
   router.put(
     '/admins/:id/role',
-    requireRole('superadmin'),
+    requireRole('admin', 'superadmin'),
     async (req: Request, res: Response) => {
       try {
         const caller = (req as AuthenticatedRequest).user;
@@ -2295,8 +2363,19 @@ const router = Router();
           return res.status(404).json({ message: 'Admin / Staff account not found' });
         }
 
+        const isCallerSuperAdmin = caller?.role === 'superadmin';
+
         if (targetEmployee.role === 'superadmin' && String(targetEmployee._id) !== String(caller?.userId)) {
           return res.status(403).json({ message: 'Cannot demote or change role of primary Super Admin account' });
+        }
+
+        if (!isCallerSuperAdmin) {
+          if (targetEmployee.role === 'superadmin') {
+            return res.status(403).json({ message: 'Only Super Administrator can modify Super Admin accounts' });
+          }
+          if (role && String(role).trim().toLowerCase() === 'superadmin') {
+            return res.status(403).json({ message: 'Only Super Administrator can assign the Super Admin role' });
+          }
         }
 
         let roleDoc: any = null;
@@ -2346,11 +2425,12 @@ const router = Router();
 
         await targetEmployee.save();
 
+        const callerTitle = isCallerSuperAdmin ? 'Super Admin' : 'Platform Administrator';
         await Notification.create({
           userId: String(targetEmployee._id),
           role: targetEmployee.role,
           title: 'Platform Role Updated',
-          message: `Super Admin (${caller?.name || 'Super Admin'}) has updated your platform role from ${oldRole} (${oldTitle}) to ${targetEmployee.role} (${targetEmployee.adminRoleTitle}).`,
+          message: `${callerTitle} (${caller?.name || 'Administrator'}) has updated your platform role from ${oldRole} (${oldTitle}) to ${targetEmployee.role} (${targetEmployee.adminRoleTitle}).`,
           type: 'system',
         }).catch(() => {});
 

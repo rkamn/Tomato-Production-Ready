@@ -760,6 +760,10 @@
                   <label>Postal Code (PIN)</label>
                   <input id="addr-pincode" type="text" placeholder="560001" />
                 </div>
+                <div class="form-group">
+                  <label>DigiPIN <span style="font-size:0.75rem; color:var(--muted); font-weight:normal;">(Digital Postal Index)</span></label>
+                  <input id="addr-digipin" type="text" placeholder="e.g. 560001-K01 or 411057-D02" style="text-transform:uppercase;" />
+                </div>
               </div>
               <div style="display:flex; justify-content:space-between; align-items:center;">
                 <label style="display:flex; align-items:center; gap:0.5rem; font-size:0.85rem;">
@@ -1236,7 +1240,7 @@
                 <div style="font-size:1.8rem; line-height:1;">📞</div>
                 <div>
                   <strong style="display:block; font-size:0.9rem; color:var(--ink);">24/7 Helpline</strong>
-                  <a href="tel:18001238662" style="font-size:0.85rem; color:var(--tomato); font-weight:700; text-decoration:none;">1800-123-TOMATO</a>
+                  <a id="support-helpline-link" href="tel:9523654737" style="font-size:0.85rem; color:var(--tomato); font-weight:700; text-decoration:none;"><span id="support-helpline-display">9523654737</span></a>
                   <p style="margin:0.2rem 0 0; font-size:0.75rem; color:var(--muted);">Toll-free immediate assistance</p>
                 </div>
               </div>
@@ -1245,7 +1249,7 @@
                 <div style="font-size:1.8rem; line-height:1;">✉️</div>
                 <div>
                   <strong style="display:block; font-size:0.9rem; color:var(--ink);">Priority Email</strong>
-                  <a href="mailto:support@tomato-app.com" style="font-size:0.85rem; color:var(--ink); font-weight:700; text-decoration:none;">support@tomato-app.com</a>
+                  <a id="support-priority-email-link" href="mailto:lightbits.infotech@gmail.com" style="font-size:0.85rem; color:var(--ink); font-weight:700; text-decoration:none;"><span id="support-priority-email-display">lightbits.infotech@gmail.com</span></a>
                   <p style="margin:0.2rem 0 0; font-size:0.75rem; color:var(--muted);">Guaranteed response within 2 hrs</p>
                 </div>
               </div>
@@ -1425,14 +1429,30 @@
                     <input id="set-restaurant-pincode" type="text" maxlength="6" placeholder="e.g. 560038" />
                   </div>
                 </div>
-                <div class="form-group">
-                  <label id="set-cuisine-label">Cuisines Served</label>
-                  <input id="set-cuisine" type="text" placeholder="North Indian, Italian, Desserts" />
+                <div class="form-row">
+                  <div class="form-group">
+                    <label id="set-restaurant-digipin-label">Restaurant DIGIPIN</label>
+                    <input id="set-restaurant-digipin" type="text" placeholder="e.g. 560038-R01 or DGP-1297-7759" style="text-transform:uppercase;" />
+                  </div>
+                  <div class="form-group">
+                    <label id="set-cuisine-label">Cuisines Served</label>
+                    <input id="set-cuisine" type="text" placeholder="North Indian, Italian, Desserts" />
+                  </div>
                 </div>
               </div>
 
               <!-- Rider specific -->
               <div id="rider-settings-group" style="display:none;">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label id="set-rider-address-label">Rider Operating Address</label>
+                    <input id="set-rider-address" type="text" placeholder="e.g. Hinjewadi Phase 1, Pune" />
+                  </div>
+                  <div class="form-group">
+                    <label id="set-rider-pincode-label">Serviceable Operating Pincode (6 Digits)</label>
+                    <input id="set-rider-pincode" type="text" maxlength="6" placeholder="e.g. 411057" />
+                  </div>
+                </div>
                 <div class="form-group">
                   <label>Delivery Vehicle</label>
                   <input id="set-vehicle" type="text" placeholder="Motorcycle / Scooter / Electric Bike" />
@@ -3601,9 +3621,38 @@
             <input id="mi-name" type="text" placeholder="Paneer Butter Masala" required />
           </div>
           <div class="form-row">
-            <div class="form-group">
-              <label>Category</label>
-              <input id="mi-category" type="text" placeholder="Main Course, Starters, Drinks" required />
+            <div class="form-group" style="position:relative;">
+              <label for="mi-category">Category</label>
+              <div class="category-combobox-wrapper" style="position:relative;">
+                <div style="position:relative; display:flex; align-items:center;">
+                  <input
+                    id="mi-category"
+                    type="text"
+                    placeholder="Search or type a category..."
+                    autocomplete="off"
+                    required
+                    style="width:100%; padding-right:2rem;"
+                    onfocus="this.select(); openCategoryDropdown(true);"
+                    oninput="handleCategoryInput(event)"
+                    onkeydown="handleCategoryKeydown(event)"
+                  />
+                  <button
+                    type="button"
+                    id="mi-category-toggle-btn"
+                    tabindex="-1"
+                    style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:transparent; border:none; color:var(--muted, #64748b); cursor:pointer; font-size:11px; padding:4px 6px; border-radius:4px;"
+                    onclick="toggleCategoryDropdown(event)"
+                    title="Toggle category list"
+                  >
+                    ▼
+                  </button>
+                </div>
+                <div
+                  id="mi-category-dropdown"
+                  style="display:none; position:absolute; top:calc(100% + 4px); left:0; right:0; max-height:220px; overflow-y:auto; background:var(--panel, #ffffff); border:1px solid var(--line, #cbd5e1); border-radius:8px; box-shadow:0 10px 25px -5px rgba(0,0,0,0.15), 0 8px 10px -6px rgba(0,0,0,0.1); z-index:1050; padding:4px;"
+                >
+                </div>
+              </div>
             </div>
             <div class="form-group">
               <label>Dietary</label>
@@ -4981,8 +5030,8 @@
       <div class="modal-box" style="max-width:500px;">
         <div class="modal-header">
           <div>
-            <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:#a21caf; font-weight:700;">🛡️ Super Admin Role Governance</span>
-            <h2 style="font-size:1.25rem; margin-top:0.2rem;">Change Platform Staff Role</h2>
+            <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:#a21caf; font-weight:700;">🛡️ Platform Role Governance</span>
+            <h2 style="font-size:1.25rem; margin-top:0.2rem;">Assign Platform Staff Role</h2>
           </div>
           <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('control-panel-change-role-modal')">&times;</button>
         </div>
@@ -5725,6 +5774,48 @@
             <button type="submit" id="partner-finance-submit-btn" class="btn btn-primary">💸 Process Transfer</button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- SERVICEABLE DELIVERY AREA ALERT POPUP MODAL -->
+    <div id="serviceable-area-alert-modal" class="modal-overlay" style="z-index:999999;" onclick="if(event.target === this) closeModal('serviceable-area-alert-modal')">
+      <div class="modal-box" style="max-width:480px; width:92%; text-align:center; padding:2rem 1.75rem; border-radius:16px; box-shadow:0 25px 65px rgba(0,0,0,0.35); border:1px solid #fee2e2; background:#ffffff;">
+        <div style="width:68px; height:68px; margin:0 auto 1.25rem; border-radius:50%; background:#fff1f2; display:flex; align-items:center; justify-content:center; font-size:2rem; box-shadow:0 8px 20px rgba(225,29,72,0.18);">
+          📍
+        </div>
+        <h3 style="font-size:1.3rem; font-weight:800; color:#991b1b; margin-bottom:0.75rem; letter-spacing:-0.02em;">
+          Serviceable Area Alert
+        </h3>
+        <p id="serviceable-area-alert-message" style="font-size:1rem; font-weight:600; color:#1e293b; line-height:1.55; margin-bottom:1.25rem; padding:0.85rem 1rem; background:#fff7ed; border:1px dashed #fdba74; border-radius:10px;">
+          your area is not in servicable range for now, update your address and pincode for orders.
+        </p>
+        <div id="serviceable-area-alert-details" style="font-size:0.85rem; color:#64748b; margin-bottom:1.5rem; line-height:1.5;">
+        </div>
+        <div style="display:flex; justify-content:center; gap:0.75rem; flex-wrap:wrap;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="closeModal('serviceable-area-alert-modal')" style="min-width:110px; font-weight:600;">Dismiss</button>
+          <button type="button" class="btn btn-primary btn-sm" id="serviceable-area-update-btn" onclick="handleServiceableAreaRedirect()" style="min-width:180px; font-weight:700; background:#e11d48; border-color:#e11d48;">✏️ Update Address & Pincode</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- RESTAURANT / SHOP TOO FAR ALERT POPUP MODAL -->
+    <div id="restaurant-too-far-modal" class="modal-overlay" style="z-index:999999;" onclick="if(event.target === this) closeModal('restaurant-too-far-modal')">
+      <div class="modal-box" style="max-width:480px; width:92%; text-align:center; padding:2rem 1.75rem; border-radius:16px; box-shadow:0 25px 65px rgba(0,0,0,0.35); border:1px solid #fee2e2; background:#ffffff;">
+        <div style="width:68px; height:68px; margin:0 auto 1.25rem; border-radius:50%; background:#fff1f2; display:flex; align-items:center; justify-content:center; font-size:2rem; box-shadow:0 8px 20px rgba(225,29,72,0.18);">
+          🛵
+        </div>
+        <h3 id="restaurant-too-far-title" style="font-size:1.3rem; font-weight:800; color:#991b1b; margin-bottom:0.75rem; letter-spacing:-0.02em;">
+          Restaurant is too far from you
+        </h3>
+        <p id="restaurant-too-far-message" style="font-size:1rem; font-weight:600; color:#1e293b; line-height:1.55; margin-bottom:1.25rem; padding:0.85rem 1rem; background:#fff7ed; border:1px dashed #fdba74; border-radius:10px;">
+          This store is located more than 15 km away from your location. We currently deliver only within a 15 km radius.
+        </p>
+        <div id="restaurant-too-far-details" style="font-size:0.85rem; color:#64748b; margin-bottom:1.5rem; line-height:1.5;">
+        </div>
+        <div style="display:flex; justify-content:center; gap:0.75rem; flex-wrap:wrap;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="closeModal('restaurant-too-far-modal')" style="min-width:110px; font-weight:600;">Dismiss</button>
+          <button type="button" class="btn btn-primary btn-sm" onclick="closeModal('restaurant-too-far-modal'); if (typeof window.selectRestaurantFilter === 'function') window.selectRestaurantFilter('all'); if (typeof window.selectShopFilter === 'function') window.selectShopFilter('all');" style="min-width:180px; font-weight:700; background:#e11d48; border-color:#e11d48;">🍽️ View Nearby Stores</button>
+        </div>
       </div>
     </div>
 

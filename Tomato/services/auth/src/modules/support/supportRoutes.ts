@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import Complaint, { IComplaint, cleanupExpiredClosedComplaints } from '../../model/Complaint.js';
 import Notification from '../../model/Notification.js';
 import { arattaiNotificationService } from '../notification/index.js';
+import { getSupportContactConfig } from '../../utils/bankHelpers.js';
 import {
   authenticate,
   AuthenticatedRequest,
@@ -10,6 +11,33 @@ import {
 
 export const createSupportRouter = () => {
   const router = express.Router();
+
+  /**
+   * GET /api/support/contact-info
+   * Returns official Priority Email and 24/7 Helpline configured by Super Admin.
+   * Defaults: lightbits.infotech@gmail.com and 9523654737
+   */
+  router.get('/contact-info', async (_req: Request, res: Response) => {
+    try {
+      const contactInfo = await getSupportContactConfig();
+      return res.json({
+        success: true,
+        priorityEmail: contactInfo.priorityEmail,
+        helpline: contactInfo.helpline,
+        updatedAt: contactInfo.updatedAt,
+        updatedBy: contactInfo.updatedBy,
+      });
+    } catch (error) {
+      console.error('Fetch support contact info failed:', error);
+      return res.json({
+        success: true,
+        priorityEmail: 'lightbits.infotech@gmail.com',
+        helpline: '9523654737',
+        updatedBy: 'System Fallback',
+      });
+    }
+  });
+
   router.use(authenticate);
 
   /**

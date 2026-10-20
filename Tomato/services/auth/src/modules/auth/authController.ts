@@ -8,6 +8,7 @@ import Customer, { ICustomer } from '../../model/Customer.js';
 import Rider, { IRider } from '../../model/Rider.js';
 import Shop, { IShop } from '../../model/Shop.js';
 import Notification from '../../model/Notification.js';
+import Address from '../../model/Address.js';
 import Counter, { getNextCounterValue, generateIdFromCounter } from '../../model/Counter.js';
 import { AuthenticatedRequest } from '../../middleware/authenticate.js';
 import {
@@ -738,7 +739,9 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 		? req.body.restaurantAddress.trim()
 		: typeof req.body?.shopAddress === 'string'
 			? req.body.shopAddress.trim()
-			: undefined;
+			: typeof req.body?.address === 'string'
+				? req.body.address.trim()
+				: undefined;
 	const nextPincode = typeof req.body?.pincode === 'string' ? req.body.pincode.trim() : undefined;
 	const nextCuisine = typeof req.body?.cuisine === 'string'
 		? req.body.cuisine.trim()
@@ -750,8 +753,11 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 	const nextGsn = typeof req.body?.gsnNumber === 'string'
 		? (req.body.gsnNumber.trim().toUpperCase() || 'NA')
 		: undefined;
+	const nextDigipin = typeof req.body?.digipin === 'string'
+		? req.body.digipin.trim().toUpperCase()
+		: undefined;
 
-	if (!nextName && !nextEmail && !nextPhone && !nextImage && !nextAddress && nextPincode === undefined && !nextCuisine && !nextVehicle && nextDob === undefined && nextGsn === undefined) {
+	if (!nextName && !nextEmail && !nextPhone && !nextImage && !nextAddress && nextPincode === undefined && !nextCuisine && !nextVehicle && nextDob === undefined && nextGsn === undefined && nextDigipin === undefined) {
 		return res.status(400).json({
 			message: 'No profile changes provided',
 		});
@@ -769,16 +775,20 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 		if (nextImage) updates.image = nextImage;
 		if (nextDob !== undefined) updates.dob = nextDob;
 		if (nextGsn !== undefined) updates.gsnNumber = nextGsn;
+		if (nextDigipin !== undefined) updates.digipin = nextDigipin;
 		if (nextAddress !== undefined) {
 			updates.restaurantAddress = nextAddress;
 			updates.shopAddress = nextAddress;
+			updates.address = nextAddress;
 		}
 		if (nextPincode !== undefined || nextAddress !== undefined) {
 			const resolvedPin = extractPincodeFromText(nextPincode || nextAddress || '');
 			if (resolvedPin) {
 				updates.pincode = resolvedPin;
+				updates.postalCode = resolvedPin;
 			} else if (nextPincode !== undefined) {
 				updates.pincode = nextPincode;
+				updates.postalCode = nextPincode;
 			}
 		}
 		if (nextCuisine !== undefined) {
@@ -839,6 +849,15 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 				{ returnDocument: 'after', runValidators: true },
 			).lean();
 		} else if (userRole === 'deliveryPartner' || (userRole as string) === 'rider') {
+			if (updates.pincode || updates.address) {
+				const pin = String(updates.pincode || '');
+				const addr = String(updates.address || '');
+				updates.assignedLocation = {
+					postalCode: pin,
+					locality: addr,
+					city: 'Bengaluru',
+				};
+			}
 			user = await Rider.findByIdAndUpdate(
 				userId,
 				updates,
@@ -854,6 +873,13 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 
 		if (!user) {
 			return res.status(404).json({ message: 'User not found' });
+		}
+
+		if (updates.pincode) {
+			await Address.updateMany(
+				{ userId: String(userId) },
+				{ $set: { postalCode: String(updates.pincode) } },
+			).catch(() => {});
 		}
 
 		return res.status(200).json({

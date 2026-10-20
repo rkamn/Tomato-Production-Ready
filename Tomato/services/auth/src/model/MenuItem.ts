@@ -38,7 +38,7 @@ const menuItemSchema: Schema<IMenuItem> = new Schema(
     category: {
       type: String,
       trim: true,
-      default: 'Main Course',
+      default: 'Chinese',
     },
     description: {
       type: String,

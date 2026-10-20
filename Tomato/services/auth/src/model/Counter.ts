@@ -17,6 +17,7 @@ export interface ICounter {
   shopId?: number;
   orderId?: number;
   pincodes?: string[];
+  metadata?: Record<string, any>;
   updatedAt?: Date;
   createdAt?: Date;
 }
@@ -39,6 +40,7 @@ const counterSchema: Schema<ICounter> = new Schema(
     shopId: { type: Number },
     orderId: { type: Number },
     pincodes: { type: [String], default: undefined },
+    metadata: { type: Schema.Types.Mixed, default: {} },
   },
   {
     timestamps: true,

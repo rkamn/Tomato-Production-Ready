@@ -452,6 +452,18 @@ export const setupAndMigrateWalletTable = async () => {
             Rider.find().select('_id name role email phone walletBalance creditPoint').lean(),
         ]);
 
+        // Ensure existing delivery riders have serviceable operating pincode initialized
+        const unpinnedRiders = await Rider.find({
+            $or: [{ pincode: { $exists: false } }, { pincode: '' }, { pincode: null }],
+        });
+        if (unpinnedRiders.length > 0) {
+            for (const r of unpinnedRiders) {
+                r.pincode = '411057';
+                r.postalCode = '411057';
+                await r.save();
+            }
+        }
+
         const allUsers: any[] = [
             ...employees.map((u: any) => ({ ...u, role: u.role || 'admin' })),
             ...customers.map((u: any) => ({ ...u, role: 'customer' })),

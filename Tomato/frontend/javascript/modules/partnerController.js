@@ -253,7 +253,11 @@ async function updateOrderStatus(orderId, nextStatus) {
     });
     fetchRestaurantOrders();
   } catch (e) {
-    alert(`Status Update Failed: ${e.message}`);
+    if (typeof showServiceableAreaPopup === 'function' && e.message && e.message.toLowerCase().includes('servicable range')) {
+      showServiceableAreaPopup();
+    } else {
+      alert(`Status Update Failed: ${e.message}`);
+    }
   }
 }
 
@@ -509,7 +513,11 @@ async function updateShopOrderStatus(orderId, nextStatus) {
     });
     fetchShopOrders();
   } catch (e) {
-    alert(`Shop Status Update Failed: ${e.message}`);
+    if (typeof showServiceableAreaPopup === 'function' && e.message && e.message.toLowerCase().includes('servicable range')) {
+      showServiceableAreaPopup();
+    } else {
+      alert(`Shop Status Update Failed: ${e.message}`);
+    }
   }
 }
 window.updateShopOrderStatus = updateShopOrderStatus;
@@ -1016,11 +1024,289 @@ async function fetchRestaurantMenu() {
   }
 }
 
+let allMenuCategories = [];
+let highlightedCategoryIndex = -1;
+
+async function fetchRestaurantMenuCategories() {
+  try {
+    const res = await apiFetch('/api/restaurant/menu/categories');
+    if (res && Array.isArray(res.categories)) {
+      allMenuCategories = res.categories;
+    }
+  } catch (err) {
+    console.error('Failed to load menu categories:', err);
+    if (!allMenuCategories.length) {
+      allMenuCategories = [
+        'Chinese',
+        'Main Course',
+        'Starters',
+        'Snacks',
+        'Desserts',
+        'Beverages',
+        'Fast Food',
+        'Breads & Rice',
+        'Soups',
+        'Salads',
+        'Combos',
+      ];
+    }
+  }
+}
+
+function highlightCategoryMatch(text, query) {
+  const safeText = typeof escapeHtml === 'function' ? escapeHtml(text) : String(text || '');
+  if (!query) return safeText;
+  try {
+    const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(${escapedQuery})`, 'gi');
+    return safeText.replace(regex, '<span style="font-weight:800; color:#2563eb; text-decoration:underline;">$1</span>');
+  } catch (e) {
+    return safeText;
+  }
+}
+
+function openCategoryDropdown(showAll = false) {
+  const dropdown = document.getElementById('mi-category-dropdown');
+  if (!dropdown) return;
+  dropdown.style.display = 'block';
+  highlightedCategoryIndex = -1;
+
+  const input = document.getElementById('mi-category');
+  const textToFilter = showAll ? '' : (input ? input.value : '');
+
+  if (!allMenuCategories || allMenuCategories.length === 0) {
+    fetchRestaurantMenuCategories().then(() => {
+      renderCategoryDropdownOptions(textToFilter);
+    });
+  } else {
+    renderCategoryDropdownOptions(textToFilter);
+  }
+}
+
+function closeCategoryDropdown() {
+  const dropdown = document.getElementById('mi-category-dropdown');
+  if (dropdown) {
+    dropdown.style.display = 'none';
+  }
+  highlightedCategoryIndex = -1;
+}
+
+function toggleCategoryDropdown(e) {
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  const dropdown = document.getElementById('mi-category-dropdown');
+  if (!dropdown) return;
+  if (dropdown.style.display === 'block') {
+    closeCategoryDropdown();
+  } else {
+    const input = document.getElementById('mi-category');
+    if (input) {
+      input.focus();
+      input.select();
+    }
+    openCategoryDropdown(true);
+  }
+}
+
+function renderCategoryDropdownOptions(filterText = '') {
+  const dropdown = document.getElementById('mi-category-dropdown');
+  if (!dropdown) return;
+
+  const rawQuery = String(filterText || '').trim();
+  const query = rawQuery.toLowerCase();
+
+  // Case-insensitive filtering across all platform categories
+  const matches = (allMenuCategories || []).filter((c) =>
+    String(c || '').trim().toLowerCase().includes(query)
+  );
+
+  // Case-insensitive exact match check
+  const exactMatch = (allMenuCategories || []).some(
+    (c) => String(c || '').trim().toLowerCase() === query
+  );
+
+  let html = '';
+
+  if (matches.length > 0) {
+    matches.forEach((cat, idx) => {
+      const isSelected = query && String(cat || '').trim().toLowerCase() === query;
+      const isHighlighted = idx === highlightedCategoryIndex;
+      const bg = isHighlighted ? '#e2e8f0' : isSelected ? '#eff6ff' : 'transparent';
+      const escapedAttr = String(cat).replace(/"/g, '&quot;');
+      const escapedArg = String(cat).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      const displayLabel = highlightCategoryMatch(cat, rawQuery);
+
+      html += `
+        <div
+          class="category-option-item ${isHighlighted ? 'highlighted' : ''} ${isSelected ? 'selected' : ''}"
+          data-category="${escapedAttr}"
+          data-index="${idx}"
+          style="padding: 7px 10px; cursor: pointer; border-radius: 6px; font-size: 0.88rem; color: var(--ink, #1f221e); display: flex; align-items: center; justify-content: space-between; background: ${bg}; transition: background 0.15s ease;"
+          onmouseenter="highlightCategoryOption(${idx})"
+          onmousedown="selectCategoryItem('${escapedArg}')"
+        >
+          <span>${displayLabel}</span>
+          ${isSelected ? '<span style="color:#2563eb; font-weight:700; font-size:0.8rem;">✓</span>' : ''}
+        </div>
+      `;
+    });
+  } else if (!rawQuery) {
+    html = `<div style="padding: 8px 12px; font-size: 0.85rem; color: var(--muted, #64748b);">No categories available</div>`;
+  }
+
+  // If user typed something and it doesn't match an existing category case-insensitively, offer to add it!
+  if (rawQuery && !exactMatch) {
+    const escapedArg = rawQuery.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const escapedDisplay = typeof escapeHtml === 'function' ? escapeHtml(rawQuery) : rawQuery;
+    html += `
+      <div
+        class="category-option-add"
+        style="padding: 8px 10px; cursor: pointer; border-radius: 6px; font-size: 0.85rem; font-weight: 600; color: #2563eb; background: #eff6ff; border-top: 1px dashed #cbd5e1; margin-top: 4px; display: flex; align-items: center; gap: 6px; transition: background 0.15s ease;"
+        onmouseenter="this.style.background='#dbeafe'"
+        onmouseleave="this.style.background='#eff6ff'"
+        onmousedown="addNewCategoryItem('${escapedArg}')"
+      >
+        <span style="font-size: 0.95rem;">➕</span>
+        <span>Add &ldquo;<strong>${escapedDisplay}</strong>&rdquo; to category list</span>
+      </div>
+    `;
+  }
+
+  dropdown.innerHTML = html;
+}
+
+function highlightCategoryOption(index) {
+  highlightedCategoryIndex = index;
+  const items = document.querySelectorAll('#mi-category-dropdown .category-option-item');
+  items.forEach((item, idx) => {
+    if (idx === index) {
+      item.style.background = '#e2e8f0';
+    } else {
+      const isSelected = item.classList.contains('selected');
+      item.style.background = isSelected ? '#eff6ff' : 'transparent';
+    }
+  });
+}
+
+function selectCategoryItem(category) {
+  const input = document.getElementById('mi-category');
+  if (input) {
+    input.value = category;
+  }
+  closeCategoryDropdown();
+}
+
+async function addNewCategoryItem(newCategory) {
+  const trimmed = String(newCategory || '').trim();
+  if (!trimmed) return;
+
+  // Case-insensitive check: if it already exists in the list, reuse the existing one
+  const existing = (allMenuCategories || []).find(
+    (c) => String(c || '').trim().toLowerCase() === trimmed.toLowerCase()
+  );
+  if (existing) {
+    selectCategoryItem(existing);
+    return;
+  }
+
+  allMenuCategories.push(trimmed);
+  allMenuCategories.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+
+  const input = document.getElementById('mi-category');
+  if (input) {
+    input.value = trimmed;
+  }
+  closeCategoryDropdown();
+
+  // Persist category to backend category list
+  try {
+    await apiFetch('/api/restaurant/menu/categories', {
+      method: 'POST',
+      body: JSON.stringify({ category: trimmed }),
+    });
+  } catch (err) {
+    console.warn('Failed to persist category to server:', err);
+  }
+}
+
+function handleCategoryInput(e) {
+  openCategoryDropdown(false);
+  renderCategoryDropdownOptions(e.target.value);
+}
+
+function handleCategoryKeydown(e) {
+  const dropdown = document.getElementById('mi-category-dropdown');
+  const isDropdownVisible = dropdown && dropdown.style.display === 'block';
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (!isDropdownVisible) {
+      openCategoryDropdown(false);
+      return;
+    }
+    const items = document.querySelectorAll('#mi-category-dropdown .category-option-item');
+    if (items.length > 0) {
+      highlightedCategoryIndex = (highlightedCategoryIndex + 1) % items.length;
+      highlightCategoryOption(highlightedCategoryIndex);
+      items[highlightedCategoryIndex].scrollIntoView({ block: 'nearest' });
+    }
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (!isDropdownVisible) {
+      openCategoryDropdown(false);
+      return;
+    }
+    const items = document.querySelectorAll('#mi-category-dropdown .category-option-item');
+    if (items.length > 0) {
+      highlightedCategoryIndex =
+        (highlightedCategoryIndex - 1 + items.length) % items.length;
+      highlightCategoryOption(highlightedCategoryIndex);
+      items[highlightedCategoryIndex].scrollIntoView({ block: 'nearest' });
+    }
+  } else if (e.key === 'Enter') {
+    if (isDropdownVisible) {
+      const items = document.querySelectorAll('#mi-category-dropdown .category-option-item');
+      if (highlightedCategoryIndex >= 0 && items[highlightedCategoryIndex]) {
+        e.preventDefault();
+        const selectedCat = items[highlightedCategoryIndex].getAttribute('data-category');
+        selectCategoryItem(selectedCat);
+      } else {
+        const input = document.getElementById('mi-category');
+        const typed = input ? input.value.trim() : '';
+        if (typed) {
+          e.preventDefault();
+          // Case-insensitive exact match check before adding
+          const matched = (allMenuCategories || []).find(
+            (c) => String(c || '').trim().toLowerCase() === typed.toLowerCase()
+          );
+          if (matched) {
+            selectCategoryItem(matched);
+          } else {
+            addNewCategoryItem(typed);
+          }
+        }
+      }
+    }
+  } else if (e.key === 'Escape') {
+    closeCategoryDropdown();
+  }
+}
+
+// Global click listener to close category dropdown when clicked outside
+document.addEventListener('click', (e) => {
+  const wrapper = document.querySelector('.category-combobox-wrapper');
+  if (wrapper && !wrapper.contains(e.target)) {
+    closeCategoryDropdown();
+  }
+});
+
 function openAddMenuItemModal() {
   document.getElementById('menu-modal-title').textContent = 'Add Menu Item';
   document.getElementById('menu-item-id').value = '';
   document.getElementById('mi-name').value = '';
-  document.getElementById('mi-category').value = 'Main Course';
+  document.getElementById('mi-category').value = 'Chinese';
   document.getElementById('mi-dietary').value = 'veg';
   document.getElementById('mi-price').value = '';
   document.getElementById('mi-quantity').value = '20';
@@ -1038,6 +1324,8 @@ function openAddMenuItemModal() {
   if (miImgPh) miImgPh.style.display = 'inline-block';
   if (miImgSt) { miImgSt.textContent = 'Upload dish image now or replace anytime.'; miImgSt.style.color = 'var(--muted)'; }
 
+  closeCategoryDropdown();
+  fetchRestaurantMenuCategories();
   openModal('menu-item-modal');
 }
 
@@ -1069,15 +1357,23 @@ function editMenuItem(id, name, category, desc, price, qty, dietary, isActive, i
     if (miImgSt) { miImgSt.textContent = 'No image uploaded yet. You can upload one now.'; miImgSt.style.color = 'var(--muted)'; }
   }
 
+  closeCategoryDropdown();
+  fetchRestaurantMenuCategories();
   openModal('menu-item-modal');
 }
 
 async function saveMenuItem(e) {
   e.preventDefault();
   const id = document.getElementById('menu-item-id').value;
+  const inputCategory = document.getElementById('mi-category').value.trim();
+  const matchedExisting = (allMenuCategories || []).find(
+    (c) => String(c || '').trim().toLowerCase() === inputCategory.toLowerCase()
+  );
+  const categoryVal = matchedExisting || inputCategory;
+
   const payload = {
     name: document.getElementById('mi-name').value.trim(),
-    category: document.getElementById('mi-category').value.trim(),
+    category: categoryVal,
     dietary: document.getElementById('mi-dietary').value,
     price: Number(document.getElementById('mi-price').value),
     quantity: Number(document.getElementById('mi-quantity').value),
@@ -1086,6 +1382,11 @@ async function saveMenuItem(e) {
     isActive: document.getElementById('mi-active').checked,
   };
 
+  if (categoryVal && !allMenuCategories.some((c) => String(c || '').trim().toLowerCase() === categoryVal.toLowerCase())) {
+    allMenuCategories.push(categoryVal);
+    allMenuCategories.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }
+
   try {
     if (id) {
       await apiFetch(`/api/restaurant/menu/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
@@ -1093,6 +1394,7 @@ async function saveMenuItem(e) {
       await apiFetch('/api/restaurant/menu', { method: 'POST', body: JSON.stringify(payload) });
     }
     closeModal('menu-item-modal');
+    closeCategoryDropdown();
     fetchRestaurantMenu();
   } catch (err) {
     alert(`Error saving food item: ${err.message}`);
@@ -1376,4 +1678,15 @@ window.fetchRestaurantMenu = fetchRestaurantMenu;
 window.openAddMenuItemModal = openAddMenuItemModal;
 window.editMenuItem = editMenuItem;
 window.saveMenuItem = saveMenuItem;
+window.fetchRestaurantMenuCategories = fetchRestaurantMenuCategories;
+window.openCategoryDropdown = openCategoryDropdown;
+window.closeCategoryDropdown = closeCategoryDropdown;
+window.toggleCategoryDropdown = toggleCategoryDropdown;
+window.renderCategoryDropdownOptions = renderCategoryDropdownOptions;
+window.selectCategoryItem = selectCategoryItem;
+window.addNewCategoryItem = addNewCategoryItem;
+window.handleCategoryInput = handleCategoryInput;
+window.handleCategoryKeydown = handleCategoryKeydown;
+window.highlightCategoryOption = highlightCategoryOption;
+
 

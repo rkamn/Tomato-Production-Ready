@@ -84,7 +84,11 @@ async function acceptDeliveryOrder(orderId) {
     alert('Delivery order claimed! Proceed to pick up the meal.');
     switchView('rider-active');
   } catch (e) {
-    alert(`Accept Delivery Error: ${e.message}`);
+    if (typeof showServiceableAreaPopup === 'function' && e.message && e.message.toLowerCase().includes('servicable range')) {
+      showServiceableAreaPopup();
+    } else {
+      alert(`Accept Delivery Error: ${e.message}`);
+    }
   }
 }
 

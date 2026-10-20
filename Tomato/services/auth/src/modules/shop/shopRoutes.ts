@@ -15,7 +15,11 @@ import { formatBill, resolveAdminGsnNumber } from '../../utils/orderHelpers.js';
 import Order, { OrderStatus } from '../../model/Order.js';
 import notificationService from '../notification/notificationService.js';
 import { productImageUpload } from '../../middleware/upload.js';
-import { validateBankAndPanDetails } from '../../utils/bankHelpers.js';
+import {
+  validateBankAndPanDetails,
+  resolvePartnerPincode,
+  getServiceablePincodes,
+} from '../../utils/bankHelpers.js';
 import Payment from '../../model/Payment.js';
 import Coupon, {
   COUPON_TYPES,
@@ -93,6 +97,20 @@ const createShopRouter = () => {
       const rawVal =
         req.body?.isOpen !== undefined ? req.body.isOpen : req.body?.isOnline;
       const isOpen = Boolean(rawVal);
+
+      if (isOpen) {
+        const shopDoc = await Shop.findById(user.userId).lean();
+        const shopPin = resolvePartnerPincode(shopDoc);
+        const serviceablePincodes = await getServiceablePincodes();
+        if (!shopPin || !serviceablePincodes.includes(shopPin)) {
+          return res.status(400).json({
+            message: 'your area is not in servicable range for now, update your address and pincode for orders.',
+            code: 'AREA_NOT_SERVICEABLE',
+            pincode: shopPin,
+            serviceablePincodes,
+          });
+        }
+      }
 
       const updated = await Shop.findByIdAndUpdate(
         user.userId,
@@ -551,6 +569,14 @@ const createShopRouter = () => {
           return res.status(400).json({
             message:
               'Your shop is currently CLOSED. Please toggle your status to OPEN in the sidebar to accept orders.',
+          });
+        }
+        const shopPin = resolvePartnerPincode(shopUser);
+        const serviceablePincodes = await getServiceablePincodes();
+        if (!shopPin || !serviceablePincodes.includes(shopPin)) {
+          return res.status(400).json({
+            message: 'your area is not in servicable range for now, update your address and pincode for orders.',
+            code: 'AREA_NOT_SERVICEABLE',
           });
         }
       }

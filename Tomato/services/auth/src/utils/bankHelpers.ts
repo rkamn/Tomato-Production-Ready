@@ -367,7 +367,9 @@ export function extractPincodeFromText(raw?: string | null): string {
 
 export function resolvePartnerPincode(partner: any): string {
   if (!partner) return '';
-  const explicit = extractPincodeFromText(partner.pincode || partner.postalCode || '');
+  const explicit = extractPincodeFromText(
+    partner.pincode || partner.postalCode || partner.assignedLocation?.postalCode || '',
+  );
   if (explicit) return explicit;
   const fromAddr = extractPincodeFromText(
     partner.restaurantAddress || partner.shopAddress || partner.address || '',
@@ -375,6 +377,17 @@ export function resolvePartnerPincode(partner: any): string {
   if (fromAddr) return fromAddr;
   const fromDigipin = extractPincodeFromText(partner.digipin || '');
   if (fromDigipin) return fromDigipin;
+  return '';
+}
+
+export function resolveRiderPincode(rider: any): string {
+  if (!rider) return '';
+  const explicit = extractPincodeFromText(
+    rider.pincode || rider.postalCode || rider.assignedLocation?.postalCode || '',
+  );
+  if (explicit) return explicit;
+  const fromAddr = extractPincodeFromText(rider.address || '');
+  if (fromAddr) return fromAddr;
   return '';
 }
 
@@ -390,42 +403,40 @@ export function resolveAddressPincode(addr: any): string {
 
 export async function getServiceablePincodes(): Promise<string[]> {
   try {
+    const pinSet = new Set<string>();
+
     const doc = await Counter.findById(SERVICEABLE_PINCODES_DOC_ID).lean();
     if (doc && Array.isArray(doc.pincodes)) {
-      return Array.from(
-        new Set(doc.pincodes.map((p) => String(p || '').trim()).filter(Boolean)),
-      );
+      for (const p of doc.pincodes) {
+        const clean = String(p || '').trim();
+        if (/^\d{5,6}$/.test(clean)) pinSet.add(clean);
+      }
     }
 
-    const seedSet = new Set<string>(DEFAULT_SERVICEABLE_PINCODES);
-    const [approvedRests, approvedShops] = await Promise.all([
-      Restaurant.find({ isApproved: true }).select('pincode restaurantAddress digipin').lean(),
-      Shop.find({ isApproved: true }).select('pincode shopAddress digipin').lean(),
-    ]);
-    for (const r of approvedRests) {
-      const pin = resolvePartnerPincode(r);
-      if (pin) seedSet.add(pin);
-    }
-    for (const s of approvedShops) {
-      const pin = resolvePartnerPincode(s);
-      if (pin) seedSet.add(pin);
+    // Automatically aggregate all active admin / superadmin / subadmin assigned location postal codes
+    try {
+      const activeAdmins = await Employee.find({
+        role: { $in: ['admin', 'superadmin', 'subadmin'] },
+        isBlocked: { $ne: true },
+      })
+        .select('assignedLocation')
+        .lean();
+
+      for (const admin of activeAdmins) {
+        const pin = resolveAddressPincode(admin.assignedLocation);
+        if (pin && /^\d{5,6}$/.test(pin)) {
+          pinSet.add(pin);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to aggregate admin location pincodes:', e);
     }
 
-    const initialList = Array.from(seedSet);
-    await Counter.findOneAndUpdate(
-      { _id: SERVICEABLE_PINCODES_DOC_ID },
-      {
-        $set: {
-          name: SERVICEABLE_PINCODES_DOC_ID,
-          counterType: 'settings',
-          description: 'Admin-configured serviceable delivery pincodes',
-          pincodes: initialList,
-        },
-        $setOnInsert: { seq: 1000, lastNumber: 1000 },
-      },
-      { upsert: true, returnDocument: 'after' },
-    );
-    return initialList;
+    if (pinSet.size === 0) {
+      DEFAULT_SERVICEABLE_PINCODES.forEach((p) => pinSet.add(p));
+    }
+
+    return Array.from(pinSet);
   } catch (err) {
     console.error('getServiceablePincodes error:', err);
     return [...DEFAULT_SERVICEABLE_PINCODES];
@@ -524,6 +535,38 @@ export async function removeServiceablePincode(
   }
 
   return { pincodes, unapprovedPartnersCount };
+}
+
+export const DEFAULT_SUPPORT_CONTACT = {
+  priorityEmail: 'lightbits.infotech@gmail.com',
+  helpline: '9523654737',
+};
+
+export const SUPPORT_CONTACT_CONFIG_DOC_ID = 'support_contact_config';
+
+export async function getSupportContactConfig(): Promise<{
+  priorityEmail: string;
+  helpline: string;
+  updatedAt?: Date;
+  updatedBy?: string;
+}> {
+  try {
+    const doc = await Counter.findById(SUPPORT_CONTACT_CONFIG_DOC_ID).lean();
+    if (doc?.metadata && doc.metadata.priorityEmail) {
+      return {
+        priorityEmail: String(doc.metadata.priorityEmail),
+        helpline: String(doc.metadata.helpline || DEFAULT_SUPPORT_CONTACT.helpline),
+        updatedAt: (doc as any).updatedAt,
+        updatedBy: doc.description || 'Super Admin',
+      };
+    }
+  } catch (err) {
+    console.error('Error fetching support contact config:', err);
+  }
+  return {
+    ...DEFAULT_SUPPORT_CONTACT,
+    updatedBy: 'System Default',
+  };
 }
 
 

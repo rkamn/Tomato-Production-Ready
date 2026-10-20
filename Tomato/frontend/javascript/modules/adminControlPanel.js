@@ -10,8 +10,14 @@ let currentControlPanelData = {
   myLocation: null,
   admins: [],
   roles: [],
+  supportContact: {
+    priorityEmail: 'lightbits.infotech@gmail.com',
+    helpline: '9523654737',
+    updatedAt: null,
+    updatedBy: 'System Default',
+  },
 };
-let controlPanelActiveTab = 'addresses'; // 'addresses' | 'roles'
+let controlPanelActiveTab = 'addresses'; // 'addresses' | 'roles' | 'support'
 let controlPanelSearchFilter = '';
 let controlPanelRoleFilter = 'all'; // 'all' | 'admin' | 'subadmin' | 'employee'
 let controlPanelRolesTabFilter = 'all'; // 'all' | 'custom' | 'system'
@@ -56,6 +62,11 @@ async function loadAdminControlPanel(force = false) {
         myLocation: res.myLocation || null,
         admins: Array.isArray(res.admins) ? res.admins : [],
         roles: Array.isArray(res.roles) ? res.roles : [],
+        supportContact: res.supportContact || {
+          priorityEmail: 'lightbits.infotech@gmail.com',
+          helpline: '9523654737',
+          updatedBy: 'System Default',
+        },
       };
       renderAdminControlPanelView();
     } else {
@@ -81,7 +92,7 @@ async function loadAdminControlPanel(force = false) {
  * Toggle Control Panel Tab
  */
 function setControlPanelTab(tab) {
-  controlPanelActiveTab = tab === 'roles' ? 'roles' : 'addresses';
+  controlPanelActiveTab = tab === 'roles' ? 'roles' : tab === 'support' ? 'support' : 'addresses';
   renderAdminControlPanelView();
 }
 
@@ -158,16 +169,16 @@ function renderAdminControlPanelView() {
               }
             </div>
             <div style="font-size:0.75rem; color:#cbd5e1; margin-top:0.35rem;">
-              ${isSuper ? 'Can assign addresses, create &amp; change roles' : 'Cannot edit addresses, roles, or permissions'}
+              ${isSuper ? 'Can assign addresses, configure support, create roles' : 'Can create employees and assign roles'}
             </div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Main Navigation Tabs: Addresses vs Role Governance -->
+    <!-- Main Navigation Tabs: Addresses vs Role Governance vs Support Channels -->
     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem; margin-bottom:1.25rem; border-bottom:2px solid var(--line); padding-bottom:0.75rem;">
-      <div style="display:flex; gap:0.5rem;">
+      <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
         <button
           type="button"
           class="btn btn-sm ${controlPanelActiveTab === 'addresses' ? 'btn-primary' : 'btn-outline'}"
@@ -187,6 +198,16 @@ function renderAdminControlPanelView() {
           <span>🎭 Platform Roles &amp; Governance</span>
           <span class="badge" style="background:${controlPanelActiveTab === 'roles' ? 'rgba(255,255,255,0.25)' : '#ede9fe'}; color:${controlPanelActiveTab === 'roles' ? '#fff' : '#6d28d9'}; font-size:0.7rem; border-radius:999px;">${totalRoles}</span>
         </button>
+
+        <button
+          type="button"
+          class="btn btn-sm ${controlPanelActiveTab === 'support' ? 'btn-primary' : 'btn-outline'}"
+          style="display:inline-flex; align-items:center; gap:0.4rem; font-weight:700; ${controlPanelActiveTab === 'support' ? 'background:#0891b2; border-color:#0891b2; color:#fff;' : ''}"
+          onclick="setControlPanelTab('support')"
+        >
+          <span>🛟 Help &amp; Support Channels</span>
+          <span class="badge" style="background:${controlPanelActiveTab === 'support' ? 'rgba(255,255,255,0.25)' : '#e0f2fe'}; color:${controlPanelActiveTab === 'support' ? '#fff' : '#0369a1'}; font-size:0.7rem; border-radius:999px;">Live Config</span>
+        </button>
       </div>
 
       <div style="display:flex; align-items:center; gap:0.5rem;">
@@ -205,7 +226,12 @@ function renderAdminControlPanelView() {
     </div>
 
     <!-- Active Tab Body -->
-    ${controlPanelActiveTab === 'addresses' ? renderAddressesTabHtml(isSuper, totalPlatformAdmins, totalSubAdmins, totalEmployees, totalWithAssignedLocation) : renderRolesTabHtml(isSuper, totalRoles, customRolesCount)}
+    ${controlPanelActiveTab === 'addresses'
+      ? renderAddressesTabHtml(isSuper, totalPlatformAdmins, totalSubAdmins, totalEmployees, totalWithAssignedLocation)
+      : controlPanelActiveTab === 'roles'
+      ? renderRolesTabHtml(isSuper, totalRoles, customRolesCount)
+      : renderSupportTabHtml(isSuper)
+    }
   `;
 }
 
@@ -360,9 +386,12 @@ function renderAddressesTabHtml(isSuper, totalPlatformAdmins, totalSubAdmins, to
                     <span>✉️ ${escapeHtml(a.email || (a.username ? '@' + a.username : 'N/A'))}</span>
                     ${a.phone ? ` • <span>📞 ${escapeHtml(a.phone)}</span>` : ''}
                   </div>
-                  <div style="margin-top:0.3rem; display:flex; gap:0.35rem; align-items:center;">
+                  <div style="margin-top:0.3rem; display:flex; gap:0.35rem; align-items:center; flex-wrap:wrap;">
                     ${roleBadge}
                     <span class="badge" style="background:#f1f5f9; color:#475569; font-family:monospace; font-size:0.7rem; font-weight:700;">ID: ${escapeHtml(aId)}</span>
+                    ${a.isBlocked
+                      ? '<span class="badge" style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; font-size:0.68rem; font-weight:700;">🚫 Blocked</span>'
+                      : '<span class="badge" style="background:#dcfce7; color:#15803d; border:1px solid #bbf7d0; font-size:0.68rem; font-weight:700;">✓ Active</span>'}
                   </div>
                 </td>
                 <td>
@@ -394,37 +423,68 @@ function renderAddressesTabHtml(isSuper, totalPlatformAdmins, totalSubAdmins, to
                   </small>
                 </td>
                 <td style="text-align:right; white-space:nowrap;">
-                  ${isSuper ? `
-                    <button
-                      type="button"
-                      class="btn btn-outline btn-sm"
-                      style="background:#eff6ff; border-color:#93c5fd; color:#1d4ed8; font-weight:700; padding:0.25rem 0.6rem;"
-                      onclick="openControlPanelLocationModal('${a._id || a.id}')"
-                      title="Assign or edit operating location for ${escapeHtml(a.name)}"
-                    >
-                      📍 Edit Address
-                    </button>
-                    ${!isTargetSuper ? `
+                  <div style="display:inline-flex; align-items:center; justify-content:flex-end; gap:0.35rem;">
+                    ${isSuper ? `
                       <button
                         type="button"
                         class="btn btn-outline btn-sm"
-                        style="background:#fdf4ff; border-color:#f0abfc; color:#a21caf; font-weight:700; padding:0.25rem 0.6rem; margin-left:0.3rem;"
-                        onclick="openControlPanelChangeRoleModal('${a._id || a.id}')"
-                        title="Change role or designation for ${escapeHtml(a.name)}"
+                        style="background:#eff6ff; border-color:#93c5fd; color:#1d4ed8; font-weight:700; padding:0.25rem 0.6rem;"
+                        onclick="openControlPanelLocationModal('${a._id || a.id}')"
+                        title="Assign or edit operating location for ${escapeHtml(a.name)}"
                       >
-                        🛡️ Change Role
+                        📍 Edit Address
                       </button>
                     ` : ''}
-                  ` : `
-                    <span
-                      class="badge"
-                      style="background:#f1f5f9; color:#64748b; font-size:0.75rem; border:1px solid #cbd5e1; padding:0.25rem 0.6rem; display:inline-flex; align-items:center; gap:0.3rem;"
-                      title="Platform administrators cannot edit assigned locations or roles. Managed by Super Admin."
-                    >
-                      <span>🔒</span>
-                      <span>View Only</span>
-                    </span>
-                  `}
+                    ${(!isTargetSuper && (isSuper || (typeof role !== 'undefined' && role === 'admin'))) ? `
+                      <button
+                        type="button"
+                        class="btn btn-outline btn-sm"
+                        style="background:#fdf4ff; border-color:#f0abfc; color:#a21caf; font-weight:700; padding:0.25rem 0.6rem;"
+                        onclick="openControlPanelChangeRoleModal('${a._id || a.id}')"
+                        title="Assign role or designation for ${escapeHtml(a.name)}"
+                      >
+                        🛡️ Assign Role
+                      </button>
+                      ${(!isTargetAdmin && !isMe) ? `
+                        <button
+                          type="button"
+                          class="btn btn-outline btn-sm"
+                          style="${a.isBlocked ? 'background:#ecfdf5; border-color:#6ee7b7; color:#065f46;' : 'background:#fff1f2; border-color:#fecdd3; color:#e11d48;'} font-weight:700; padding:0.25rem 0.55rem;"
+                          onclick="toggleStaffStatusFromControlPanel('${a._id || a.id}', ${Boolean(a.isBlocked)}, '${escapeHtml(a.name || 'Staff Member')}', '${escapeHtml(a.role || 'employee')}')"
+                          title="${a.isBlocked ? 'Unblock / Enable ' : 'Block / Disable '}${escapeHtml(a.name)}"
+                        >
+                          ${a.isBlocked ? '✓ Enable' : '🚫 Disable'}
+                        </button>
+                        <button
+                          type="button"
+                          class="btn btn-sm"
+                          style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; font-weight:700; padding:0.25rem 0.55rem;"
+                          onclick="deleteStaffFromControlPanel('${a._id || a.id}', '${escapeHtml(a.name || 'Staff Member')}', '${escapeHtml(a.role || 'employee')}')"
+                          title="Delete ${escapeHtml(a.name)}"
+                        >
+                          🗑️
+                        </button>
+                      ` : ''}
+                    ` : (isTargetSuper ? `
+                      <span
+                        class="badge"
+                        style="background:#fef3c7; color:#b45309; border:1px solid #fde68a; font-size:0.75rem; padding:0.25rem 0.6rem; display:inline-flex; align-items:center; gap:0.3rem;"
+                        title="Super Administrator role is protected."
+                      >
+                        <span>👑</span>
+                        <span>Super Admin</span>
+                      </span>
+                    ` : `
+                      <span
+                        class="badge"
+                        style="background:#f1f5f9; color:#64748b; font-size:0.75rem; border:1px solid #cbd5e1; padding:0.25rem 0.6rem; display:inline-flex; align-items:center; gap:0.3rem;"
+                        title="View Only"
+                      >
+                        <span>🔒</span>
+                        <span>View Only</span>
+                      </span>
+                    `)}
+                  </div>
                 </td>
               </tr>
             `;
@@ -601,14 +661,15 @@ function renderRolesTabHtml(isSuper, totalRoles, customRolesCount) {
           </p>
         </div>
 
-        ${isSuper ? `
+        ${(isSuper || (typeof role !== 'undefined' && role === 'admin')) ? `
           <button
             type="button"
             class="btn btn-sm btn-primary"
-            style="background:#7c3aed; border-color:#7c3aed; font-weight:700;"
-            onclick="openControlPanelCreateRoleModal()"
+            style="background:#0284c7; border-color:#0284c7; font-weight:700; display:inline-flex; align-items:center; gap:0.35rem;"
+            onclick="openCreateEmployeeModal()"
+            title="Create a new normal employee account"
           >
-            ➕ Create New Role
+            <span>➕ Create Employee</span>
           </button>
         ` : ''}
       </div>
@@ -1166,10 +1227,31 @@ function openControlPanelLocationModal(adminId) {
 /**
  * Super Admin: Open Change Role Modal (Dynamically Populates System & Custom Roles)
  */
-function openControlPanelChangeRoleModal(adminId) {
-  const admin = currentControlPanelData.admins.find(a => String(a._id || a.id) === String(adminId));
+async function openControlPanelChangeRoleModal(adminId) {
+  let admin = Array.isArray(currentControlPanelData?.admins)
+    ? currentControlPanelData.admins.find(a => String(a._id || a.id) === String(adminId))
+    : null;
+
+  if (!admin && Array.isArray(window.currentSubAdminsList)) {
+    admin = window.currentSubAdminsList.find(a => String(a._id || a.id) === String(adminId));
+  }
+
   if (!admin) {
-    alert('Administrator account not found.');
+    try {
+      const data = await apiFetch('/api/admin/control-panel');
+      if (data && Array.isArray(data.admins)) {
+        currentControlPanelData = {
+          admins: data.admins,
+          roles: Array.isArray(data.roles) ? data.roles : [],
+          supportContact: data.supportContact || null,
+        };
+        admin = data.admins.find(a => String(a._id || a.id) === String(adminId));
+      }
+    } catch (_) {}
+  }
+
+  if (!admin) {
+    alert('Staff account not found.');
     return;
   }
 
@@ -1180,9 +1262,11 @@ function openControlPanelChangeRoleModal(adminId) {
 
   if (idInput) idInput.value = String(admin._id || admin.id);
 
+  const isSuper = Boolean(currentControlPanelData?.isSuperAdmin || (typeof role !== 'undefined' && role === 'superadmin'));
+
   // Dynamically populate available roles from currentControlPanelData.roles
   if (selectRole) {
-    const rolesList = Array.isArray(currentControlPanelData.roles) && currentControlPanelData.roles.length
+    const rolesList = Array.isArray(currentControlPanelData?.roles) && currentControlPanelData.roles.length
       ? currentControlPanelData.roles
       : [
           { roleKey: 'admin', displayName: 'Platform Administrator', baseRole: 'admin', isSystem: true },
@@ -1191,11 +1275,12 @@ function openControlPanelChangeRoleModal(adminId) {
         ];
 
     const sysRoles = rolesList.filter(r => r.isSystem);
+    const visibleSysRoles = isSuper ? sysRoles : sysRoles.filter(r => r.roleKey !== 'superadmin');
     const customRoles = rolesList.filter(r => !r.isSystem);
 
     let optsHtml = `
       <optgroup label="System Standard Roles">
-        ${sysRoles.map(r => `
+        ${visibleSysRoles.map(r => `
           <option value="${escapeHtml(r.roleKey)}" data-title="${escapeHtml(r.displayName)}" ${admin.role === r.roleKey ? 'selected' : ''}>
             ${r.roleKey === 'superadmin' ? '👑' : r.roleKey === 'admin' ? '👑' : r.roleKey === 'subadmin' ? '🛡️' : '👔'} ${escapeHtml(r.displayName)} (${escapeHtml(r.baseRole.toUpperCase())})
           </option>
@@ -1309,6 +1394,347 @@ async function submitControlPanelChangeRole(event) {
   }
 }
 
+/**
+ * Render Help & Support Channels Tab
+ */
+function renderSupportTabHtml(isSuper) {
+  const contact = currentControlPanelData.supportContact || {
+    priorityEmail: 'lightbits.infotech@gmail.com',
+    helpline: '9523654737',
+    updatedBy: 'System Default',
+    updatedAt: null,
+  };
+
+  const emailVal = contact.priorityEmail || 'lightbits.infotech@gmail.com';
+  const helplineVal = contact.helpline || '9523654737';
+  const updatedBy = contact.updatedBy || 'Super Admin';
+  const updatedAtStr = contact.updatedAt ? new Date(contact.updatedAt).toLocaleString() : 'System Default Configuration';
+
+  return `
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(360px, 1fr)); gap:1.5rem; align-items:start;">
+      <!-- LEFT: CONFIGURATION FORM -->
+      <div style="background:#fff; border:1px solid var(--line); border-radius:12px; padding:1.5rem; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.5rem;">
+          <div>
+            <h3 style="margin:0 0 0.35rem; font-size:1.15rem; color:var(--ink); display:flex; align-items:center; gap:0.5rem;">
+              <span>🛟</span> Help &amp; Support Channels Config
+            </h3>
+            <p style="margin:0; font-size:0.83rem; color:var(--muted); line-height:1.4;">
+              Configure official support touchpoints. Any update here is instantly broadcast to all users under the <strong>Help &amp; Support</strong> desk.
+            </p>
+          </div>
+          <span class="badge" style="background:#ecfdf5; color:#059669; border:1px solid #a7f3d0; font-size:0.75rem; font-weight:700; padding:0.25rem 0.6rem; border-radius:999px;">
+            ● Live Broadcast Active
+          </span>
+        </div>
+
+        ${!isSuper ? `
+          <div style="background:#fffbeb; border:1px solid #fef3c7; border-radius:8px; padding:0.75rem 1rem; margin-bottom:1.25rem; font-size:0.82rem; color:#92400e; display:flex; align-items:center; gap:0.5rem;">
+            <span style="font-size:1.1rem;">🔒</span>
+            <span><strong>Read-Only Access:</strong> You are viewing platform support channels. Only <strong>Super Administrator</strong> can edit or update these fields.</span>
+          </div>
+        ` : ''}
+
+        <form id="cp-support-channels-form" onsubmit="event.preventDefault(); saveControlPanelSupportContact();">
+          <!-- Priority Email Field -->
+          <div class="form-group" style="margin-bottom:1.25rem;">
+            <label for="cp-support-priority-email" style="display:block; font-weight:700; font-size:0.88rem; color:var(--ink); margin-bottom:0.35rem;">
+              Priority Email <span style="color:#d94b35;">*</span>
+            </label>
+            <div style="position:relative; display:flex; align-items:center;">
+              <span style="position:absolute; left:12px; font-size:1.1rem; color:#64748b;">✉️</span>
+              <input
+                id="cp-support-priority-email"
+                type="email"
+                value="${escapeHtml(emailVal)}"
+                placeholder="lightbits.infotech@gmail.com"
+                required
+                ${isSuper ? '' : 'readonly'}
+                oninput="handleSupportPreviewInput()"
+                style="width:100%; padding:0.65rem 0.75rem 0.65rem 2.5rem; border:1px solid var(--line); border-radius:8px; font-size:0.92rem; background:${isSuper ? '#fff' : '#f8fafc'}; color:var(--ink);"
+              />
+            </div>
+            <small style="display:block; margin-top:0.35rem; font-size:0.76rem; color:var(--muted);">
+              Reflects under <strong>"Priority Email"</strong> on all users' Help &amp; Support dashboard. Default: <code>lightbits.infotech@gmail.com</code>
+            </small>
+          </div>
+
+          <!-- 24/7 Helpline Field -->
+          <div class="form-group" style="margin-bottom:1.5rem;">
+            <label for="cp-support-helpline" style="display:block; font-weight:700; font-size:0.88rem; color:var(--ink); margin-bottom:0.35rem;">
+              24/7 Helpline <span style="color:#d94b35;">*</span>
+            </label>
+            <div style="position:relative; display:flex; align-items:center;">
+              <span style="position:absolute; left:12px; font-size:1.1rem; color:#64748b;">📞</span>
+              <input
+                id="cp-support-helpline"
+                type="text"
+                value="${escapeHtml(helplineVal)}"
+                placeholder="9523654737"
+                required
+                ${isSuper ? '' : 'readonly'}
+                oninput="handleSupportPreviewInput()"
+                style="width:100%; padding:0.65rem 0.75rem 0.65rem 2.5rem; border:1px solid var(--line); border-radius:8px; font-size:0.92rem; background:${isSuper ? '#fff' : '#f8fafc'}; color:var(--ink);"
+              />
+            </div>
+            <small style="display:block; margin-top:0.35rem; font-size:0.76rem; color:var(--muted);">
+              Reflects under <strong>"24/7 Helpline"</strong> on all users' Help &amp; Support dashboard. Default: <code>9523654737</code>
+            </small>
+          </div>
+
+          <!-- Action Buttons -->
+          ${isSuper ? `
+            <div style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap; border-top:1px solid var(--line); padding-top:1.25rem;">
+              <button
+                type="submit"
+                id="cp-save-support-btn"
+                class="btn btn-primary"
+                style="background:#0891b2; border-color:#0891b2; padding:0.6rem 1.4rem; font-weight:700; font-size:0.9rem; display:inline-flex; align-items:center; gap:0.4rem;"
+              >
+                <span>💾 Save &amp; Broadcast to All Dashboards</span>
+              </button>
+
+              <button
+                type="button"
+                class="btn btn-outline"
+                style="padding:0.6rem 1rem; font-size:0.85rem;"
+                onclick="resetControlPanelSupportContactDefaults()"
+              >
+                ↺ Reset to Defaults
+              </button>
+            </div>
+          ` : ''}
+        </form>
+
+        <!-- Governance Footer -->
+        <div style="margin-top:1.5rem; padding-top:1rem; border-top:1px dashed var(--line); font-size:0.75rem; color:var(--muted); display:flex; justify-content:space-between; flex-wrap:wrap; gap:0.5rem;">
+          <span>Last modified by: <strong>${escapeHtml(updatedBy)}</strong></span>
+          <span>Timestamp: <strong>${escapeHtml(updatedAtStr)}</strong></span>
+        </div>
+      </div>
+
+      <!-- RIGHT: LIVE PREVIEW OF "HELP & SUPPORT" TILES -->
+      <div>
+        <div style="background:#fff; border:1px solid var(--line); border-radius:12px; padding:1.5rem; box-shadow:0 1px 3px rgba(0,0,0,0.05); margin-bottom:1.5rem;">
+          <h4 style="margin:0 0 0.5rem; font-size:1rem; color:var(--ink); display:flex; align-items:center; gap:0.4rem;">
+            <span>👁️</span> Live User Dashboard Preview
+          </h4>
+          <p style="margin:0 0 1.25rem; font-size:0.8rem; color:var(--muted);">
+            This is exactly how the <strong>Help &amp; Support</strong> header cards render for Customers, Restaurants, Riders, and Shops:
+          </p>
+
+          <div style="display:grid; grid-template-columns:1fr; gap:0.85rem;">
+            <!-- Live Preview Helpline Card -->
+            <div style="background:#f8fafc; border:1px solid var(--line); border-radius:8px; padding:1rem; display:flex; align-items:flex-start; gap:0.8rem;">
+              <div style="font-size:1.8rem; line-height:1;">📞</div>
+              <div>
+                <strong style="display:block; font-size:0.9rem; color:var(--ink);">24/7 Helpline</strong>
+                <a id="cp-preview-helpline-link" href="tel:${escapeHtml(helplineVal.replace(/\s+/g, ''))}" style="font-size:0.9rem; color:var(--tomato, #d94b35); font-weight:800; text-decoration:none;">
+                  <span id="cp-preview-helpline-text">${escapeHtml(helplineVal)}</span>
+                </a>
+                <p style="margin:0.2rem 0 0; font-size:0.75rem; color:var(--muted);">Toll-free immediate assistance</p>
+              </div>
+            </div>
+
+            <!-- Live Preview Priority Email Card -->
+            <div style="background:#f8fafc; border:1px solid var(--line); border-radius:8px; padding:1rem; display:flex; align-items:flex-start; gap:0.8rem;">
+              <div style="font-size:1.8rem; line-height:1;">✉️</div>
+              <div>
+                <strong style="display:block; font-size:0.9rem; color:var(--ink);">Priority Email</strong>
+                <a id="cp-preview-email-link" href="mailto:${escapeHtml(emailVal)}" style="font-size:0.9rem; color:var(--ink); font-weight:800; text-decoration:none;">
+                  <span id="cp-preview-email-text">${escapeHtml(emailVal)}</span>
+                </a>
+                <p style="margin:0.2rem 0 0; font-size:0.75rem; color:var(--muted);">Guaranteed response within 2 hrs</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Touchpoints Information Card -->
+        <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:12px; padding:1.25rem;">
+          <h5 style="margin:0 0 0.5rem; font-size:0.9rem; color:#0369a1; display:flex; align-items:center; gap:0.4rem;">
+            <span>ℹ️</span> Multi-Role Visibility Scope
+          </h5>
+          <ul style="margin:0; padding-left:1.2rem; font-size:0.8rem; color:#0c4a6e; line-height:1.6;">
+            <li><strong>Customers:</strong> Shown under Customer Help &amp; Support desk for instant order queries.</li>
+            <li><strong>Restaurant Partners:</strong> Shown under Kitchen &amp; Menu Help for settlement &amp; order inquiries.</li>
+            <li><strong>Delivery Riders:</strong> Shown under Rider Delivery Help for roadside assistance.</li>
+            <li><strong>Grocery Shops:</strong> Shown under Retail Partner Help for catalog &amp; dispatch issues.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function handleSupportPreviewInput() {
+  const emailInput = document.getElementById('cp-support-priority-email');
+  const helplineInput = document.getElementById('cp-support-helpline');
+
+  const emailVal = emailInput ? emailInput.value.trim() : '';
+  const helplineVal = helplineInput ? helplineInput.value.trim() : '';
+
+  const prevEmailText = document.getElementById('cp-preview-email-text');
+  const prevEmailLink = document.getElementById('cp-preview-email-link');
+  if (prevEmailText) prevEmailText.textContent = emailVal || 'lightbits.infotech@gmail.com';
+  if (prevEmailLink) prevEmailLink.href = `mailto:${emailVal || 'lightbits.infotech@gmail.com'}`;
+
+  const prevHelpText = document.getElementById('cp-preview-helpline-text');
+  const prevHelpLink = document.getElementById('cp-preview-helpline-link');
+  if (prevHelpText) prevHelpText.textContent = helplineVal || '9523654737';
+  if (prevHelpLink) prevHelpLink.href = `tel:${(helplineVal || '9523654737').replace(/\s+/g, '')}`;
+}
+
+function resetControlPanelSupportContactDefaults() {
+  const emailInput = document.getElementById('cp-support-priority-email');
+  const helplineInput = document.getElementById('cp-support-helpline');
+  if (emailInput) emailInput.value = 'lightbits.infotech@gmail.com';
+  if (helplineInput) helplineInput.value = '9523654737';
+  handleSupportPreviewInput();
+}
+
+async function saveControlPanelSupportContact() {
+  const emailInput = document.getElementById('cp-support-priority-email');
+  const helplineInput = document.getElementById('cp-support-helpline');
+  const btn = document.getElementById('cp-save-support-btn');
+
+  const priorityEmail = String(emailInput?.value || '').trim();
+  const helpline = String(helplineInput?.value || '').trim();
+
+  if (!priorityEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(priorityEmail)) {
+    alert('Please enter a valid Priority Email address.');
+    if (emailInput) emailInput.focus();
+    return;
+  }
+
+  if (!helpline || helpline.length < 5) {
+    alert('Please enter a valid 24/7 Helpline number.');
+    if (helplineInput) helplineInput.focus();
+    return;
+  }
+
+  const origBtnText = btn ? btn.innerHTML : 'Save';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Saving & Broadcasting...';
+  }
+
+  try {
+    const res = await apiFetch('/api/admin/control-panel/support-contact', {
+      method: 'PUT',
+      body: JSON.stringify({ priorityEmail, helpline }),
+    });
+
+    if (res && res.success) {
+      currentControlPanelData.supportContact = res.supportContact;
+
+      // Update local storage so immediate reloads or other views have it
+      try {
+        localStorage.setItem(
+          'tomato_support_contact',
+          JSON.stringify({ priorityEmail, helpline })
+        );
+      } catch (_) {}
+
+      // Immediately update DOM elements on current dashboard if present
+      const emailLink = document.getElementById('support-priority-email-link');
+      const emailDisplay = document.getElementById('support-priority-email-display');
+      if (emailLink) emailLink.href = `mailto:${priorityEmail}`;
+      if (emailDisplay) emailDisplay.textContent = priorityEmail;
+
+      const helplineLink = document.getElementById('support-helpline-link');
+      const helplineDisplay = document.getElementById('support-helpline-display');
+      if (helplineLink) helplineLink.href = `tel:${helpline.replace(/\s+/g, '')}`;
+      if (helplineDisplay) helplineDisplay.textContent = helpline;
+
+      if (typeof showToastNotification === 'function') {
+        showToastNotification({
+          title: '🛟 Support Channels Updated',
+          message: `Priority Email set to "${priorityEmail}" and Helpline to "${helpline}". Reflected across all dashboards!`,
+          type: 'success',
+          duration: 4500,
+        });
+      } else {
+        alert(`✅ Support channels updated successfully!\nPriority Email: ${priorityEmail}\n24/7 Helpline: ${helpline}`);
+      }
+
+      renderAdminControlPanelView();
+    } else {
+      alert(`⚠️ Failed to update support contacts: ${res?.message || 'Unknown error'}`);
+    }
+  } catch (err) {
+    console.error('Error saving support contact:', err);
+    alert(`⚠️ Error saving support contact: ${err.message}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = origBtnText;
+    }
+  }
+}
+
+async function toggleStaffStatusFromControlPanel(staffId, currentlyBlocked, name = 'Staff Member', role = 'employee') {
+  const isEmp = role === 'employee';
+  const roleName = isEmp ? 'employee' : role === 'subadmin' ? 'sub-administrator' : 'staff member';
+  const action = currentlyBlocked ? 'unblock / enable' : 'block / disable';
+  if (!confirm(`Are you sure you want to ${action} ${roleName} "${name}"?`)) return;
+
+  try {
+    const res = await apiFetch(`/api/admin/employees/${staffId}/status`, {
+      method: 'PUT',
+      body: JSON.stringify({ isBlocked: !currentlyBlocked }),
+    });
+
+    if (typeof showToastNotification === 'function') {
+      showToastNotification({
+        title: `Staff ${currentlyBlocked ? 'Enabled' : 'Disabled'}`,
+        message: res.message || `${roleName.charAt(0).toUpperCase() + roleName.slice(1)} "${name}" ${action}ed successfully.`,
+        type: 'success',
+        duration: 3500,
+      });
+    } else {
+      alert(res.message || `${roleName.charAt(0).toUpperCase() + roleName.slice(1)} "${name}" ${action}ed successfully.`);
+    }
+
+    loadAdminControlPanel(true);
+    if (typeof fetchAdminSubAdmins === 'function') {
+      fetchAdminSubAdmins(true);
+    }
+  } catch (err) {
+    alert(`Error: ${err.message}`);
+  }
+}
+
+async function deleteStaffFromControlPanel(staffId, name = 'Staff Member', role = 'employee') {
+  const isEmp = role === 'employee';
+  const roleName = isEmp ? 'employee' : role === 'subadmin' ? 'sub-administrator' : 'staff member';
+  if (!confirm(`⚠️ Warning: Are you sure you want to permanently delete ${roleName} "${name}"? This action cannot be undone.`)) return;
+
+  try {
+    const res = await apiFetch(`/api/admin/employees/${staffId}`, {
+      method: 'DELETE',
+    });
+
+    if (typeof showToastNotification === 'function') {
+      showToastNotification({
+        title: 'Staff Member Deleted',
+        message: res.message || `${roleName.charAt(0).toUpperCase() + roleName.slice(1)} "${name}" deleted permanently.`,
+        type: 'success',
+        duration: 3500,
+      });
+    } else {
+      alert(res.message || `${roleName.charAt(0).toUpperCase() + roleName.slice(1)} "${name}" deleted permanently.`);
+    }
+
+    loadAdminControlPanel(true);
+    if (typeof fetchAdminSubAdmins === 'function') {
+      fetchAdminSubAdmins(true);
+    }
+  } catch (err) {
+    alert(`Error: ${err.message}`);
+  }
+}
+
 // Window exports
 window.loadAdminControlPanel = loadAdminControlPanel;
 window.renderAdminControlPanelView = renderAdminControlPanelView;
@@ -1331,4 +1757,11 @@ window.deleteControlPanelRole = deleteControlPanelRole;
 window.handleRoleDisplayNameInput = handleRoleDisplayNameInput;
 window.handleRoleBaseChange = handleRoleBaseChange;
 window.setAllRolePermissions = setAllRolePermissions;
+window.renderSupportTabHtml = renderSupportTabHtml;
+window.handleSupportPreviewInput = handleSupportPreviewInput;
+window.resetControlPanelSupportContactDefaults = resetControlPanelSupportContactDefaults;
+window.saveControlPanelSupportContact = saveControlPanelSupportContact;
+window.toggleStaffStatusFromControlPanel = toggleStaffStatusFromControlPanel;
+window.deleteStaffFromControlPanel = deleteStaffFromControlPanel;
 window.CONTROL_PANEL_PERMS_MAP = CONTROL_PANEL_PERMS_MAP;
+

@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { promisify } from 'node:util';
-import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomInt, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import Employee, { IEmployee, USER_ROLES, UserRole } from '../../model/Employee.js';
 import Restaurant, { IRestaurant } from '../../model/Restaurant.js';
@@ -23,6 +23,7 @@ import {
 	revokeAllUserSessions,
 	getUserActiveSessions,
 } from '../../services/sessionService.js';
+import mailService from '../../services/mailService.js';
 
 const getPublicBaseUrl = () => process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 5050}`;
 
@@ -663,11 +664,11 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
 			const emailClean = rawValue.toLowerCase();
 			const escaped = emailClean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 			const emailQuery = { email: { $regex: new RegExp(`^${escaped}$`, 'i') } };
-			user = await Customer.findOne(emailQuery);
-			if (!user) user = await Rider.findOne(emailQuery);
-			if (!user) user = await Restaurant.findOne(emailQuery);
-			if (!user) user = await Shop.findOne(emailQuery);
-			if (!user) user = await Employee.findOne(emailQuery);
+			user = await Customer.findOne(emailQuery).select('+resetPasswordExpiresAt');
+			if (!user) user = await Rider.findOne(emailQuery).select('+resetPasswordExpiresAt');
+			if (!user) user = await Restaurant.findOne(emailQuery).select('+resetPasswordExpiresAt');
+			if (!user) user = await Shop.findOne(emailQuery).select('+resetPasswordExpiresAt');
+			if (!user) user = await Employee.findOne(emailQuery).select('+resetPasswordExpiresAt');
 		} else {
 			const digits = rawValue.replace(/\D/g, '');
 			const phoneVariants = new Set<string>();
@@ -690,29 +691,106 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
 					{ email: { $regex: new RegExp(`^${rawValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } },
 				],
 			};
-			user = await Customer.findOne(phoneQuery);
-			if (!user) user = await Rider.findOne(phoneQuery);
-			if (!user) user = await Restaurant.findOne(phoneQuery);
-			if (!user) user = await Shop.findOne(phoneQuery);
-			if (!user) user = await Employee.findOne(phoneQuery);
+			user = await Customer.findOne(phoneQuery).select('+resetPasswordExpiresAt');
+			if (!user) user = await Rider.findOne(phoneQuery).select('+resetPasswordExpiresAt');
+			if (!user) user = await Restaurant.findOne(phoneQuery).select('+resetPasswordExpiresAt');
+			if (!user) user = await Shop.findOne(phoneQuery).select('+resetPasswordExpiresAt');
+			if (!user) user = await Employee.findOne(phoneQuery).select('+resetPasswordExpiresAt');
 		}
 
 		if (!user) {
 			return res.status(404).json({ message: 'No account found for that email or mobile number' });
 		}
 
-		const resetToken = randomBytes(32).toString('hex');
-		user.resetPasswordTokenHash = hashResetToken(resetToken);
-		user.resetPasswordExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
+		const isResend = Boolean(req.body?.isResend);
+		const now = Date.now();
+		const hasActiveCode =
+			user.resetPasswordExpiresAt &&
+			new Date(user.resetPasswordExpiresAt).getTime() > now;
+
+		// Do not automatically send the verification code a 2nd time until user explicitly asks to resend it
+		if (hasActiveCode && !isResend) {
+			const recipientEmail = user.email || (rawValue.includes('@') ? rawValue : undefined);
+			return res.status(200).json({
+				message: recipientEmail
+					? `A 6-digit verification code has already been sent to ${recipientEmail}. It is valid for 10 minutes. Click 'Resend code?' if you need a new code.`
+					: 'A 6-digit verification code is already active. Please enter it or click Resend code.',
+				emailSent: false,
+				expiresInMinutes: 10,
+			});
+		}
+
+		// Generate cryptographically secure 6-digit random number
+		const sixDigitCode = randomInt(100000, 1000000).toString();
+		user.resetPasswordTokenHash = hashResetToken(sixDigitCode);
+		// Validity: 10 minutes
+		user.resetPasswordExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
 		await user.save();
 
+		// Construct secure frontend reset URL
+		const frontendOrigin = req.headers.origin || req.headers.referer || process.env.FRONTEND_URL || 'http://127.0.0.1:3000';
+		const cleanFrontendUrl = String(frontendOrigin).replace(/\/$/, '');
+		const resetUrl = `${cleanFrontendUrl}/index.html?action=reset-password&token=${sixDigitCode}`;
+
+		// Send secure password reset email with 6-digit code if customer email exists
+		const recipientEmail = user.email || (rawValue.includes('@') ? rawValue : undefined);
+		if (recipientEmail) {
+			mailService.sendPasswordResetMail({
+				customerEmail: recipientEmail,
+				customerName: user.name || 'Tomato User',
+				resetToken: sixDigitCode,
+				resetUrl,
+				expiresInMinutes: 10,
+			}).catch((err) => console.error('[Mail Service] Password reset mail error:', err));
+		}
+
 		return res.status(200).json({
-			message: 'Reset token created. In production, deliver this token by email or SMS.',
-			resetToken,
+			message: recipientEmail
+				? `A 6-digit verification code has been sent to ${recipientEmail}. It is valid for 10 minutes.`
+				: 'A 6-digit verification code has been generated. It is valid for 10 minutes.',
+			emailSent: Boolean(recipientEmail),
+			expiresInMinutes: 10,
 		});
 	} catch (error) {
 		console.error('Password reset request failed:', error);
 		return res.status(500).json({ message: 'Unable to start password reset' });
+	}
+};
+
+export const verifyResetCode = async (req: Request, res: Response) => {
+	const token = typeof req.body?.resetToken === 'string' ? req.body.resetToken.trim() : '';
+
+	if (!token || token.length !== 6 || !/^\d{6}$/.test(token)) {
+		return res.status(400).json({ valid: false, message: 'A 6-digit verification code is required.' });
+	}
+
+	try {
+		const hashed = hashResetToken(token);
+		const filter = {
+			resetPasswordTokenHash: hashed,
+			resetPasswordExpiresAt: { $gt: new Date() },
+		};
+
+		let user: any = await Customer.findOne(filter).select('_id name email');
+		if (!user) user = await Rider.findOne(filter).select('_id name email');
+		if (!user) user = await Restaurant.findOne(filter).select('_id name email');
+		if (!user) user = await Shop.findOne(filter).select('_id name email');
+		if (!user) user = await Employee.findOne(filter).select('_id name email');
+
+		if (!user) {
+			return res.status(400).json({
+				valid: false,
+				message: 'Invalid or expired 6-digit verification code. Please request a new code.',
+			});
+		}
+
+		return res.status(200).json({
+			valid: true,
+			message: 'Verification code confirmed.',
+		});
+	} catch (error) {
+		console.error('Password reset code verification failed:', error);
+		return res.status(500).json({ valid: false, message: 'Unable to verify verification code.' });
 	}
 };
 
@@ -721,7 +799,7 @@ export const resetPassword = async (req: Request, res: Response) => {
 	const password = typeof req.body?.password === 'string' ? req.body.password : '';
 
 	if (!token || !password) {
-		return res.status(400).json({ message: 'Reset token and new password are required' });
+		return res.status(400).json({ message: '6-digit verification code and new password are required' });
 	}
 
 	if (password.length < 8) {
@@ -763,7 +841,7 @@ export const resetPassword = async (req: Request, res: Response) => {
 		}
 
 		if (!user) {
-			return res.status(400).json({ message: 'Reset token is invalid or expired' });
+			return res.status(400).json({ message: 'Invalid or expired 6-digit verification code. Please request a new code.' });
 		}
 
 		user.passwordHash = await hashPassword(password);
@@ -773,6 +851,15 @@ export const resetPassword = async (req: Request, res: Response) => {
 
 		// Revoke all existing sessions across devices on password reset
 		await revokeAllUserSessions(String(user._id), 'password_reset').catch(() => {});
+
+		// Send password changed security alert email
+		if (user.email) {
+			mailService.sendPasswordChangedMail({
+				customerEmail: user.email,
+				customerName: user.name || 'Tomato User',
+				changedAt: new Date(),
+			}).catch((err) => console.error('[Mail Service] Password changed alert error:', err));
+		}
 
 		return res.status(200).json({ message: 'Password reset successful' });
 	} catch (error) {

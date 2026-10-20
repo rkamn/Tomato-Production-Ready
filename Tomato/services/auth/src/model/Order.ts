@@ -57,6 +57,7 @@ export interface IOrder extends Document {
   customerId: mongoose.Types.ObjectId;
   customerName?: string;
   customerPhone?: string;
+  customerEmail?: string;
   restaurantId?: mongoose.Types.ObjectId;
   restaurantCode?: string;
   digipin?: string;
@@ -163,6 +164,11 @@ const orderSchema: Schema<IOrder> = new Schema(
     customerPhone: {
       type: String,
       default: '',
+    },
+    customerEmail: {
+      type: String,
+      default: '',
+      trim: true,
     },
     restaurantId: {
       type: Schema.Types.ObjectId,

@@ -6,6 +6,7 @@ import {
   loginUser,
   registerUser,
   requestPasswordReset,
+  verifyResetCode,
   resetPassword,
   updateProfile,
   userResponse,
@@ -328,6 +329,7 @@ const createAuthRouter = (upload: multer.Multer) => {
   });
   router.put('/profile', authenticate, upload.single('photo'), updateProfile);
   router.post('/password-reset/request', requestPasswordReset);
+  router.post('/password-reset/verify-code', verifyResetCode);
   router.post('/password-reset/confirm', resetPassword);
 
   // Active Session Management & Server-Side Revocation

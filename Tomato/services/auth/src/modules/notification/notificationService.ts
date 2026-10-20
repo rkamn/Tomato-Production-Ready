@@ -2,8 +2,11 @@ import { Response } from 'express';
 import mongoose from 'mongoose';
 import Notification, { INotification } from '../../model/Notification.js';
 import Rider from '../../model/Rider.js';
+import Customer from '../../model/Customer.js';
+import Employee from '../../model/Employee.js';
 import { IOrder } from '../../model/Order.js';
 import arattaiNotificationService from './arattaiService.js';
+import mailService from '../../services/mailService.js';
 import {
   resolveRiderPincode,
   resolveAddressPincode,
@@ -524,6 +527,55 @@ class NotificationService {
             amount: order.totalAmount,
           })
           .catch((err) => console.error('[Arattai Order Delivered Alert Error]:', err));
+      }
+
+      // Trigger order delivered confirmation email to the customer
+      try {
+        let customerEmail = (order as any).customerEmail;
+        let customerName = order.customerName;
+        if (order.customerId) {
+          const cust = await Customer.findById(order.customerId).lean();
+          if (cust) {
+            customerEmail = cust.email || customerEmail;
+            if (cust.name) customerName = cust.name;
+          } else {
+            const emp = await Employee.findById(order.customerId).lean();
+            if (emp) {
+              customerEmail = emp.email || customerEmail;
+              if (emp.name) customerName = emp.name;
+            }
+          }
+        }
+
+        if (customerEmail) {
+          mailService
+            .sendOrderDeliveredMail({
+              customerEmail,
+              customerName: customerName || 'Valued Customer',
+              orderNumber: order.orderNumber,
+              billNumber: order.billNumber,
+              storeName: order.restaurantName || 'Tomato Partner Store',
+              storeAddress: order.restaurantAddress,
+              isShopOrder: order.orderNumber?.startsWith('SHOP'),
+              riderName: order.riderName,
+              riderPhone: order.riderPhone,
+              items: (order.items || []).map((it) => ({
+                name: it.name,
+                quantity: it.quantity,
+                price: it.price,
+                totalPrice: it.totalPrice || it.price * it.quantity,
+              })),
+              totalAmount: order.totalAmount,
+              paymentMethod: order.paymentMethod,
+              deliveryAddress: order.deliveryAddress,
+              deliveredAt: new Date(),
+            })
+            .catch((mailErr) =>
+              console.error('[Mail Service] Order delivered email error:', mailErr),
+            );
+        }
+      } catch (custErr) {
+        console.error('[Mail Service] Error resolving customer for delivered email:', custErr);
       }
     }
 

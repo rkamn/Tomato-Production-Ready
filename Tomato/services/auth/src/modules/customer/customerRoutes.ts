@@ -11,6 +11,7 @@ import Restaurant from '../../model/Restaurant.js';
 import Shop from '../../model/Shop.js';
 import ShopOrder from '../../model/ShopOrder.js';
 import Customer from '../../model/Customer.js';
+import Employee from '../../model/Employee.js';
 import Rider from '../../model/Rider.js';
 import Review from '../../model/Review.js';
 import Coupon, {
@@ -31,6 +32,7 @@ import {
   identifyCardBrand,
   validateCardExpiration,
 } from '../../services/paymentService.js';
+import { mailService } from '../../services/mailService.js';
 import {
   notificationService,
   arattaiNotificationService,
@@ -1461,7 +1463,9 @@ const createCustomerRouter = () => {
         });
       }
 
-      const customer = await Customer.findById(user.userId).lean();
+      const customer =
+        (await Customer.findById(user.userId).lean()) ||
+        (await Employee.findById(user.userId).lean());
       const customerName = customer?.name || (user as any).name || 'Customer';
 
       // Check if this customer already reviewed this product (by productId or productName)
@@ -1829,7 +1833,9 @@ const createCustomerRouter = () => {
           });
         }
 
-        const customer = await Customer.findById(user.userId).lean();
+        const customer =
+        (await Customer.findById(user.userId).lean()) ||
+        (await Employee.findById(user.userId).lean());
         const customerName = customer?.name || (user as any).name || 'Customer';
 
         const existingReview = await Review.findOne({
@@ -2397,7 +2403,9 @@ const createCustomerRouter = () => {
       if (!user?.userId)
         return res.status(401).json({ message: 'Authentication required' });
 
-      const customer = await Customer.findById(user.userId).lean();
+      const customer =
+        (await Customer.findById(user.userId).lean()) ||
+        (await Employee.findById(user.userId).lean());
       const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
       if (!rawItems.length)
         return res.status(400).json({ message: 'Order items are required' });
@@ -2904,6 +2912,11 @@ const createCustomerRouter = () => {
         customerId: new mongoose.Types.ObjectId(user.userId),
         customerName: customer?.name || 'Customer',
         customerPhone: customer?.phone || '',
+        customerEmail:
+          (typeof req.body?.email === 'string' && req.body.email.trim()) ||
+          customer?.email ||
+          user.email ||
+          '',
         restaurantCode: storeCode,
         digipin,
         restaurantName: storeName,
@@ -3052,6 +3065,45 @@ const createCustomerRouter = () => {
           })
           .catch((err) =>
             console.error('[Arattai Order Notification Error]:', err),
+          );
+      }
+
+      // Dispatch order confirmation email dynamically to the customer mail ID
+      const customerEmail =
+        (typeof req.body?.email === 'string' && req.body.email.trim()) ||
+        (typeof req.body?.deliveryAddress?.email === 'string' && req.body.deliveryAddress.email.trim()) ||
+        customer?.email ||
+        user.email;
+
+      if (customerEmail) {
+        mailService
+          .sendOrderPlacedMail({
+            customerEmail,
+            customerName: customer?.name || user.name || 'Valued Customer',
+            orderNumber,
+            billNumber,
+            storeName,
+            storeAddress,
+            isShopOrder,
+            items: sanitizedItems.map((it: SanitizedOrderItem) => ({
+              name: it.name,
+              quantity: it.quantity,
+              price: it.price,
+              totalPrice: it.totalPrice,
+            })),
+            subtotal,
+            tax,
+            deliveryFee,
+            discountAmount,
+            couponCodes,
+            totalAmount: finalTotalAmount,
+            paymentMethod,
+            paymentStatus,
+            deliveryAddress,
+            orderDate: new Date(),
+          })
+          .catch((mailErr) =>
+            console.error('[Mail Service] Order confirmation email error:', mailErr),
           );
       }
 

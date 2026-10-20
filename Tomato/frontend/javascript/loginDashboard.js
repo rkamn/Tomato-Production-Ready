@@ -1365,6 +1365,8 @@ function populateSettingsUserIdBadge() {
 // ADMIN SERVICEABLE DELIVERY AREA VALIDATION & POPUP ALERT SYSTEM
 // =========================================================================
 let cachedGlobalServiceablePincodes = null;
+let cachedGlobalAdminZones = [];
+window.cachedGlobalAdminZones = cachedGlobalAdminZones;
 
 async function fetchGlobalServiceablePincodes(forceRefresh = false) {
   if (cachedGlobalServiceablePincodes && !forceRefresh) {
@@ -1377,20 +1379,25 @@ async function fetchGlobalServiceablePincodes(forceRefresh = false) {
     if (res && Array.isArray(res.pincodes)) {
       cachedGlobalServiceablePincodes = res.pincodes;
     }
+    if (res && Array.isArray(res.adminZones)) {
+      cachedGlobalAdminZones = res.adminZones;
+      window.cachedGlobalAdminZones = res.adminZones;
+    }
   } catch (_) {}
   return cachedGlobalServiceablePincodes || [];
 }
 window.fetchGlobalServiceablePincodes = fetchGlobalServiceablePincodes;
 
-function showServiceableAreaPopup(currentPincode, serviceableList = [], targetRole = role) {
+function showServiceableAreaPopup(currentPincode, serviceableList = [], targetRole = role, customMessage = null) {
   const modal = document.getElementById('serviceable-area-alert-modal');
+  const alertText = customMessage || 'your oder is out of deliverable range, please update your address';
   if (!modal) {
-    alert('your area is not in servicable range for now, update your address and pincode for orders.');
+    alert(alertText);
     return;
   }
   const msgEl = document.getElementById('serviceable-area-alert-message');
   if (msgEl) {
-    msgEl.textContent = 'your area is not in servicable range for now, update your address and pincode for orders.';
+    msgEl.textContent = alertText;
   }
   const detailsEl = document.getElementById('serviceable-area-alert-details');
   if (detailsEl) {
@@ -1405,8 +1412,32 @@ function showServiceableAreaPopup(currentPincode, serviceableList = [], targetRo
 }
 window.showServiceableAreaPopup = showServiceableAreaPopup;
 
+function showDeliverableRangeAlert(customMessage, currentPincode, distanceKm) {
+  const alertText = customMessage || 'your oder is out of deliverable range, please update your address';
+  const modal = document.getElementById('serviceable-area-alert-modal');
+  if (!modal) {
+    alert(alertText);
+    return;
+  }
+  const msgEl = document.getElementById('serviceable-area-alert-message');
+  if (msgEl) {
+    msgEl.textContent = alertText;
+  }
+  const detailsEl = document.getElementById('serviceable-area-alert-details');
+  if (detailsEl) {
+    const pinStr = currentPincode ? `Your Delivery Area Pincode: <strong>${escapeHtml(currentPincode)}</strong>` : '';
+    const distStr = typeof distanceKm === 'number' ? `Distance to Store: <strong>${distanceKm} km</strong> (Deliverable Radius: 15.0 km)` : '';
+    const infoParts = [pinStr, distStr].filter(Boolean).join(' &nbsp;•&nbsp; ');
+    detailsEl.innerHTML = `${infoParts ? `<div>${infoParts}</div>` : ''}<span style="margin-top:0.4rem; display:inline-block; color:#dc2626; font-weight:600;">The selected delivery address is outside the deliverable range of the chosen store. Please select another address or update your address.</span>`;
+  }
+  openModal('serviceable-area-alert-modal');
+}
+window.showDeliverableRangeAlert = showDeliverableRangeAlert;
+
 function handleServiceableAreaRedirect() {
   closeModal('serviceable-area-alert-modal');
+  closeModal('restaurant-too-far-modal');
+  closeModal('payment-gateway-modal');
   if (role === 'customer') {
     if (typeof switchView === 'function') {
       switchView('customer-address');
@@ -1458,7 +1489,7 @@ function showRestaurantTooFarPopup(storeName = 'Restaurant', distanceKm = null) 
 window.showRestaurantTooFarPopup = showRestaurantTooFarPopup;
 
 async function verifyUserOperatingServiceableArea(showAlert = true) {
-  const checkRoles = ['customer', 'restaurant', 'shop', 'deliveryPartner'];
+  const checkRoles = ['restaurant', 'shop', 'deliveryPartner'];
   if (!checkRoles.includes(role)) return true;
 
   const activePincodes = await fetchGlobalServiceablePincodes();
@@ -1467,14 +1498,7 @@ async function verifyUserOperatingServiceableArea(showAlert = true) {
   }
 
   let userPincode = '';
-  if (role === 'customer') {
-    if (typeof customerAddresses !== 'undefined' && Array.isArray(customerAddresses) && customerAddresses.length > 0) {
-      const def = customerAddresses.find((a) => a.isDefault) || customerAddresses[0];
-      userPincode = typeof resolveFrontendAddressPincode === 'function' ? resolveFrontendAddressPincode(def) : (def?.postalCode || def?.pincode || '');
-    } else {
-      userPincode = user.pincode || user.postalCode || '';
-    }
-  } else if (role === 'restaurant' || role === 'shop') {
+  if (role === 'restaurant' || role === 'shop') {
     userPincode = (typeof resolveFrontendPartnerPincode === 'function' ? resolveFrontendPartnerPincode(user) : '') || user.pincode || user.postalCode || '';
   } else if (role === 'deliveryPartner') {
     userPincode = user.pincode || user.postalCode || user.assignedLocation?.postalCode || '';
@@ -1721,6 +1745,18 @@ function executeSignOut() {
   closeModal('sign-out-confirm-modal');
   if (notificationEventSource) {
     try { notificationEventSource.close(); } catch (_) {}
+  }
+  // Immediately inform backend to revoke active session from DB and cache
+  if (token) {
+    try {
+      fetch(`${API_ROOT}/api/auth/logout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      }).catch(() => {});
+    } catch (_) {}
   }
   localStorage.removeItem('tomatoToken');
   localStorage.removeItem('tomatoUser');

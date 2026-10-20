@@ -25,7 +25,16 @@ import {
   AuthenticatedRequest,
   requireRole,
 } from '../../middleware/authenticate.js';
-import { notificationService, arattaiNotificationService } from '../notification/index.js';
+import { getTomatoOfficialBankDetails } from '../../config/bankConfig.js';
+import {
+  validateLuhnChecksum,
+  identifyCardBrand,
+  validateCardExpiration,
+} from '../../services/paymentService.js';
+import {
+  notificationService,
+  arattaiNotificationService,
+} from '../notification/index.js';
 import { calculateDistanceKm } from '../notification/notificationService.js';
 import {
   formatBill,
@@ -38,6 +47,8 @@ import {
   resolveAddressPincode,
   resolveRiderPincode,
   getServiceablePincodes,
+  getAdminPincodeMap,
+  matchAdminForPincodes,
 } from '../../utils/bankHelpers.js';
 import {
   MAX_COUPONS_PER_ORDER,
@@ -52,11 +63,16 @@ const createCustomerRouter = () => {
 
   router.get('/serviceable-pincodes', async (_req: Request, res: Response) => {
     try {
-      const pincodes = await getServiceablePincodes();
-      return res.json({ pincodes });
+      const [pincodes, adminZones] = await Promise.all([
+        getServiceablePincodes(),
+        getAdminPincodeMap(),
+      ]);
+      return res.json({ pincodes, adminZones });
     } catch (error) {
       console.error('Customer serviceable pincodes fetch failed:', error);
-      return res.status(500).json({ message: 'Unable to fetch serviceable pincodes' });
+      return res
+        .status(500)
+        .json({ message: 'Unable to fetch serviceable pincodes' });
     }
   });
 
@@ -97,21 +113,28 @@ const createCustomerRouter = () => {
       const visibleCoupons = activeCoupons
         .filter((c) => {
           if (c.validUntil && new Date(c.validUntil) < now) return false;
-          if (c.totalUsageLimit > 0 && c.usedCount >= c.totalUsageLimit) return false;
+          if (c.totalUsageLimit > 0 && c.usedCount >= c.totalUsageLimit)
+            return false;
           if (
             c.couponType === 'specific_user' ||
             c.couponType === 'instant' ||
-            (c.couponType === 'settlement' && String(c.targetUserIdentifier || '').trim())
+            (c.couponType === 'settlement' &&
+              String(c.targetUserIdentifier || '').trim())
           ) {
-            return doesUserMatchTargetIdentifier(c.targetUserIdentifier, userContext);
+            return doesUserMatchTargetIdentifier(
+              c.targetUserIdentifier,
+              userContext,
+            );
           }
 
           // Restaurant/Shop specific coupon filtering: only show if for this specific store
           if (c.sponsorType === 'restaurant') {
-            if (storeId && c.partnerId && String(c.partnerId) !== storeId) return false;
+            if (storeId && c.partnerId && String(c.partnerId) !== storeId)
+              return false;
           }
           if (c.sponsorType === 'shop') {
-            if (storeId && c.partnerId && String(c.partnerId) !== storeId) return false;
+            if (storeId && c.partnerId && String(c.partnerId) !== storeId)
+              return false;
           }
           return true;
         })
@@ -120,8 +143,11 @@ const createCustomerRouter = () => {
             (u) => String(u.userId) === String(user.userId),
           ).length;
           const remainingForUser =
-            c.usageLimitPerUser > 0 ? Math.max(0, c.usageLimitPerUser - userUses) : 999;
-          const isNewUserEligible = c.couponType !== 'new_user' || previousOrdersCount === 0;
+            c.usageLimitPerUser > 0
+              ? Math.max(0, c.usageLimitPerUser - userUses)
+              : 999;
+          const isNewUserEligible =
+            c.couponType !== 'new_user' || previousOrdersCount === 0;
           const sType = (c.sponsorType as SponsorType) || 'tomato';
           return {
             id: String(c._id),
@@ -149,8 +175,8 @@ const createCustomerRouter = () => {
             ineligibleReason: !isNewUserEligible
               ? 'Valid only for new users on their 1st order'
               : remainingForUser <= 0
-              ? 'Already redeemed maximum allowed times'
-              : '',
+                ? 'Already redeemed maximum allowed times'
+                : '',
             validUntil: c.validUntil,
           };
         });
@@ -162,7 +188,9 @@ const createCustomerRouter = () => {
       });
     } catch (error) {
       console.error('Customer coupons fetch failed:', error);
-      return res.status(500).json({ message: 'Unable to fetch available coupons' });
+      return res
+        .status(500)
+        .json({ message: 'Unable to fetch available coupons' });
     }
   });
 
@@ -177,8 +205,8 @@ const createCustomerRouter = () => {
       const rawCodes = Array.isArray(req.body?.couponCodes)
         ? req.body.couponCodes
         : req.body?.couponCode
-        ? [req.body.couponCode]
-        : [];
+          ? [req.body.couponCode]
+          : [];
       const items = Array.isArray(req.body?.items) ? req.body.items : [];
       const isShopOrder = Boolean(req.body?.isShopOrder);
       const storeId = String(
@@ -247,11 +275,52 @@ const createCustomerRouter = () => {
     }
   });
 
+  // Helper: Resolve coordinates from DigiPIN (e.g. DGP-1297-7759 -> lat: 12.97, lng: 77.59)
+  function resolveCoordinatesFromDigipin(
+    digipin?: string,
+  ): { lat: number; lng: number } | null {
+    if (!digipin || typeof digipin !== 'string') return null;
+    const clean = digipin.trim().toUpperCase();
+    const dgpMatch = clean.match(/DGP-(\d{3,4})-(\d{3,4})/i);
+    if (dgpMatch && dgpMatch[1] && dgpMatch[2]) {
+      const latVal = parseInt(dgpMatch[1], 10) / 100;
+      const lngVal = parseInt(dgpMatch[2], 10) / 100;
+      if (!isNaN(latVal) && !isNaN(lngVal) && latVal > 0 && lngVal > 0) {
+        return { lat: latVal, lng: lngVal };
+      }
+    }
+    const pinMatch = clean.match(/\b\d{6}\b/);
+    if (pinMatch) {
+      return resolveCoordinatesFromPincode(pinMatch[0]);
+    }
+    return null;
+  }
+
+  // Helper: Resolve coordinates from Indian Pincode
+  function resolveCoordinatesFromPincode(
+    pincode?: string,
+  ): { lat: number; lng: number } | null {
+    if (!pincode) return null;
+    const pin = String(pincode).trim();
+    if (pin === '411057') return { lat: 18.5707, lng: 73.6908 };
+    if (pin === '845401') return { lat: 26.6471, lng: 84.9085 };
+    if (pin === '560001') return { lat: 12.9716, lng: 77.5946 };
+    return null;
+  }
+
   // Helper: Extract coordinates from store document
-  function getStoreCoordinates(store: any): { lat: number; lng: number } | null {
+  function getStoreCoordinates(
+    store: any,
+  ): { lat: number; lng: number } | null {
     if (!store) return null;
-    const loc = store.restaurantLocation || store.shopLocation || store.location;
-    if (loc && typeof loc.lat === 'number' && typeof loc.lng === 'number' && (loc.lat !== 0 || loc.lng !== 0)) {
+    const loc =
+      store.restaurantLocation || store.shopLocation || store.location;
+    if (
+      loc &&
+      typeof loc.lat === 'number' &&
+      typeof loc.lng === 'number' &&
+      (loc.lat !== 0 || loc.lng !== 0)
+    ) {
       return { lat: loc.lat, lng: loc.lng };
     }
     if (loc && Array.isArray(loc.coordinates) && loc.coordinates.length >= 2) {
@@ -261,30 +330,33 @@ const createCustomerRouter = () => {
         return { lat: cLat, lng: cLng };
       }
     }
+    if (store.digipin) {
+      const dgpCoords = resolveCoordinatesFromDigipin(store.digipin);
+      if (dgpCoords) return dgpCoords;
+    }
     const pin = resolvePartnerPincode(store);
-    if (pin === '411057') return { lat: 18.5707, lng: 73.6908 };
-    if (pin === '845401') return { lat: 26.6471, lng: 84.9085 };
-    if (pin === '560001') return { lat: 12.9716, lng: 77.5946 };
-    return null;
+    return resolveCoordinatesFromPincode(pin);
   }
 
   interface CustomerLocationContext {
     customerPincode: string;
-    matchedAdminPincode: string | null;
-    serviceablePincodes: string[];
+    customerDigipin: string;
     lat: number | null;
     lng: number | null;
   }
 
-  // Helper: Resolve customer's operating pincode, coordinates, and matched Admin Serviceable Zone
+  // Helper: Resolve customer's operating pincode, digipin, and coordinates
   async function resolveCustomerLocationContext(
     userId?: string,
     explicitPincode?: string,
     explicitLat?: any,
     explicitLng?: any,
+    explicitDigipin?: string,
   ): Promise<CustomerLocationContext> {
-    const serviceablePincodes = await getServiceablePincodes();
     let customerPincode = String(explicitPincode || '').trim();
+    let customerDigipin = String(explicitDigipin || '')
+      .trim()
+      .toUpperCase();
     let lat: number | null = null;
     let lng: number | null = null;
 
@@ -304,102 +376,173 @@ const createCustomerRouter = () => {
       }
     }
 
+    if (customerDigipin && (lat === null || lng === null)) {
+      const dgpCoords = resolveCoordinatesFromDigipin(customerDigipin);
+      if (dgpCoords) {
+        lat = dgpCoords.lat;
+        lng = dgpCoords.lng;
+      }
+    }
+
     let defaultAddr: any = null;
     if (userId && mongoose.isValidObjectId(userId)) {
       defaultAddr =
         (await Address.findOne({ userId, isDefault: true }).lean()) ||
         (await Address.findOne({ userId }).lean());
 
-      if (!customerPincode && defaultAddr) {
-        customerPincode = resolveAddressPincode(defaultAddr);
-      }
-      if (!customerPincode) {
-        const custDoc = await Customer.findById(userId).lean();
-        customerPincode = (custDoc as any)?.pincode || (custDoc as any)?.postalCode || '';
+      if (defaultAddr) {
+        if (!customerPincode) {
+          customerPincode = resolveAddressPincode(defaultAddr);
+        }
+        if (!customerDigipin && defaultAddr.digipin) {
+          customerDigipin = String(defaultAddr.digipin).trim().toUpperCase();
+        }
+        if ((lat === null || lng === null) && customerDigipin) {
+          const dgpCoords = resolveCoordinatesFromDigipin(customerDigipin);
+          if (dgpCoords) {
+            lat = dgpCoords.lat;
+            lng = dgpCoords.lng;
+          }
+        }
+        if ((lat === null || lng === null) && customerPincode) {
+          const pinCoords = resolveCoordinatesFromPincode(customerPincode);
+          if (pinCoords) {
+            lat = pinCoords.lat;
+            lng = pinCoords.lng;
+          }
+        }
+        if (
+          (lat === null || lng === null) &&
+          defaultAddr?.location?.coordinates
+        ) {
+          const coords = defaultAddr.location.coordinates;
+          if (Array.isArray(coords) && coords.length >= 2) {
+            const cLng = Number(coords[0]);
+            const cLat = Number(coords[1]);
+            if (!isNaN(cLat) && !isNaN(cLng) && (cLat !== 0 || cLng !== 0)) {
+              lat = cLat;
+              lng = cLng;
+            }
+          }
+        }
       }
 
-      if ((lat === null || lng === null) && defaultAddr?.location?.coordinates) {
-        const coords = defaultAddr.location.coordinates;
-        if (Array.isArray(coords) && coords.length >= 2) {
-          const cLng = Number(coords[0]);
-          const cLat = Number(coords[1]);
-          if (!isNaN(cLat) && !isNaN(cLng) && (cLat !== 0 || cLng !== 0)) {
-            lat = cLat;
-            lng = cLng;
+      if (!customerPincode) {
+        const custDoc = await Customer.findById(userId).lean();
+        customerPincode =
+          (custDoc as any)?.pincode || (custDoc as any)?.postalCode || '';
+        if (!customerDigipin && (custDoc as any)?.digipin) {
+          customerDigipin = String((custDoc as any).digipin)
+            .trim()
+            .toUpperCase();
+        }
+        if ((lat === null || lng === null) && (custDoc as any)?.digipin) {
+          const dgpCoords = resolveCoordinatesFromDigipin(
+            (custDoc as any).digipin,
+          );
+          if (dgpCoords) {
+            lat = dgpCoords.lat;
+            lng = dgpCoords.lng;
           }
         }
       }
     }
 
-    // Fallback lat/lng from pincode if coordinates couldn't be resolved
+    // Fallback lat/lng from customer pincode
     if (lat === null || lng === null) {
-      if (customerPincode === '411057') {
-        lat = 18.5707;
-        lng = 73.6908;
-      } else if (customerPincode === '845401') {
-        lat = 26.6471;
-        lng = 84.9085;
-      } else if (customerPincode === '560001') {
-        lat = 12.9716;
-        lng = 77.5946;
+      if (customerPincode) {
+        const pinCoords = resolveCoordinatesFromPincode(customerPincode);
+        if (pinCoords) {
+          lat = pinCoords.lat;
+          lng = pinCoords.lng;
+        }
       }
     }
 
-    const matchedAdminPincode =
-      customerPincode && serviceablePincodes.includes(customerPincode)
-        ? customerPincode
-        : null;
+    // Default coordinate fallback
+    if (lat === null || lng === null) {
+      lat = 12.9716;
+      lng = 77.5946;
+    }
 
-    return { customerPincode, matchedAdminPincode, serviceablePincodes, lat, lng };
+    return { customerPincode, customerDigipin, lat, lng };
   }
 
-  // 1. View all restaurants (filtered to <= 15 km of customer's current location, sorted nearest first)
+  // 1. View all restaurants (filtered to <= 15 km of customer's location/digipin, sorted nearest first)
   router.get('/restaurants', async (req: Request, res: Response) => {
     try {
       const user = (req as AuthenticatedRequest).user;
-      const { customerPincode, matchedAdminPincode, serviceablePincodes, lat: custLat, lng: custLng } =
-        await resolveCustomerLocationContext(
-          user?.userId,
-          (req.query.pincode as string) || (req.query.postalCode as string),
-          req.query.lat ?? req.query.latitude,
-          req.query.lng ?? req.query.longitude,
-        );
+      const {
+        customerPincode,
+        customerDigipin,
+        lat: custLat,
+        lng: custLng,
+      } = await resolveCustomerLocationContext(
+        user?.userId,
+        (req.query.pincode as string) || (req.query.postalCode as string),
+        req.query.lat ?? req.query.latitude,
+        req.query.lng ?? req.query.longitude,
+        req.query.digipin as string,
+      );
 
       const [restaurants, platformGsnNumber] = await Promise.all([
         Restaurant.find({
           isBlocked: { $ne: true },
         })
           .select(
-            'name restaurantId digipin pincode gsnNumber email phone image restaurantAddress restaurantLocation cuisine isApproved isOpen isOnline',
+            'name restaurantId digipin pincode gsnNumber email phone image restaurantAddress restaurantLocation cuisine isApproved isOpen isOnline bankDetails',
           )
           .lean(),
         resolveAdminGsnNumber(),
       ]);
 
-      const hasCustomerCoordinates = custLat !== null && custLng !== null;
-
-      // Calculate distance for all restaurants; use the matched serviceable pincode when
-      // customer coordinates are unavailable.
+      // Calculate distance for all restaurants; filter by max 15.0 km
       const restaurantsWithDistance = restaurants.map((r) => {
         const storeCoords = getStoreCoordinates(r);
         let distanceKm = 9999;
         if (custLat !== null && custLng !== null && storeCoords) {
-          distanceKm = Number(calculateDistanceKm(custLat, custLng, storeCoords.lat, storeCoords.lng).toFixed(2));
+          distanceKm = Number(
+            calculateDistanceKm(
+              custLat,
+              custLng,
+              storeCoords.lat,
+              storeCoords.lng,
+            ).toFixed(2),
+          );
         }
         return {
           ...r,
           distanceKm,
-          distanceText: distanceKm < 999 ? `${distanceKm.toFixed(1)} km` : 'N/A',
+          distanceText:
+            distanceKm < 999 ? `${distanceKm.toFixed(1)} km` : 'N/A',
         };
       });
 
-      // Filter by distance when possible, otherwise use the same serviceable pincode.
+      const [adminList, serviceablePincodes] = await Promise.all([
+        getAdminPincodeMap(),
+        getServiceablePincodes(),
+      ]);
+      const isCustomerServiceable = Boolean(
+        customerPincode && serviceablePincodes.includes(customerPincode),
+      );
+
+      // Filter by max 15km distance AND matching same admin as customer's pincode
       const matchingRestaurants = restaurantsWithDistance
-        .filter((r) =>
-          hasCustomerCoordinates
-            ? r.distanceKm <= 15.0
-            : Boolean(matchedAdminPincode && resolvePartnerPincode(r) === matchedAdminPincode),
-        )
+        .filter((r) => {
+          if (r.distanceKm > 15.0) return false;
+          if (customerPincode) {
+            const storePin = resolvePartnerPincode(r);
+            if (storePin) {
+              const match = matchAdminForPincodes(
+                customerPincode,
+                storePin,
+                adminList,
+              );
+              return match.matched;
+            }
+          }
+          return true;
+        })
         .sort((a, b) => a.distanceKm - b.distanceKm);
 
       const restObjIds = matchingRestaurants.map((r) => r._id);
@@ -428,7 +571,10 @@ const createCustomerRouter = () => {
           ])
         : [];
 
-      const statByProductId = new Map<string, { avgRating: number; totalReviews: number }>(
+      const statByProductId = new Map<
+        string,
+        { avgRating: number; totalReviews: number }
+      >(
         reviewStats.map((s: any) => [
           String(s._id),
           {
@@ -446,33 +592,30 @@ const createCustomerRouter = () => {
       }
 
       return res.json({
-        serviceablePincodes,
         platformGsnNumber,
         customerPincode: customerPincode || '',
-        matchedAdminPincode: matchedAdminPincode || '',
-        isServiceable: Boolean(matchedAdminPincode),
-        customerLocation: custLat !== null && custLng !== null ? { lat: custLat, lng: custLng } : null,
-        message: matchedAdminPincode
-          ? (hasCustomerCoordinates
-              ? (matchingRestaurants.length
-                  ? `Showing ${matchingRestaurants.length} restaurants within 15 km of your location`
-                  : 'No restaurants found within 15 km of your location')
-              : (matchingRestaurants.length
-                  ? `Showing ${matchingRestaurants.length} restaurants in your serviceable area`
-                  : 'No restaurants found in your serviceable area'))
-          : 'your area is not in servicable range for now, update your address and pincode for orders.',
+        customerDigipin: customerDigipin || '',
+        serviceablePincodes,
+        isServiceable: isCustomerServiceable && matchingRestaurants.length > 0,
+        customerLocation:
+          custLat !== null && custLng !== null
+            ? { lat: custLat, lng: custLng }
+            : null,
+        message: !isCustomerServiceable
+          ? 'your area is not in servicable range for now, update your address and pincode for orders.'
+          : matchingRestaurants.length
+            ? `Showing ${matchingRestaurants.length} restaurants within 15 km of your location`
+            : 'No restaurants found within 15 km of your location',
         restaurants: matchingRestaurants.map((r) => {
           const restKey = String(r._id);
           const restId = r.restaurantId || '';
           const displayName = r.name;
           const partnerPin = resolvePartnerPincode(r);
-          const isApproved = r.isApproved ?? true;
-          const isServiceable = Boolean(
-            isApproved &&
-              (r.distanceKm <= 15.0 ||
-                (!hasCustomerCoordinates && matchedAdminPincode && resolvePartnerPincode(r) === matchedAdminPincode)),
+          const isApproved = Boolean(
+            r.isApproved || ((r as any).bankDetails?.isApproved ?? true),
           );
-          const isOpen = Boolean((r.isOpen ?? r.isOnline ?? true) && isServiceable);
+          const isServiceable = Boolean(isApproved && r.distanceKm <= 15.0);
+          const isOpen = Boolean(r.isOpen ?? r.isOnline ?? true);
 
           const itemIdsForRest = itemsByRestId.get(restKey) || [];
           const itemAverages: number[] = [];
@@ -492,8 +635,13 @@ const createCustomerRouter = () => {
           let rating: number | null = null;
           if (itemAverages.length > 0) {
             const sumOfItemAvgs = itemAverages.reduce((acc, v) => acc + v, 0);
-            rating = Math.round((sumOfItemAvgs / itemAverages.length) * 10) / 10;
-          } else if (directRestStat && directRestStat.totalReviews > 0 && directRestStat.avgRating > 0) {
+            rating =
+              Math.round((sumOfItemAvgs / itemAverages.length) * 10) / 10;
+          } else if (
+            directRestStat &&
+            directRestStat.totalReviews > 0 &&
+            directRestStat.avgRating > 0
+          ) {
             rating = Math.round(directRestStat.avgRating * 10) / 10;
           }
 
@@ -509,7 +657,8 @@ const createCustomerRouter = () => {
             pincode: partnerPin,
             distanceKm: r.distanceKm,
             distanceText: r.distanceText,
-            gsnNumber: (r.gsnNumber && r.gsnNumber.trim()) ? r.gsnNumber.trim() : 'NA',
+            gsnNumber:
+              r.gsnNumber && r.gsnNumber.trim() ? r.gsnNumber.trim() : 'NA',
             isServiceable,
             email: r.email,
             phone: r.phone,
@@ -532,24 +681,29 @@ const createCustomerRouter = () => {
     }
   });
 
-  // 1b. View all shops (filtered to <= 15 km of customer's current location, sorted nearest first)
+  // 1b. View all shops (filtered to <= 15 km of customer's location/digipin, sorted nearest first)
   router.get('/shops', async (req: Request, res: Response) => {
     try {
       const user = (req as AuthenticatedRequest).user;
-      const { customerPincode, matchedAdminPincode, serviceablePincodes, lat: custLat, lng: custLng } =
-        await resolveCustomerLocationContext(
-          user?.userId,
-          (req.query.pincode as string) || (req.query.postalCode as string),
-          req.query.lat ?? req.query.latitude,
-          req.query.lng ?? req.query.longitude,
-        );
+      const {
+        customerPincode,
+        customerDigipin,
+        lat: custLat,
+        lng: custLng,
+      } = await resolveCustomerLocationContext(
+        user?.userId,
+        (req.query.pincode as string) || (req.query.postalCode as string),
+        req.query.lat ?? req.query.latitude,
+        req.query.lng ?? req.query.longitude,
+        req.query.digipin as string,
+      );
 
       const [shops, platformGsnNumber] = await Promise.all([
         Shop.find({
           isBlocked: { $ne: true },
         })
           .select(
-            'name shopId digipin pincode gsnNumber email phone image shopAddress shopLocation category isApproved isOpen isOnline',
+            'name shopId digipin pincode gsnNumber email phone image shopAddress shopLocation category isApproved isOpen isOnline bankDetails',
           )
           .lean(),
         resolveAdminGsnNumber(),
@@ -560,39 +714,146 @@ const createCustomerRouter = () => {
         const storeCoords = getStoreCoordinates(s);
         let distanceKm = 9999;
         if (custLat !== null && custLng !== null && storeCoords) {
-          distanceKm = Number(calculateDistanceKm(custLat, custLng, storeCoords.lat, storeCoords.lng).toFixed(2));
+          distanceKm = Number(
+            calculateDistanceKm(
+              custLat,
+              custLng,
+              storeCoords.lat,
+              storeCoords.lng,
+            ).toFixed(2),
+          );
         }
         return {
           ...s,
           distanceKm,
-          distanceText: distanceKm < 999 ? `${distanceKm.toFixed(1)} km` : 'N/A',
+          distanceText:
+            distanceKm < 999 ? `${distanceKm.toFixed(1)} km` : 'N/A',
         };
       });
 
-      // Filter by max 15km distance and sort nearest first
+      const [adminList, serviceablePincodes] = await Promise.all([
+        getAdminPincodeMap(),
+        getServiceablePincodes(),
+      ]);
+      const isCustomerServiceable = Boolean(
+        customerPincode && serviceablePincodes.includes(customerPincode),
+      );
+
+      // Filter by max 15km distance AND matching same admin as customer's pincode
       const matchingShops = shopsWithDistance
-        .filter((s) => s.distanceKm <= 15.0)
+        .filter((s) => {
+          if (s.distanceKm > 15.0) return false;
+          if (customerPincode) {
+            const storePin = resolvePartnerPincode(s);
+            if (storePin) {
+              const match = matchAdminForPincodes(
+                customerPincode,
+                storePin,
+                adminList,
+              );
+              return match.matched;
+            }
+          }
+          return true;
+        })
         .sort((a, b) => a.distanceKm - b.distanceKm);
 
+      const [reviewStats, shopItems] = await Promise.all([
+        Review.aggregate([
+          {
+            $match: {
+              targetType: { $in: ['restaurant', 'shop', 'dish', 'item'] },
+            },
+          },
+          {
+            $group: {
+              _id: '$targetId',
+              avgRating: { $avg: '$rating' },
+              totalReviews: { $sum: 1 },
+            },
+          },
+        ]),
+        MenuItem.find({
+          restaurantId: { $in: matchingShops.map((s) => s._id) },
+        })
+          .select('_id restaurantId')
+          .lean(),
+      ]);
+
+      const statByProductId = new Map<
+        string,
+        { avgRating: number; totalReviews: number }
+      >();
+      for (const stat of reviewStats) {
+        statByProductId.set(String(stat._id), {
+          avgRating: stat.avgRating || 0,
+          totalReviews: stat.totalReviews || 0,
+        });
+      }
+
+      const itemsByShopId = new Map<string, string[]>();
+      for (const itm of shopItems) {
+        const sKey = String(itm.restaurantId);
+        if (!itemsByShopId.has(sKey)) itemsByShopId.set(sKey, []);
+        itemsByShopId.get(sKey)!.push(String(itm._id));
+      }
+
       return res.json({
-        serviceablePincodes,
         platformGsnNumber,
         customerPincode: customerPincode || '',
-        matchedAdminPincode: matchedAdminPincode || '',
-        isServiceable: Boolean(matchedAdminPincode),
-        customerLocation: custLat !== null && custLng !== null ? { lat: custLat, lng: custLng } : null,
-        message: matchedAdminPincode
-          ? (matchingShops.length
-              ? `Showing ${matchingShops.length} shops within 15 km of your location`
-              : `No shops found within 15 km of your location`)
-          : 'your area is not in servicable range for now, update your address and pincode for orders.',
+        customerDigipin: customerDigipin || '',
+        serviceablePincodes,
+        isServiceable: isCustomerServiceable && matchingShops.length > 0,
+        customerLocation:
+          custLat !== null && custLng !== null
+            ? { lat: custLat, lng: custLng }
+            : null,
+        message: !isCustomerServiceable
+          ? 'your area is not in servicable range for now, update your address and pincode for orders.'
+          : matchingShops.length
+            ? `Showing ${matchingShops.length} shops within 15 km of your location`
+            : 'No shops found within 15 km of your location',
         shops: matchingShops.map((s) => {
+          const shopKey = String(s._id);
           const shopCode = s.shopId || '';
           const displayName = s.name;
           const partnerPin = resolvePartnerPincode(s);
-          const isApproved = s.isApproved ?? true;
+          const isApproved = Boolean(
+            s.isApproved || ((s as any).bankDetails?.isApproved ?? true),
+          );
           const isServiceable = Boolean(isApproved && s.distanceKm <= 15.0);
-          const isOpen = Boolean((s.isOpen ?? s.isOnline ?? true) && isServiceable);
+          const isOpen = Boolean(s.isOpen ?? s.isOnline ?? true);
+
+          const itemIdsForShop = itemsByShopId.get(shopKey) || [];
+          const itemAverages: number[] = [];
+          let itemReviewsSum = 0;
+
+          for (const iId of itemIdsForShop) {
+            const st = statByProductId.get(iId);
+            if (st && st.totalReviews > 0 && st.avgRating > 0) {
+              itemAverages.push(Math.round(st.avgRating * 10) / 10);
+              itemReviewsSum += st.totalReviews;
+            }
+          }
+
+          const directShopStat = statByProductId.get(shopKey);
+          const directReviewsCount = directShopStat?.totalReviews || 0;
+
+          let rating: number | null = null;
+          if (itemAverages.length > 0) {
+            const sumOfItemAvgs = itemAverages.reduce((acc, v) => acc + v, 0);
+            rating =
+              Math.round((sumOfItemAvgs / itemAverages.length) * 10) / 10;
+          } else if (
+            directShopStat &&
+            directShopStat.totalReviews > 0 &&
+            directShopStat.avgRating > 0
+          ) {
+            rating = Math.round(directShopStat.avgRating * 10) / 10;
+          }
+
+          const reviewCount = directReviewsCount + itemReviewsSum;
+
           return {
             id: s._id,
             _id: s._id,
@@ -603,7 +864,8 @@ const createCustomerRouter = () => {
             pincode: partnerPin,
             distanceKm: s.distanceKm,
             distanceText: s.distanceText,
-            gsnNumber: (s.gsnNumber && s.gsnNumber.trim()) ? s.gsnNumber.trim() : 'NA',
+            gsnNumber:
+              s.gsnNumber && s.gsnNumber.trim() ? s.gsnNumber.trim() : 'NA',
             isServiceable,
             email: s.email,
             phone: s.phone,
@@ -615,6 +877,9 @@ const createCustomerRouter = () => {
             isApproved,
             isOpen,
             isOnline: isOpen,
+            rating,
+            reviewCount,
+            directReviewCount: directReviewsCount,
           };
         }),
       });
@@ -631,23 +896,34 @@ const createCustomerRouter = () => {
       const { restaurantId, shopId, type, category, search } = req.query;
       const query: Record<string, unknown> = { isActive: true };
 
-      const { customerPincode, matchedAdminPincode, serviceablePincodes, lat: custLat, lng: custLng } =
-        await resolveCustomerLocationContext(
-          user?.userId,
-          (req.query.pincode as string) || (req.query.postalCode as string),
-          req.query.lat ?? req.query.latitude,
-          req.query.lng ?? req.query.longitude,
-        );
+      const {
+        customerPincode,
+        customerDigipin,
+        lat: custLat,
+        lng: custLng,
+      } = await resolveCustomerLocationContext(
+        user?.userId,
+        (req.query.pincode as string) || (req.query.postalCode as string),
+        req.query.lat ?? req.query.latitude,
+        req.query.lng ?? req.query.longitude,
+        req.query.digipin as string,
+      );
 
-      if (
-        typeof shopId === 'string' &&
-        mongoose.isValidObjectId(shopId)
-      ) {
-        const targetShop = await Shop.findById(shopId).select('name pincode shopAddress digipin shopLocation').lean();
+      const adminList = await getAdminPincodeMap();
+
+      if (typeof shopId === 'string' && mongoose.isValidObjectId(shopId)) {
+        const targetShop = await Shop.findById(shopId)
+          .select('name pincode shopAddress digipin shopLocation')
+          .lean();
         if (targetShop && custLat !== null && custLng !== null) {
           const coords = getStoreCoordinates(targetShop);
           if (coords) {
-            const dist = calculateDistanceKm(custLat, custLng, coords.lat, coords.lng);
+            const dist = calculateDistanceKm(
+              custLat,
+              custLng,
+              coords.lat,
+              coords.lng,
+            );
             if (dist > 15.0) {
               return res.status(400).json({
                 message: 'Shop is too far from you',
@@ -659,16 +935,41 @@ const createCustomerRouter = () => {
             }
           }
         }
+        if (targetShop && customerPincode) {
+          const storePin = resolvePartnerPincode(targetShop);
+          if (storePin) {
+            const match = matchAdminForPincodes(
+              customerPincode,
+              storePin,
+              adminList,
+            );
+            if (!match.matched) {
+              return res.status(400).json({
+                message:
+                  'your area is not in servicable range for now, update your address and pincode for orders.',
+                code: 'ADMIN_ZONE_MISMATCH',
+                menu: [],
+              });
+            }
+          }
+        }
         query.restaurantId = new mongoose.Types.ObjectId(shopId);
       } else if (
         typeof restaurantId === 'string' &&
         mongoose.isValidObjectId(restaurantId)
       ) {
-        const targetRest = await Restaurant.findById(restaurantId).select('name pincode restaurantAddress digipin restaurantLocation').lean();
+        const targetRest = await Restaurant.findById(restaurantId)
+          .select('name pincode restaurantAddress digipin restaurantLocation')
+          .lean();
         if (targetRest && custLat !== null && custLng !== null) {
           const coords = getStoreCoordinates(targetRest);
           if (coords) {
-            const dist = calculateDistanceKm(custLat, custLng, coords.lat, coords.lng);
+            const dist = calculateDistanceKm(
+              custLat,
+              custLng,
+              coords.lat,
+              coords.lng,
+            );
             if (dist > 15.0) {
               return res.status(400).json({
                 message: 'Restaurant is too far from you',
@@ -680,58 +981,138 @@ const createCustomerRouter = () => {
             }
           }
         }
+        if (targetRest && customerPincode) {
+          const storePin = resolvePartnerPincode(targetRest);
+          if (storePin) {
+            const match = matchAdminForPincodes(
+              customerPincode,
+              storePin,
+              adminList,
+            );
+            if (!match.matched) {
+              return res.status(400).json({
+                message:
+                  'your area is not in servicable range for now, update your address and pincode for orders.',
+                code: 'ADMIN_ZONE_MISMATCH',
+                menu: [],
+              });
+            }
+          }
+        }
         query.restaurantId = new mongoose.Types.ObjectId(restaurantId);
       } else if (type === 'shop') {
         const shops = await Shop.find({ isBlocked: { $ne: true } })
           .select('_id name pincode shopAddress digipin shopLocation')
           .lean();
-        const allowedShops = (custLat !== null && custLng !== null)
-          ? shops.filter((s) => {
-              const coords = getStoreCoordinates(s);
-              if (!coords) return false;
-              return calculateDistanceKm(custLat, custLng, coords.lat, coords.lng) <= 15.0;
-            })
-          : (matchedAdminPincode
-              ? shops.filter((s) => resolvePartnerPincode(s) === matchedAdminPincode)
-              : []);
+        const allowedShops = shops.filter((s) => {
+          if (custLat !== null && custLng !== null) {
+            const coords = getStoreCoordinates(s);
+            if (!coords) return false;
+            if (
+              calculateDistanceKm(custLat, custLng, coords.lat, coords.lng) >
+              15.0
+            )
+              return false;
+          }
+          if (customerPincode) {
+            const storePin = resolvePartnerPincode(s);
+            if (storePin) {
+              const match = matchAdminForPincodes(
+                customerPincode,
+                storePin,
+                adminList,
+              );
+              return match.matched;
+            }
+          }
+          return true;
+        });
         query.restaurantId = { $in: allowedShops.map((s) => s._id) };
       } else if (type === 'restaurant') {
         const restaurants = await Restaurant.find({ isBlocked: { $ne: true } })
-          .select('_id name pincode restaurantAddress digipin restaurantLocation')
+          .select(
+            '_id name pincode restaurantAddress digipin restaurantLocation',
+          )
           .lean();
-        const allowedRests = (custLat !== null && custLng !== null)
-          ? restaurants.filter((r) => {
-              const coords = getStoreCoordinates(r);
-              if (!coords) return false;
-              return calculateDistanceKm(custLat, custLng, coords.lat, coords.lng) <= 15.0;
-            })
-          : (matchedAdminPincode
-              ? restaurants.filter((r) => resolvePartnerPincode(r) === matchedAdminPincode)
-              : []);
+        const allowedRests = restaurants.filter((r) => {
+          if (custLat !== null && custLng !== null) {
+            const coords = getStoreCoordinates(r);
+            if (!coords) return false;
+            if (
+              calculateDistanceKm(custLat, custLng, coords.lat, coords.lng) >
+              15.0
+            )
+              return false;
+          }
+          if (customerPincode) {
+            const storePin = resolvePartnerPincode(r);
+            if (storePin) {
+              const match = matchAdminForPincodes(
+                customerPincode,
+                storePin,
+                adminList,
+              );
+              return match.matched;
+            }
+          }
+          return true;
+        });
         query.restaurantId = { $in: allowedRests.map((r) => r._id) };
       } else {
         const [restaurants, shops] = await Promise.all([
-          Restaurant.find({ isBlocked: { $ne: true } }).select('_id pincode restaurantAddress digipin restaurantLocation').lean(),
-          Shop.find({ isBlocked: { $ne: true } }).select('_id pincode shopAddress digipin shopLocation').lean(),
+          Restaurant.find({ isBlocked: { $ne: true } })
+            .select('_id pincode restaurantAddress digipin restaurantLocation')
+            .lean(),
+          Shop.find({ isBlocked: { $ne: true } })
+            .select('_id pincode shopAddress digipin shopLocation')
+            .lean(),
         ]);
-        const allowedRests = (custLat !== null && custLng !== null)
-          ? restaurants.filter((r) => {
-              const coords = getStoreCoordinates(r);
-              if (!coords) return false;
-              return calculateDistanceKm(custLat, custLng, coords.lat, coords.lng) <= 15.0;
-            })
-          : (matchedAdminPincode
-              ? restaurants.filter((r) => resolvePartnerPincode(r) === matchedAdminPincode)
-              : []);
-        const allowedShops = (custLat !== null && custLng !== null)
-          ? shops.filter((s) => {
-              const coords = getStoreCoordinates(s);
-              if (!coords) return false;
-              return calculateDistanceKm(custLat, custLng, coords.lat, coords.lng) <= 15.0;
-            })
-          : (matchedAdminPincode
-              ? shops.filter((s) => resolvePartnerPincode(s) === matchedAdminPincode)
-              : []);
+        const allowedRests = restaurants.filter((r) => {
+          if (custLat !== null && custLng !== null) {
+            const coords = getStoreCoordinates(r);
+            if (!coords) return false;
+            if (
+              calculateDistanceKm(custLat, custLng, coords.lat, coords.lng) >
+              15.0
+            )
+              return false;
+          }
+          if (customerPincode) {
+            const storePin = resolvePartnerPincode(r);
+            if (storePin) {
+              const match = matchAdminForPincodes(
+                customerPincode,
+                storePin,
+                adminList,
+              );
+              return match.matched;
+            }
+          }
+          return true;
+        });
+        const allowedShops = shops.filter((s) => {
+          if (custLat !== null && custLng !== null) {
+            const coords = getStoreCoordinates(s);
+            if (!coords) return false;
+            if (
+              calculateDistanceKm(custLat, custLng, coords.lat, coords.lng) >
+              15.0
+            )
+              return false;
+          }
+          if (customerPincode) {
+            const storePin = resolvePartnerPincode(s);
+            if (storePin) {
+              const match = matchAdminForPincodes(
+                customerPincode,
+                storePin,
+                adminList,
+              );
+              return match.matched;
+            }
+          }
+          return true;
+        });
         const allowedStoreIds = [
           ...allowedRests.map((r) => r._id),
           ...allowedShops.map((s) => s._id),
@@ -831,14 +1212,17 @@ const createCustomerRouter = () => {
       }
 
       const itemId = String(req.params.itemId || '');
-      const queryName = typeof req.query.name === 'string' ? req.query.name.trim() : '';
+      const queryName =
+        typeof req.query.name === 'string' ? req.query.name.trim() : '';
 
       let item: any = mongoose.isValidObjectId(itemId)
         ? await FoodItem.findById(itemId).lean()
         : null;
 
       if (!item && queryName) {
-        item = await FoodItem.findOne({ name: new RegExp(`^${queryName}$`, 'i') }).lean();
+        item = await FoodItem.findOne({
+          name: new RegExp(`^${queryName}$`, 'i'),
+        }).lean();
       }
 
       const userObjId = new mongoose.Types.ObjectId(user.userId);
@@ -850,10 +1234,14 @@ const createCustomerRouter = () => {
         orderSearchConditions.push({ 'items.name': item.name });
       } else {
         if (mongoose.isValidObjectId(itemId)) {
-          orderSearchConditions.push({ 'items.foodItemId': new mongoose.Types.ObjectId(itemId) });
+          orderSearchConditions.push({
+            'items.foodItemId': new mongoose.Types.ObjectId(itemId),
+          });
         }
         if (queryName) {
-          orderSearchConditions.push({ 'items.name': new RegExp(`^${queryName}$`, 'i') });
+          orderSearchConditions.push({
+            'items.name': new RegExp(`^${queryName}$`, 'i'),
+          });
         }
       }
 
@@ -869,13 +1257,20 @@ const createCustomerRouter = () => {
 
       // If item is not in active catalog but customer ordered it, use snapshot from order
       if (!item && pastOrder) {
-        const orderItem = (pastOrder.items || []).find((it: any) =>
-          (mongoose.isValidObjectId(itemId) && String(it.foodItemId) === itemId) ||
-          (queryName && String(it.name || '').toLowerCase() === queryName.toLowerCase())
+        const orderItem = (pastOrder.items || []).find(
+          (it: any) =>
+            (mongoose.isValidObjectId(itemId) &&
+              String(it.foodItemId) === itemId) ||
+            (queryName &&
+              String(it.name || '').toLowerCase() === queryName.toLowerCase()),
         );
         if (orderItem) {
           item = {
-            _id: orderItem.foodItemId || (mongoose.isValidObjectId(itemId) ? new mongoose.Types.ObjectId(itemId) : new mongoose.Types.ObjectId()),
+            _id:
+              orderItem.foodItemId ||
+              (mongoose.isValidObjectId(itemId)
+                ? new mongoose.Types.ObjectId(itemId)
+                : new mongoose.Types.ObjectId()),
             name: orderItem.name,
             price: orderItem.price,
             category: 'Ordered Dish',
@@ -886,15 +1281,14 @@ const createCustomerRouter = () => {
       }
 
       if (!item) {
-        return res.status(404).json({ message: 'Product or food item not found' });
+        return res
+          .status(404)
+          .json({ message: 'Product or food item not found' });
       }
 
       const targetProductId = item._id;
       const rawReviews = await Review.find({
-        $or: [
-          { productId: targetProductId },
-          { productName: item.name },
-        ],
+        $or: [{ productId: targetProductId }, { productName: item.name }],
       })
         .sort({ updatedAt: -1, createdAt: -1 })
         .lean();
@@ -914,12 +1308,19 @@ const createCustomerRouter = () => {
       const totalReviews = reviews.length;
       const averageRating = totalReviews
         ? Math.round(
-            (reviews.reduce((sum, r) => sum + (r.rating || 0), 0) / totalReviews) *
+            (reviews.reduce((sum, r) => sum + (r.rating || 0), 0) /
+              totalReviews) *
               10,
           ) / 10
         : null;
 
-      const ratingDistribution: Record<number, number> = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+      const ratingDistribution: Record<number, number> = {
+        5: 0,
+        4: 0,
+        3: 0,
+        2: 0,
+        1: 0,
+      };
       for (const r of reviews) {
         const star = Math.min(5, Math.max(1, Math.round(r.rating || 0)));
         ratingDistribution[star] = (ratingDistribution[star] || 0) + 1;
@@ -972,7 +1373,8 @@ const createCustomerRouter = () => {
       }
 
       const itemId = String(req.params.itemId || '');
-      const bodyName = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+      const bodyName =
+        typeof req.body?.name === 'string' ? req.body.name.trim() : '';
 
       const rating = Number(req.body?.rating);
       if (isNaN(rating) || rating < 1 || rating > 5) {
@@ -989,7 +1391,9 @@ const createCustomerRouter = () => {
         : null;
 
       if (!item && bodyName) {
-        item = await FoodItem.findOne({ name: new RegExp(`^${bodyName}$`, 'i') }).lean();
+        item = await FoodItem.findOne({
+          name: new RegExp(`^${bodyName}$`, 'i'),
+        }).lean();
       }
 
       const userObjId = new mongoose.Types.ObjectId(user.userId);
@@ -999,10 +1403,14 @@ const createCustomerRouter = () => {
         orderSearchConditions.push({ 'items.name': item.name });
       } else {
         if (mongoose.isValidObjectId(itemId)) {
-          orderSearchConditions.push({ 'items.foodItemId': new mongoose.Types.ObjectId(itemId) });
+          orderSearchConditions.push({
+            'items.foodItemId': new mongoose.Types.ObjectId(itemId),
+          });
         }
         if (bodyName) {
-          orderSearchConditions.push({ 'items.name': new RegExp(`^${bodyName}$`, 'i') });
+          orderSearchConditions.push({
+            'items.name': new RegExp(`^${bodyName}$`, 'i'),
+          });
         }
       }
 
@@ -1017,13 +1425,20 @@ const createCustomerRouter = () => {
         : null;
 
       if (!item && pastOrder) {
-        const orderItem = (pastOrder.items || []).find((it: any) =>
-          (mongoose.isValidObjectId(itemId) && String(it.foodItemId) === itemId) ||
-          (bodyName && String(it.name || '').toLowerCase() === bodyName.toLowerCase())
+        const orderItem = (pastOrder.items || []).find(
+          (it: any) =>
+            (mongoose.isValidObjectId(itemId) &&
+              String(it.foodItemId) === itemId) ||
+            (bodyName &&
+              String(it.name || '').toLowerCase() === bodyName.toLowerCase()),
         );
         if (orderItem) {
           item = {
-            _id: orderItem.foodItemId || (mongoose.isValidObjectId(itemId) ? new mongoose.Types.ObjectId(itemId) : new mongoose.Types.ObjectId()),
+            _id:
+              orderItem.foodItemId ||
+              (mongoose.isValidObjectId(itemId)
+                ? new mongoose.Types.ObjectId(itemId)
+                : new mongoose.Types.ObjectId()),
             name: orderItem.name,
             price: orderItem.price,
             category: 'Ordered Dish',
@@ -1034,7 +1449,9 @@ const createCustomerRouter = () => {
       }
 
       if (!item) {
-        return res.status(404).json({ message: 'Product or food item not found' });
+        return res
+          .status(404)
+          .json({ message: 'Product or food item not found' });
       }
 
       if (!pastOrder) {
@@ -1045,15 +1462,19 @@ const createCustomerRouter = () => {
       }
 
       const customer = await Customer.findById(user.userId).lean();
-      const customerName =
-        customer?.name || (user as any).name || 'Customer';
+      const customerName = customer?.name || (user as any).name || 'Customer';
 
       // Check if this customer already reviewed this product (by productId or productName)
       const existingReview = await Review.findOne({
         customerId: userObjId,
         $or: [
           { productId: item._id },
-          { productName: new RegExp(`^${String(item.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+          {
+            productName: new RegExp(
+              `^${String(item.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
+              'i',
+            ),
+          },
         ],
       });
 
@@ -1067,7 +1488,9 @@ const createCustomerRouter = () => {
         existingReview.productName = item.name;
         if (item.restaurantId) existingReview.storeId = item.restaurantId;
         if (item.restaurantName) existingReview.storeName = item.restaurantName;
-        existingReview.storeType = (item as any).isShopItem ? 'shop' : 'restaurant';
+        existingReview.storeType = (item as any).isShopItem
+          ? 'shop'
+          : 'restaurant';
         existingReview.customerName = customerName;
         existingReview.rating = Math.round(rating);
         existingReview.comment = comment;
@@ -1097,7 +1520,12 @@ const createCustomerRouter = () => {
         customerId: userObjId,
         $or: [
           { productId: item._id },
-          { productName: new RegExp(`^${String(item.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+          {
+            productName: new RegExp(
+              `^${String(item.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
+              'i',
+            ),
+          },
         ],
       });
 
@@ -1135,280 +1563,325 @@ const createCustomerRouter = () => {
   });
 
   // 2e. Get reviews & rating for a specific restaurant
-  router.get('/restaurants/:restaurantId/reviews', async (req: Request, res: Response) => {
-    try {
-      const user = (req as AuthenticatedRequest).user;
-      if (!user?.userId) {
-        return res.status(401).json({ message: 'Authentication required' });
-      }
-
-      const restaurantIdParam = String(req.params.restaurantId || '');
-      const queryName = typeof req.query.name === 'string' ? req.query.name.trim() : '';
-
-      let restaurant: any = mongoose.isValidObjectId(restaurantIdParam)
-        ? await Restaurant.findById(restaurantIdParam).lean()
-        : null;
-
-      if (!restaurant && queryName) {
-        const escapedName = queryName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        restaurant = await Restaurant.findOne({ name: new RegExp(`^${escapedName}`, 'i') }).lean();
-      }
-
-      if (!restaurant) {
-        return res.status(404).json({ message: 'Restaurant not found' });
-      }
-
-      const restObjId = restaurant._id;
-      const userObjId = new mongoose.Types.ObjectId(user.userId);
-
-      // Find all items belonging to this restaurant
-      const restItems = await FoodItem.find({ restaurantId: restObjId }).lean();
-      const itemIds = restItems.map((i) => i._id);
-      const itemNames = restItems.map((i) => i.name).filter(Boolean);
-
-      // Check if customer has purchased from this specific restaurant
-      const escapedRestName = (String(restaurant.name || '').split('/')[0] || '')
-        .trim()
-        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const orderOrConditions: Record<string, unknown>[] = [{ restaurantId: restObjId }];
-      if (escapedRestName) {
-        orderOrConditions.push({ restaurantName: new RegExp(escapedRestName, 'i') });
-      }
-      if (itemIds.length > 0) {
-        orderOrConditions.push({ 'items.foodItemId': { $in: itemIds } });
-      }
-      if (itemNames.length > 0) {
-        orderOrConditions.push({ 'items.name': { $in: itemNames } });
-      }
-
-      const pastOrder = await Order.findOne({
-        customerId: userObjId,
-        status: { $ne: 'cancelled' },
-        $or: orderOrConditions,
-      })
-        .sort({ createdAt: -1 })
-        .lean();
-
-      // Compute average of each item's average rating
-      const itemReviewStats = itemIds.length
-        ? await Review.aggregate([
-            { $match: { productId: { $in: itemIds } } },
-            {
-              $group: {
-                _id: '$productId',
-                avgRating: { $avg: '$rating' },
-                totalReviews: { $sum: 1 },
-              },
-            },
-          ])
-        : [];
-
-      const itemAverages: number[] = [];
-      for (const st of itemReviewStats) {
-        if (st.totalReviews > 0 && st.avgRating > 0) {
-          itemAverages.push(Math.round(Number(st.avgRating) * 10) / 10);
+  router.get(
+    '/restaurants/:restaurantId/reviews',
+    async (req: Request, res: Response) => {
+      try {
+        const user = (req as AuthenticatedRequest).user;
+        if (!user?.userId) {
+          return res.status(401).json({ message: 'Authentication required' });
         }
-      }
 
-      // Fetch all reviews for this restaurant (direct restaurant reviews + item reviews for this restaurant)
-      const reviewOrConditions: Record<string, unknown>[] = [
-        { productId: restObjId },
-        { storeId: restObjId },
-      ];
-      if (itemIds.length > 0) {
-        reviewOrConditions.push({ productId: { $in: itemIds } });
-      }
+        const restaurantIdParam = String(req.params.restaurantId || '');
+        const queryName =
+          typeof req.query.name === 'string' ? req.query.name.trim() : '';
 
-      const rawReviews = await Review.find({ $or: reviewOrConditions })
-        .sort({ updatedAt: -1, createdAt: -1 })
-        .lean();
+        let restaurant: any = mongoose.isValidObjectId(restaurantIdParam)
+          ? await Restaurant.findById(restaurantIdParam).lean()
+          : null;
 
-      // Deduplicate per (productId, customerId)
-      const seenKeys = new Set<string>();
-      const reviews: any[] = [];
-      const directRestReviews: any[] = [];
+        if (!restaurant && queryName) {
+          const escapedName = queryName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          restaurant = await Restaurant.findOne({
+            name: new RegExp(`^${escapedName}`, 'i'),
+          }).lean();
+        }
 
-      for (const r of rawReviews) {
-        const key = `${String(r.productId)}_${String(r.customerId)}`;
-        if (!seenKeys.has(key)) {
-          seenKeys.add(key);
-          const isDirectRestaurantReview = String(r.productId) === String(restObjId);
-          const enriched = {
-            ...r,
-            isRestaurantReview: isDirectRestaurantReview,
-            reviewedTargetName: isDirectRestaurantReview ? restaurant.name : r.productName,
-          };
-          reviews.push(enriched);
-          if (isDirectRestaurantReview) {
-            directRestReviews.push(enriched);
+        if (!restaurant) {
+          return res.status(404).json({ message: 'Restaurant not found' });
+        }
+
+        const restObjId = restaurant._id;
+        const userObjId = new mongoose.Types.ObjectId(user.userId);
+
+        // Find all items belonging to this restaurant
+        const restItems = await FoodItem.find({
+          restaurantId: restObjId,
+        }).lean();
+        const itemIds = restItems.map((i) => i._id);
+        const itemNames = restItems.map((i) => i.name).filter(Boolean);
+
+        // Check if customer has purchased from this specific restaurant
+        const escapedRestName = (
+          String(restaurant.name || '').split('/')[0] || ''
+        )
+          .trim()
+          .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const orderOrConditions: Record<string, unknown>[] = [
+          { restaurantId: restObjId },
+        ];
+        if (escapedRestName) {
+          orderOrConditions.push({
+            restaurantName: new RegExp(escapedRestName, 'i'),
+          });
+        }
+        if (itemIds.length > 0) {
+          orderOrConditions.push({ 'items.foodItemId': { $in: itemIds } });
+        }
+        if (itemNames.length > 0) {
+          orderOrConditions.push({ 'items.name': { $in: itemNames } });
+        }
+
+        const pastOrder = await Order.findOne({
+          customerId: userObjId,
+          status: { $ne: 'cancelled' },
+          $or: orderOrConditions,
+        })
+          .sort({ createdAt: -1 })
+          .lean();
+
+        // Compute average of each item's average rating
+        const itemReviewStats = itemIds.length
+          ? await Review.aggregate([
+              { $match: { productId: { $in: itemIds } } },
+              {
+                $group: {
+                  _id: '$productId',
+                  avgRating: { $avg: '$rating' },
+                  totalReviews: { $sum: 1 },
+                },
+              },
+            ])
+          : [];
+
+        const itemAverages: number[] = [];
+        for (const st of itemReviewStats) {
+          if (st.totalReviews > 0 && st.avgRating > 0) {
+            itemAverages.push(Math.round(Number(st.avgRating) * 10) / 10);
           }
         }
-      }
 
-      let averageRating: number | null = null;
-      if (itemAverages.length > 0) {
-        const sumOfItemAvgs = itemAverages.reduce((acc, v) => acc + v, 0);
-        averageRating = Math.round((sumOfItemAvgs / itemAverages.length) * 10) / 10;
-      } else if (directRestReviews.length > 0) {
-        const sumDirect = directRestReviews.reduce((acc, r) => acc + Number(r.rating || 0), 0);
-        averageRating = Math.round((sumDirect / directRestReviews.length) * 10) / 10;
-      }
+        // Fetch all reviews for this restaurant (direct restaurant reviews + item reviews for this restaurant)
+        const reviewOrConditions: Record<string, unknown>[] = [
+          { productId: restObjId },
+          { storeId: restObjId },
+        ];
+        if (itemIds.length > 0) {
+          reviewOrConditions.push({ productId: { $in: itemIds } });
+        }
 
-      const totalReviews = reviews.length;
-      const canReview = Boolean(pastOrder);
-      const userReview =
-        directRestReviews.find((r) => String(r.customerId) === String(user.userId)) || null;
+        const rawReviews = await Review.find({ $or: reviewOrConditions })
+          .sort({ updatedAt: -1, createdAt: -1 })
+          .lean();
 
-      return res.json({
-        restaurant: {
-          id: restaurant._id,
-          _id: restaurant._id,
-          name: restaurant.name,
-          cuisine: restaurant.cuisine || 'Multi-Cuisine Restaurant',
-          address: restaurant.restaurantAddress || 'Bengaluru Food Quarter',
-          totalMenuItems: restItems.length,
-          ratedItemsCount: itemAverages.length,
-        },
-        reviews,
-        totalReviews,
-        averageRating,
-        ratedItemsCount: itemAverages.length,
-        canReview,
-        cannotReviewReason: canReview
-          ? null
-          : 'Only customers who have purchased from this restaurant can submit a review.',
-        userReview,
-        verifiedOrder: pastOrder
-          ? {
-              orderId: pastOrder._id,
-              orderNumber: pastOrder.orderNumber,
-              createdAt: pastOrder.createdAt,
+        // Deduplicate per (productId, customerId)
+        const seenKeys = new Set<string>();
+        const reviews: any[] = [];
+        const directRestReviews: any[] = [];
+
+        for (const r of rawReviews) {
+          const key = `${String(r.productId)}_${String(r.customerId)}`;
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            const isDirectRestaurantReview =
+              String(r.productId) === String(restObjId);
+            const enriched = {
+              ...r,
+              isRestaurantReview: isDirectRestaurantReview,
+              reviewedTargetName: isDirectRestaurantReview
+                ? restaurant.name
+                : r.productName,
+            };
+            reviews.push(enriched);
+            if (isDirectRestaurantReview) {
+              directRestReviews.push(enriched);
             }
-          : null,
-      });
-    } catch (error) {
-      console.error('Fetch restaurant reviews failed:', error);
-      return res.status(500).json({ message: 'Unable to fetch restaurant reviews' });
-    }
-  });
+          }
+        }
+
+        let averageRating: number | null = null;
+        if (itemAverages.length > 0) {
+          const sumOfItemAvgs = itemAverages.reduce((acc, v) => acc + v, 0);
+          averageRating =
+            Math.round((sumOfItemAvgs / itemAverages.length) * 10) / 10;
+        } else if (directRestReviews.length > 0) {
+          const sumDirect = directRestReviews.reduce(
+            (acc, r) => acc + Number(r.rating || 0),
+            0,
+          );
+          averageRating =
+            Math.round((sumDirect / directRestReviews.length) * 10) / 10;
+        }
+
+        const totalReviews = reviews.length;
+        const canReview = Boolean(pastOrder);
+        const userReview =
+          directRestReviews.find(
+            (r) => String(r.customerId) === String(user.userId),
+          ) || null;
+
+        return res.json({
+          restaurant: {
+            id: restaurant._id,
+            _id: restaurant._id,
+            name: restaurant.name,
+            cuisine: restaurant.cuisine || 'Multi-Cuisine Restaurant',
+            address: restaurant.restaurantAddress || 'Bengaluru Food Quarter',
+            totalMenuItems: restItems.length,
+            ratedItemsCount: itemAverages.length,
+          },
+          reviews,
+          totalReviews,
+          averageRating,
+          ratedItemsCount: itemAverages.length,
+          canReview,
+          cannotReviewReason: canReview
+            ? null
+            : 'Only customers who have purchased from this restaurant can submit a review.',
+          userReview,
+          verifiedOrder: pastOrder
+            ? {
+                orderId: pastOrder._id,
+                orderNumber: pastOrder.orderNumber,
+                createdAt: pastOrder.createdAt,
+              }
+            : null,
+        });
+      } catch (error) {
+        console.error('Fetch restaurant reviews failed:', error);
+        return res
+          .status(500)
+          .json({ message: 'Unable to fetch restaurant reviews' });
+      }
+    },
+  );
 
   // 2f. Submit or update review for a specific restaurant (verified purchase from that restaurant required)
-  router.post('/restaurants/:restaurantId/reviews', async (req: Request, res: Response) => {
-    try {
-      const user = (req as AuthenticatedRequest).user;
-      if (!user?.userId) {
-        return res.status(401).json({ message: 'Authentication required' });
-      }
+  router.post(
+    '/restaurants/:restaurantId/reviews',
+    async (req: Request, res: Response) => {
+      try {
+        const user = (req as AuthenticatedRequest).user;
+        if (!user?.userId) {
+          return res.status(401).json({ message: 'Authentication required' });
+        }
 
-      const restaurantIdParam = String(req.params.restaurantId || '');
-      const bodyName = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+        const restaurantIdParam = String(req.params.restaurantId || '');
+        const bodyName =
+          typeof req.body?.name === 'string' ? req.body.name.trim() : '';
 
-      const rating = Number(req.body?.rating);
-      if (isNaN(rating) || rating < 1 || rating > 5) {
-        return res.status(400).json({ message: 'Rating must be an integer between 1 and 5' });
-      }
+        const rating = Number(req.body?.rating);
+        if (isNaN(rating) || rating < 1 || rating > 5) {
+          return res
+            .status(400)
+            .json({ message: 'Rating must be an integer between 1 and 5' });
+        }
 
-      const comment = typeof req.body?.comment === 'string' ? req.body.comment.trim() : '';
+        const comment =
+          typeof req.body?.comment === 'string' ? req.body.comment.trim() : '';
 
-      let restaurant: any = mongoose.isValidObjectId(restaurantIdParam)
-        ? await Restaurant.findById(restaurantIdParam).lean()
-        : null;
+        let restaurant: any = mongoose.isValidObjectId(restaurantIdParam)
+          ? await Restaurant.findById(restaurantIdParam).lean()
+          : null;
 
-      if (!restaurant && bodyName) {
-        const escapedName = bodyName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        restaurant = await Restaurant.findOne({ name: new RegExp(`^${escapedName}`, 'i') }).lean();
-      }
+        if (!restaurant && bodyName) {
+          const escapedName = bodyName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          restaurant = await Restaurant.findOne({
+            name: new RegExp(`^${escapedName}`, 'i'),
+          }).lean();
+        }
 
-      if (!restaurant) {
-        return res.status(404).json({ message: 'Restaurant not found' });
-      }
+        if (!restaurant) {
+          return res.status(404).json({ message: 'Restaurant not found' });
+        }
 
-      const restObjId = restaurant._id;
-      const userObjId = new mongoose.Types.ObjectId(user.userId);
+        const restObjId = restaurant._id;
+        const userObjId = new mongoose.Types.ObjectId(user.userId);
 
-      const restItems = await FoodItem.find({ restaurantId: restObjId }).select('_id name').lean();
-      const itemIds = restItems.map((i) => i._id);
-      const itemNames = restItems.map((i) => i.name).filter(Boolean);
+        const restItems = await FoodItem.find({ restaurantId: restObjId })
+          .select('_id name')
+          .lean();
+        const itemIds = restItems.map((i) => i._id);
+        const itemNames = restItems.map((i) => i.name).filter(Boolean);
 
-      const escapedRestName = (String(restaurant.name || '').split('/')[0] || '')
-        .trim()
-        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const orderOrConditions: Record<string, unknown>[] = [{ restaurantId: restObjId }];
-      if (escapedRestName) {
-        orderOrConditions.push({ restaurantName: new RegExp(escapedRestName, 'i') });
-      }
-      if (itemIds.length > 0) {
-        orderOrConditions.push({ 'items.foodItemId': { $in: itemIds } });
-      }
-      if (itemNames.length > 0) {
-        orderOrConditions.push({ 'items.name': { $in: itemNames } });
-      }
+        const escapedRestName = (
+          String(restaurant.name || '').split('/')[0] || ''
+        )
+          .trim()
+          .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const orderOrConditions: Record<string, unknown>[] = [
+          { restaurantId: restObjId },
+        ];
+        if (escapedRestName) {
+          orderOrConditions.push({
+            restaurantName: new RegExp(escapedRestName, 'i'),
+          });
+        }
+        if (itemIds.length > 0) {
+          orderOrConditions.push({ 'items.foodItemId': { $in: itemIds } });
+        }
+        if (itemNames.length > 0) {
+          orderOrConditions.push({ 'items.name': { $in: itemNames } });
+        }
 
-      const pastOrder = await Order.findOne({
-        customerId: userObjId,
-        status: { $ne: 'cancelled' },
-        $or: orderOrConditions,
-      })
-        .sort({ createdAt: -1 })
-        .lean();
-
-      if (!pastOrder) {
-        return res.status(403).json({
-          message:
-            'Verified purchase required: Only customers who have purchased from this restaurant can submit a review.',
-        });
-      }
-
-      const customer = await Customer.findById(user.userId).lean();
-      const customerName = customer?.name || (user as any).name || 'Customer';
-
-      const existingReview = await Review.findOne({
-        customerId: userObjId,
-        productId: restObjId,
-      });
-
-      let review;
-      let isOverride = false;
-
-      if (existingReview) {
-        isOverride = true;
-        existingReview.productName = restaurant.name;
-        existingReview.storeId = restObjId;
-        existingReview.storeName = restaurant.name;
-        existingReview.storeType = 'restaurant';
-        existingReview.customerName = customerName;
-        existingReview.rating = Math.round(rating);
-        existingReview.comment = comment;
-        existingReview.orderId = pastOrder._id;
-        existingReview.orderNumber = pastOrder.orderNumber;
-        review = await existingReview.save();
-      } else {
-        review = await Review.create({
-          productId: restObjId,
-          productName: restaurant.name,
-          storeId: restObjId,
-          storeName: restaurant.name,
-          storeType: 'restaurant',
+        const pastOrder = await Order.findOne({
           customerId: userObjId,
-          customerName,
-          rating: Math.round(rating),
-          comment,
-          orderId: pastOrder._id,
-          orderNumber: pastOrder.orderNumber,
-        });
-      }
+          status: { $ne: 'cancelled' },
+          $or: orderOrConditions,
+        })
+          .sort({ createdAt: -1 })
+          .lean();
 
-      return res.status(200).json({
-        message: isOverride
-          ? 'Your restaurant review has been updated!'
-          : 'Restaurant review saved successfully!',
-        review,
-      });
-    } catch (error) {
-      console.error('Submit restaurant review failed:', error);
-      return res.status(500).json({ message: 'Unable to submit restaurant review' });
-    }
-  });
+        if (!pastOrder) {
+          return res.status(403).json({
+            message:
+              'Verified purchase required: Only customers who have purchased from this restaurant can submit a review.',
+          });
+        }
+
+        const customer = await Customer.findById(user.userId).lean();
+        const customerName = customer?.name || (user as any).name || 'Customer';
+
+        const existingReview = await Review.findOne({
+          customerId: userObjId,
+          productId: restObjId,
+        });
+
+        let review;
+        let isOverride = false;
+
+        if (existingReview) {
+          isOverride = true;
+          existingReview.productName = restaurant.name;
+          existingReview.storeId = restObjId;
+          existingReview.storeName = restaurant.name;
+          existingReview.storeType = 'restaurant';
+          existingReview.customerName = customerName;
+          existingReview.rating = Math.round(rating);
+          existingReview.comment = comment;
+          existingReview.orderId = pastOrder._id;
+          existingReview.orderNumber = pastOrder.orderNumber;
+          review = await existingReview.save();
+        } else {
+          review = await Review.create({
+            productId: restObjId,
+            productName: restaurant.name,
+            storeId: restObjId,
+            storeName: restaurant.name,
+            storeType: 'restaurant',
+            customerId: userObjId,
+            customerName,
+            rating: Math.round(rating),
+            comment,
+            orderId: pastOrder._id,
+            orderNumber: pastOrder.orderNumber,
+          });
+        }
+
+        return res.status(200).json({
+          message: isOverride
+            ? 'Your restaurant review has been updated!'
+            : 'Restaurant review saved successfully!',
+          review,
+        });
+      } catch (error) {
+        console.error('Submit restaurant review failed:', error);
+        return res
+          .status(500)
+          .json({ message: 'Unable to submit restaurant review' });
+      }
+    },
+  );
 
   // 3. Addresses
   router.get('/addresses', async (req: Request, res: Response) => {
@@ -1446,16 +1919,46 @@ const createCustomerRouter = () => {
       const postalCode =
         typeof payload.postalCode === 'string' ? payload.postalCode.trim() : '';
       const digipin =
-        typeof payload.digipin === 'string' ? payload.digipin.trim().toUpperCase() : '';
+        typeof payload.digipin === 'string'
+          ? payload.digipin.trim().toUpperCase()
+          : '';
       const line2 =
         typeof payload.line2 === 'string' ? payload.line2.trim() : '';
       const locality =
         typeof payload.locality === 'string' ? payload.locality.trim() : '';
       const isDefault = Boolean(payload.isDefault);
-      const coordinates =
-        Array.isArray(payload.coordinates) && payload.coordinates.length === 2
-          ? [Number(payload.coordinates[0]), Number(payload.coordinates[1])]
-          : [77.5946, 12.9716];
+      let coordinates: [number, number] = [77.5946, 12.9716];
+      let hasExplicitCoords = false;
+      if (
+        Array.isArray(payload.coordinates) &&
+        payload.coordinates.length === 2
+      ) {
+        const c0 = Number(payload.coordinates[0]);
+        const c1 = Number(payload.coordinates[1]);
+        if (
+          !isNaN(c0) &&
+          !isNaN(c1) &&
+          (c0 !== 0 || c1 !== 0) &&
+          (c0 !== 77.5946 || c1 !== 12.9716)
+        ) {
+          coordinates = [c0, c1];
+          hasExplicitCoords = true;
+        }
+      }
+      if (!hasExplicitCoords) {
+        if (digipin) {
+          const dgp = resolveCoordinatesFromDigipin(digipin);
+          if (dgp) coordinates = [dgp.lng, dgp.lat];
+        }
+        if (
+          coordinates[0] === 77.5946 &&
+          coordinates[1] === 12.9716 &&
+          postalCode
+        ) {
+          const pinC = resolveCoordinatesFromPincode(postalCode);
+          if (pinC) coordinates = [pinC.lng, pinC.lat];
+        }
+      }
 
       if (!line1 || !city) {
         return res
@@ -1489,7 +1992,7 @@ const createCustomerRouter = () => {
         isDefault: shouldBeDefault,
         location: {
           type: 'Point',
-          coordinates: coordinates as [number, number],
+          coordinates,
         },
       });
 
@@ -1516,7 +2019,26 @@ const createCustomerRouter = () => {
       const update: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(payload)) {
         if (value !== undefined && value !== null) {
-          update[key] = typeof value === 'string' && key === 'digipin' ? value.trim().toUpperCase() : value;
+          update[key] =
+            typeof value === 'string' && key === 'digipin'
+              ? value.trim().toUpperCase()
+              : value;
+        }
+      }
+
+      if (!update.location && (update.digipin || update.postalCode)) {
+        let coords: { lat: number; lng: number } | null = null;
+        if (typeof update.digipin === 'string') {
+          coords = resolveCoordinatesFromDigipin(update.digipin);
+        }
+        if (!coords && typeof update.postalCode === 'string') {
+          coords = resolveCoordinatesFromPincode(update.postalCode);
+        }
+        if (coords) {
+          update.location = {
+            type: 'Point',
+            coordinates: [coords.lng, coords.lat],
+          };
         }
       }
 
@@ -1630,17 +2152,7 @@ const createCustomerRouter = () => {
       keyId,
       isLive,
       currency: 'INR',
-      tomatoOfficialBank: {
-        companyName: process.env.TOMATO_COMPANY_NAME || 'Tomato Technologies Private Limited',
-        accountHolderName: process.env.TOMATO_BANK_ACCOUNT_HOLDER || 'Tomato Central Treasury',
-        bankName: process.env.TOMATO_BANK_NAME || 'HDFC Bank Limited',
-        accountNumber: process.env.TOMATO_BANK_ACCOUNT_NUMBER || '50200088991122',
-        ifscCode: process.env.TOMATO_BANK_IFSC || 'HDFC0000060',
-        upiId: process.env.TOMATO_OFFICIAL_UPI_ID || 'tomato.official@hdfcbank',
-        branch: 'Central Indiranagar Branch, Bengaluru',
-        merchantCategoryCode: '5812',
-        settlementPolicy: 'Direct T+1 Official Current Account Settlement',
-      },
+      tomatoOfficialBank: getTomatoOfficialBankDetails(),
     });
   });
 
@@ -1651,158 +2163,127 @@ const createCustomerRouter = () => {
   });
 
   // 4b. Razorpay - Create Order on Razorpay Gateway
-  router.post('/payment/razorpay/order', async (req: Request, res: Response) => {
-    try {
-      const { amount, receipt } = req.body;
-      const numAmount = Number(amount);
-      if (!numAmount || numAmount <= 0) {
-        return res.status(400).json({ message: 'Valid payment amount is required' });
-      }
-
-      const keyId = process.env.RAZORPAY_KEY_ID || 'rzp_test_TjUFioCQLtVxJn';
-      const keySecret = process.env.RAZORPAY_KEY_SECRET || '1zFOIza2vJGCB6g2PeqFs12t';
-      const authHeader = 'Basic ' + Buffer.from(`${keyId}:${keySecret}`).toString('base64');
-
-      // Amount in paise (1 INR = 100 paise)
-      const amountPaise = Math.round(numAmount * 100);
-
-      const rzpRes = await axios.post(
-        'https://api.razorpay.com/v1/orders',
-        {
-          amount: amountPaise,
-          currency: 'INR',
-          receipt: receipt || `rcpt_${Date.now()}`,
-          notes: {
-            preferred_currency: 'INR',
-            currency: 'INR',
-          },
-        },
-        {
-          headers: {
-            Authorization: authHeader,
-            'Content-Type': 'application/json',
-          },
-          timeout: 10000,
+  router.post(
+    '/payment/razorpay/order',
+    async (req: Request, res: Response) => {
+      try {
+        const { amount, receipt } = req.body;
+        const numAmount = Number(amount);
+        if (!numAmount || numAmount <= 0) {
+          return res
+            .status(400)
+            .json({ message: 'Valid payment amount is required' });
         }
-      );
 
-      return res.json({
-        success: true,
-        orderId: rzpRes.data.id,
-        amount: rzpRes.data.amount,
-        currency: rzpRes.data.currency,
-        keyId,
-      });
-    } catch (err: any) {
-      console.error('Razorpay order creation failed:', err.response?.data || err.message);
-      return res.status(500).json({
-        message: 'Unable to initiate Razorpay order',
-        error: err.response?.data?.error?.description || err.message,
-      });
-    }
-  });
+        const keyId = process.env.RAZORPAY_KEY_ID || 'rzp_test_TjUFioCQLtVxJn';
+        const keySecret =
+          process.env.RAZORPAY_KEY_SECRET || '1zFOIza2vJGCB6g2PeqFs12t';
+        const authHeader =
+          'Basic ' + Buffer.from(`${keyId}:${keySecret}`).toString('base64');
 
-  // 4c. Razorpay - Verify Payment Signature
-  router.post('/payment/razorpay/verify', async (req: Request, res: Response) => {
-    try {
-      const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+        // Amount in paise (1 INR = 100 paise)
+        const amountPaise = Math.round(numAmount * 100);
 
-      if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-        return res.status(400).json({ message: 'Missing Razorpay verification parameters' });
-      }
+        const rzpRes = await axios.post(
+          'https://api.razorpay.com/v1/orders',
+          {
+            amount: amountPaise,
+            currency: 'INR',
+            receipt: receipt || `rcpt_${Date.now()}`,
+            notes: {
+              preferred_currency: 'INR',
+              currency: 'INR',
+            },
+          },
+          {
+            headers: {
+              Authorization: authHeader,
+              'Content-Type': 'application/json',
+            },
+            timeout: 10000,
+          },
+        );
 
-      const keySecret = process.env.RAZORPAY_KEY_SECRET || '1zFOIza2vJGCB6g2PeqFs12t';
-
-      const generatedSignature = crypto
-        .createHmac('sha256', keySecret)
-        .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-        .digest('hex');
-
-      if (generatedSignature !== razorpay_signature) {
-        return res.status(400).json({
-          success: false,
-          verified: false,
-          message: 'Razorpay payment signature verification failed',
+        return res.json({
+          success: true,
+          orderId: rzpRes.data.id,
+          amount: rzpRes.data.amount,
+          currency: rzpRes.data.currency,
+          keyId,
+        });
+      } catch (err: any) {
+        console.error(
+          'Razorpay order creation failed:',
+          err.response?.data || err.message,
+        );
+        return res.status(500).json({
+          message: 'Unable to initiate Razorpay order',
+          error: err.response?.data?.error?.description || err.message,
         });
       }
+    },
+  );
 
-      return res.json({
-        success: true,
-        verified: true,
-        message: 'Payment verified successfully via Razorpay and credited to Tomato Treasury',
-        transactionId: razorpay_payment_id,
-        orderId: razorpay_order_id,
-        paymentMethod: 'razorpay',
-        settlementAccount: {
-          companyName: process.env.TOMATO_COMPANY_NAME || 'Tomato Technologies Private Limited',
-          accountHolderName: process.env.TOMATO_BANK_ACCOUNT_HOLDER || 'Tomato Central Treasury',
-          bankName: process.env.TOMATO_BANK_NAME || 'HDFC Bank Limited',
-          accountNumber: process.env.TOMATO_BANK_ACCOUNT_NUMBER || '50200088991122',
-          ifscCode: process.env.TOMATO_BANK_IFSC || 'HDFC0000060',
-          upiId: process.env.TOMATO_OFFICIAL_UPI_ID || 'tomato.official@hdfcbank',
-          settlementPolicy: 'Direct Central Settlement to Official Tomato Treasury',
-        },
-      });
-    } catch (err: any) {
-      console.error('Razorpay verification error:', err);
-      return res.status(500).json({ message: 'Payment verification failed', error: err.message });
-    }
-  });
+  // 4c. Razorpay - Verify Payment Signature
+  router.post(
+    '/payment/razorpay/verify',
+    async (req: Request, res: Response) => {
+      try {
+        const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
+          req.body;
 
-  // Helper validation routines for actual payment methods
-  function validateLuhnChecksum(digits: string): boolean {
-    let sum = 0;
-    let alternate = false;
-    for (let i = digits.length - 1; i >= 0; i--) {
-      let n = parseInt(digits.charAt(i), 10);
-      if (isNaN(n)) return false;
-      if (alternate) {
-        n *= 2;
-        if (n > 9) n -= 9;
+        if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+          return res
+            .status(400)
+            .json({ message: 'Missing Razorpay verification parameters' });
+        }
+
+        const keySecret =
+          process.env.RAZORPAY_KEY_SECRET || '1zFOIza2vJGCB6g2PeqFs12t';
+
+        const generatedSignature = crypto
+          .createHmac('sha256', keySecret)
+          .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+          .digest('hex');
+
+        if (generatedSignature !== razorpay_signature) {
+          return res.status(400).json({
+            success: false,
+            verified: false,
+            message: 'Razorpay payment signature verification failed',
+          });
+        }
+
+        return res.json({
+          success: true,
+          verified: true,
+          message:
+            'Payment verified successfully via Razorpay and credited to Tomato Treasury',
+          transactionId: razorpay_payment_id,
+          orderId: razorpay_order_id,
+          paymentMethod: 'razorpay',
+          settlementAccount: getTomatoOfficialBankDetails(),
+        });
+      } catch (err: any) {
+        console.error('Razorpay verification error:', err);
+        return res
+          .status(500)
+          .json({ message: 'Payment verification failed', error: err.message });
       }
-      sum += n;
-      alternate = !alternate;
-    }
-    return sum % 10 === 0;
-  }
-
-  function identifyCardBrand(digits: string): string {
-    if (/^4/.test(digits)) return 'Visa';
-    if (/^(5[1-5]|222[1-9]|22[3-9]|2[3-6]|27[01]|2720)/.test(digits)) return 'Mastercard';
-    if (/^3[47]/.test(digits)) return 'American Express';
-    if (/^(60|65|81|82|508)/.test(digits) || /^35(2[89]|[3-8][0-9])/.test(digits)) return 'RuPay';
-    if (/^(50|5[6-8]|6\d)/.test(digits)) return 'Maestro';
-    return 'Credit / Debit Card';
-  }
-
-  function validateCardExpiration(exp: string): { valid: boolean; message?: string } {
-    const trimmed = String(exp || '').trim();
-    const match = trimmed.match(/^(\d{1,2})\/(\d{2}|\d{4})$/);
-    if (!match) {
-      return { valid: false, message: 'Expiry date must be in MM/YY format (e.g. 12/28)' };
-    }
-    const month = parseInt(match[1] || '0', 10);
-    let year = parseInt(match[2] || '0', 10);
-    if (month < 1 || month > 12) {
-      return { valid: false, message: 'Invalid card expiry month (must be 01 - 12)' };
-    }
-    if (year < 100) year += 2000;
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth() + 1;
-    if (year < currentYear || (year === currentYear && month < currentMonth)) {
-      return { valid: false, message: 'Card has expired. Please use an active card.' };
-    }
-    if (year > currentYear + 30) {
-      return { valid: false, message: 'Invalid expiry year.' };
-    }
-    return { valid: true };
-  }
+    },
+  );
 
   // 4d. Payment Gateway integration endpoint (Validated Direct & Gateway Settlement)
   router.post('/payment/process', async (req: Request, res: Response) => {
     try {
-      const { amount, paymentMethod, cardDetails, upiId, bankCode, utrReference } = req.body;
+      const {
+        amount,
+        paymentMethod,
+        cardDetails,
+        upiId,
+        bankCode,
+        utrReference,
+      } = req.body;
       const numAmount = Number(amount);
 
       if (!numAmount || numAmount <= 0) {
@@ -1820,7 +2301,10 @@ const createCustomerRouter = () => {
       let detectedBrand = 'Generic';
 
       if (method === 'card') {
-        const rawCard = String(cardDetails?.number || '').replace(/[\s-]+/g, '');
+        const rawCard = String(cardDetails?.number || '').replace(
+          /[\s-]+/g,
+          '',
+        );
         if (!/^\d{13,19}$/.test(rawCard)) {
           return res.status(400).json({
             message: 'Card number must be between 13 and 19 numeric digits',
@@ -1828,7 +2312,8 @@ const createCustomerRouter = () => {
         }
         if (!validateLuhnChecksum(rawCard)) {
           return res.status(400).json({
-            message: 'Invalid card number (failed Luhn Mod-10 checksum validation)',
+            message:
+              'Invalid card number (failed Luhn Mod-10 checksum validation)',
           });
         }
         detectedBrand = identifyCardBrand(rawCard);
@@ -1848,14 +2333,17 @@ const createCustomerRouter = () => {
 
         const cardHolder = String(cardDetails?.name || '').trim();
         if (cardHolder.length < 2) {
-          return res.status(400).json({ message: 'Valid cardholder name is required' });
+          return res
+            .status(400)
+            .json({ message: 'Valid cardholder name is required' });
         }
       } else if (method === 'upi') {
         const upi = String(upiId || '').trim();
         const upiRegex = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/;
         if (!upiRegex.test(upi)) {
           return res.status(400).json({
-            message: 'Invalid UPI ID format. Expected format: username@bank (e.g. user@okhdfcbank, tomato@paytm)',
+            message:
+              'Invalid UPI ID format. Expected format: username@bank (e.g. user@okhdfcbank, tomato@paytm)',
           });
         }
         if (utrReference) {
@@ -1867,28 +2355,24 @@ const createCustomerRouter = () => {
           }
         }
       } else if (method === 'netbanking') {
-        const selectedBank = String(bankCode || req.body?.bankName || '').trim();
+        const selectedBank = String(
+          bankCode || req.body?.bankName || '',
+        ).trim();
         if (!selectedBank) {
-          return res.status(400).json({ message: 'Please select a valid bank for NetBanking authorization' });
+          return res.status(400).json({
+            message: 'Please select a valid bank for NetBanking authorization',
+          });
         }
       }
 
       const transactionId = `TXN_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
-      const settlementAccount = {
-        companyName: process.env.TOMATO_COMPANY_NAME || 'Tomato Technologies Private Limited',
-        accountHolderName: process.env.TOMATO_BANK_ACCOUNT_HOLDER || 'Tomato Central Treasury',
-        bankName: process.env.TOMATO_BANK_NAME || 'HDFC Bank Limited',
-        accountNumber: process.env.TOMATO_BANK_ACCOUNT_NUMBER || '50200088991122',
-        ifscCode: process.env.TOMATO_BANK_IFSC || 'HDFC0000060',
-        upiId: process.env.TOMATO_OFFICIAL_UPI_ID || 'tomato.official@hdfcbank',
-        branch: 'Central Indiranagar Branch, Bengaluru',
-        settlementPolicy: 'Direct T+1 Central Settlement to Official Tomato Treasury',
-      };
+      const settlementAccount = getTomatoOfficialBankDetails();
 
       return res.json({
         success: true,
-        message: 'Payment verified and authorized for direct settlement to Tomato Official Bank Account',
+        message:
+          'Payment verified and authorized for direct settlement to Tomato Official Bank Account',
         transactionId,
         paymentMethod: method,
         amount: numAmount,
@@ -1899,9 +2383,10 @@ const createCustomerRouter = () => {
       });
     } catch (error: any) {
       console.error('Payment gateway process failed:', error);
-      return res
-        .status(500)
-        .json({ message: 'Payment gateway transaction failed', error: error?.message });
+      return res.status(500).json({
+        message: 'Payment gateway transaction failed',
+        error: error?.message,
+      });
     }
   });
 
@@ -1979,7 +2464,11 @@ const createCustomerRouter = () => {
       }
 
       // 2. Resolve restaurantIdStr (which might be a restaurant or a shop)
-      if (!shopUser && restaurantIdStr && mongoose.isValidObjectId(restaurantIdStr)) {
+      if (
+        !shopUser &&
+        restaurantIdStr &&
+        mongoose.isValidObjectId(restaurantIdStr)
+      ) {
         restaurantUser = await Restaurant.findById(restaurantIdStr);
         if (!restaurantUser) {
           shopUser = await Shop.findById(restaurantIdStr);
@@ -1999,26 +2488,15 @@ const createCustomerRouter = () => {
         }
       }
 
-      const serviceablePincodes = await getServiceablePincodes();
-
-      // 1. Customer Default Pincode Validation
-      // Check customer's default delivery address pincode against Admin Serviceable Delivery Pincodes
       const defaultAddrDoc =
-        (await Address.findOne({ userId: user.userId, isDefault: true }).lean()) ||
-        (await Address.findOne({ userId: user.userId }).lean());
+        (await Address.findOne({
+          userId: user.userId,
+          isDefault: true,
+        }).lean()) || (await Address.findOne({ userId: user.userId }).lean());
 
       const customerDefaultPincode = defaultAddrDoc
         ? resolveAddressPincode(defaultAddrDoc)
         : (customer as any)?.pincode || (customer as any)?.postalCode || '';
-
-      if (!customerDefaultPincode || !serviceablePincodes.includes(customerDefaultPincode)) {
-        return res.status(400).json({
-          message: 'your area is not in servicable range for now, update your address and pincode for orders.',
-          code: 'CUSTOMER_DEFAULT_PINCODE_NOT_SERVICEABLE',
-          customerDefaultPincode: customerDefaultPincode || '',
-          serviceablePincodes,
-        });
-      }
 
       let deliveryAddress = req.body?.deliveryAddress;
       const addressId = req.body?.addressId;
@@ -2030,8 +2508,7 @@ const createCustomerRouter = () => {
                 _id: new mongoose.Types.ObjectId(addressId),
                 userId: user.userId,
               }).lean()
-            : null) ||
-          defaultAddrDoc;
+            : null) || defaultAddrDoc;
 
         if (savedAddress) {
           deliveryAddress = {
@@ -2060,21 +2537,13 @@ const createCustomerRouter = () => {
         }
       }
 
-      const deliveryPincode = resolveAddressPincode(deliveryAddress) || customerDefaultPincode;
-      if (!deliveryPincode || !serviceablePincodes.includes(deliveryPincode)) {
-        return res.status(400).json({
-          message: 'your area is not in servicable range for now, update your address and pincode for orders.',
-          code: 'AREA_OUT_OF_SERVICEABLE_RANGE',
-          customerPincode: deliveryPincode || '',
-          deliveryPincode: deliveryPincode || '',
-          serviceablePincodes,
-        });
-      }
-
       // Resolve delivery coordinates
       let delivLat: number | null = null;
       let delivLng: number | null = null;
-      if (Array.isArray(deliveryAddress.coordinates) && deliveryAddress.coordinates.length >= 2) {
+      if (
+        Array.isArray(deliveryAddress.coordinates) &&
+        deliveryAddress.coordinates.length >= 2
+      ) {
         const cLng = Number(deliveryAddress.coordinates[0]);
         const cLat = Number(deliveryAddress.coordinates[1]);
         if (!isNaN(cLat) && !isNaN(cLng) && (cLat !== 0 || cLng !== 0)) {
@@ -2083,16 +2552,100 @@ const createCustomerRouter = () => {
         }
       }
       if (delivLat === null || delivLng === null) {
-        if (deliveryPincode === '411057') {
-          delivLat = 18.5707;
-          delivLng = 73.6908;
-        } else if (deliveryPincode === '845401') {
-          delivLat = 26.6471;
-          delivLng = 84.9085;
-        } else if (deliveryPincode === '560001') {
-          delivLat = 12.9716;
-          delivLng = 77.5946;
+        if (deliveryAddress.digipin) {
+          const dgpCoords = resolveCoordinatesFromDigipin(
+            deliveryAddress.digipin,
+          );
+          if (dgpCoords) {
+            delivLat = dgpCoords.lat;
+            delivLng = dgpCoords.lng;
+          }
         }
+      }
+      if (delivLat === null || delivLng === null) {
+        const rawPin =
+          resolveAddressPincode(deliveryAddress) || customerDefaultPincode;
+        if (rawPin) {
+          const pinCoords = resolveCoordinatesFromPincode(rawPin);
+          if (pinCoords) {
+            delivLat = pinCoords.lat;
+            delivLng = pinCoords.lng;
+          }
+        }
+      }
+      if (delivLat === null || delivLng === null) {
+        delivLat = 12.9716;
+        delivLng = 77.5946;
+      }
+
+      // 1. Resolve delivery location pincode from deliveryAddress.postalCode, digipin, coordinates, or customer default address
+      let deliveryPincode = resolveAddressPincode(deliveryAddress);
+      if (!deliveryPincode && deliveryAddress?.digipin) {
+        const pinMatch = String(deliveryAddress.digipin).match(/\b\d{6}\b/);
+        if (pinMatch) {
+          deliveryPincode = pinMatch[0];
+        } else {
+          const dgpCoords = resolveCoordinatesFromDigipin(
+            deliveryAddress.digipin,
+          );
+          if (dgpCoords) {
+            if (
+              calculateDistanceKm(
+                dgpCoords.lat,
+                dgpCoords.lng,
+                18.5707,
+                73.6908,
+              ) <= 25
+            )
+              deliveryPincode = '411057';
+            else if (
+              calculateDistanceKm(
+                dgpCoords.lat,
+                dgpCoords.lng,
+                26.6471,
+                84.9085,
+              ) <= 25
+            )
+              deliveryPincode = '845401';
+            else if (
+              calculateDistanceKm(
+                dgpCoords.lat,
+                dgpCoords.lng,
+                12.9716,
+                77.5946,
+              ) <= 25
+            )
+              deliveryPincode = '560001';
+          }
+        }
+      }
+      if (!deliveryPincode && delivLat !== null && delivLng !== null) {
+        if (calculateDistanceKm(delivLat, delivLng, 18.5707, 73.6908) <= 25)
+          deliveryPincode = '411057';
+        else if (
+          calculateDistanceKm(delivLat, delivLng, 26.6471, 84.9085) <= 25
+        )
+          deliveryPincode = '845401';
+        else if (
+          calculateDistanceKm(delivLat, delivLng, 12.9716, 77.5946) <= 25
+        )
+          deliveryPincode = '560001';
+      }
+      if (!deliveryPincode) {
+        deliveryPincode = customerDefaultPincode;
+      }
+
+      // Requirement: Customer delivery location, current location or digipin must be in serviceable location before placing order
+      const serviceablePincodes = await getServiceablePincodes();
+      if (!deliveryPincode || !serviceablePincodes.includes(deliveryPincode)) {
+        return res.status(400).json({
+          message:
+            'your area is not in servicable range for now, update your address and pincode for orders.',
+          code: 'AREA_OUT_OF_SERVICEABLE_RANGE',
+          customerPincode: deliveryPincode || '',
+          deliveryPincode: deliveryPincode || '',
+          serviceablePincodes,
+        });
       }
 
       if (isShopOrder) {
@@ -2100,15 +2653,6 @@ const createCustomerRouter = () => {
           shopUser = await Shop.findOne({ isBlocked: { $ne: true } });
         }
         if (shopUser) {
-          const shopPin = resolvePartnerPincode(shopUser);
-          if (!shopPin || !serviceablePincodes.includes(shopPin)) {
-            return res.status(400).json({
-              message: 'your area is not in servicable range for now, update your address and pincode for orders.',
-              code: 'AREA_OUT_OF_SERVICEABLE_RANGE',
-              storePincode: shopPin || '',
-              serviceablePincodes,
-            });
-          }
           if (shopUser.isApproved === false) {
             return res.status(400).json({
               message: `Shop "${shopUser.name}" is not approved to provide service.`,
@@ -2119,7 +2663,12 @@ const createCustomerRouter = () => {
           const storeCoords = getStoreCoordinates(shopUser);
           if (storeCoords && delivLat !== null && delivLng !== null) {
             const distanceKm = Number(
-              calculateDistanceKm(delivLat, delivLng, storeCoords.lat, storeCoords.lng).toFixed(2),
+              calculateDistanceKm(
+                delivLat,
+                delivLng,
+                storeCoords.lat,
+                storeCoords.lng,
+              ).toFixed(2),
             );
             if (distanceKm > 15.0) {
               return res.status(400).json({
@@ -2138,18 +2687,11 @@ const createCustomerRouter = () => {
         }
       } else {
         if (!restaurantUser) {
-          restaurantUser = await Restaurant.findOne({ isBlocked: { $ne: true } });
+          restaurantUser = await Restaurant.findOne({
+            isBlocked: { $ne: true },
+          });
         }
         if (restaurantUser) {
-          const restPin = resolvePartnerPincode(restaurantUser);
-          if (!restPin || !serviceablePincodes.includes(restPin)) {
-            return res.status(400).json({
-              message: 'your area is not in servicable range for now, update your address and pincode for orders.',
-              code: 'AREA_OUT_OF_SERVICEABLE_RANGE',
-              storePincode: restPin || '',
-              serviceablePincodes,
-            });
-          }
           if (restaurantUser.isApproved === false) {
             return res.status(400).json({
               message: `Restaurant "${restaurantUser.name}" is not approved to provide service.`,
@@ -2160,7 +2702,12 @@ const createCustomerRouter = () => {
           const storeCoords = getStoreCoordinates(restaurantUser);
           if (storeCoords && delivLat !== null && delivLng !== null) {
             const distanceKm = Number(
-              calculateDistanceKm(delivLat, delivLng, storeCoords.lat, storeCoords.lng).toFixed(2),
+              calculateDistanceKm(
+                delivLat,
+                delivLng,
+                storeCoords.lat,
+                storeCoords.lng,
+              ).toFixed(2),
             );
             if (distanceKm > 15.0) {
               return res.status(400).json({
@@ -2171,7 +2718,10 @@ const createCustomerRouter = () => {
               });
             }
           }
-          if (restaurantUser.isOpen === false || restaurantUser.isOnline === false) {
+          if (
+            restaurantUser.isOpen === false ||
+            restaurantUser.isOnline === false
+          ) {
             return res.status(400).json({
               message: `${restaurantUser.name} is currently closed and not accepting orders. Please choose another restaurant or try again later.`,
             });
@@ -2179,26 +2729,61 @@ const createCustomerRouter = () => {
         }
       }
 
+      // Requirement: current selected pincode must be matching with the admin from which restaurant's pincode is matching
+      const targetPartner = isShopOrder ? shopUser : restaurantUser;
+      const storePin = targetPartner
+        ? resolvePartnerPincode(targetPartner)
+        : '';
+      if (!storePin || !serviceablePincodes.includes(storePin)) {
+        return res.status(400).json({
+          message:
+            'your area is not in servicable range for now, update your address and pincode for orders.',
+          code: 'STORE_OUT_OF_SERVICEABLE_RANGE',
+          storePincode: storePin || '',
+          serviceablePincodes,
+        });
+      }
+
+      const adminList = await getAdminPincodeMap();
+      const adminMatch = matchAdminForPincodes(
+        deliveryPincode,
+        storePin,
+        adminList,
+      );
+      if (!adminMatch.matched) {
+        return res.status(400).json({
+          message:
+            'your area is not in servicable range for now, update your address and pincode for orders.',
+          code: 'ADMIN_ZONE_MISMATCH',
+          deliveryPincode,
+          storePincode: storePin,
+          serviceablePincodes,
+        });
+      }
+
       const storeId = isShopOrder
         ? (shopUser?._id as mongoose.Types.ObjectId)
         : restaurantUser
-        ? (restaurantUser._id as mongoose.Types.ObjectId)
-        : undefined;
+          ? (restaurantUser._id as mongoose.Types.ObjectId)
+          : undefined;
       const storeCode = isShopOrder
-        ? (shopUser?.shopId || 'shop-1001')
-        : (restaurantUser?.restaurantId || '');
+        ? shopUser?.shopId || 'shop-1001'
+        : restaurantUser?.restaurantId || '';
       const digipin = isShopOrder
-        ? (shopUser?.digipin || '')
-        : (restaurantUser?.digipin || '');
+        ? shopUser?.digipin || ''
+        : restaurantUser?.digipin || '';
       const storeName = isShopOrder
-        ? (shopUser?.name || 'Tomato Partner Shop')
-        : (restaurantUser ? restaurantUser.name : 'Tomato Partner Restaurant');
+        ? shopUser?.name || 'Tomato Partner Shop'
+        : restaurantUser
+          ? restaurantUser.name
+          : 'Tomato Partner Restaurant';
       const storeAddress = isShopOrder
-        ? (shopUser?.shopAddress || '45 CMH Road, Indiranagar, Bengaluru, 560038')
-        : (restaurantUser?.restaurantAddress || '12 Indiranagar 100ft Road, Bengaluru, 560038');
+        ? shopUser?.shopAddress || '45 CMH Road, Indiranagar, Bengaluru, 560038'
+        : restaurantUser?.restaurantAddress ||
+          '12 Indiranagar 100ft Road, Bengaluru, 560038';
       const storeLocation = isShopOrder
-        ? (shopUser?.shopLocation || { lat: 12.9784, lng: 77.6408 })
-        : (restaurantUser?.restaurantLocation || { lat: 12.9716, lng: 77.5946 });
+        ? shopUser?.shopLocation || { lat: 12.9784, lng: 77.6408 }
+        : restaurantUser?.restaurantLocation || { lat: 12.9716, lng: 77.5946 };
 
       // Find eligible riders whose operating pincode matches the Admin Serviceable Delivery Pincodes for this delivery location
       const allRiders = await Rider.find({
@@ -2211,9 +2796,13 @@ const createCustomerRouter = () => {
       );
 
       let assignedRider: any = null;
-      if (matchedLocationRiders.length > 0) {
-        const onlineMatched = matchedLocationRiders.filter((r) => r.isOnline !== false);
-        const pool = onlineMatched.length > 0 ? onlineMatched : matchedLocationRiders;
+      const riderPoolToUse =
+        matchedLocationRiders.length > 0 ? matchedLocationRiders : allRiders;
+      if (riderPoolToUse.length > 0) {
+        const onlineMatched = riderPoolToUse.filter(
+          (r) => r.isOnline !== false,
+        );
+        const pool = onlineMatched.length > 0 ? onlineMatched : riderPoolToUse;
 
         const restLat = storeLocation?.lat ?? 12.9716;
         const restLng = storeLocation?.lng ?? 77.5946;
@@ -2241,8 +2830,8 @@ const createCustomerRouter = () => {
       const rawCouponCodes: string[] = Array.isArray(req.body?.couponCodes)
         ? req.body.couponCodes
         : req.body?.couponCode
-        ? [String(req.body.couponCode)]
-        : [];
+          ? [String(req.body.couponCode)]
+          : [];
 
       if (rawCouponCodes.length > MAX_COUPONS_PER_ORDER) {
         return res.status(400).json({
@@ -2261,7 +2850,9 @@ const createCustomerRouter = () => {
 
       if (rawCouponCodes.length > 0 && !couponEval.valid) {
         return res.status(400).json({
-          message: couponEval.message || 'One or more selected coupons are invalid for this order.',
+          message:
+            couponEval.message ||
+            'One or more selected coupons are invalid for this order.',
           code: 'INVALID_COUPON',
           rejectedCoupons: couponEval.rejectedCoupons,
         });
@@ -2281,9 +2872,13 @@ const createCustomerRouter = () => {
         Number((subtotal + tax + deliveryFee - discountAmount).toFixed(2)),
       );
 
-      const paymentMethod = ['card', 'upi', 'netbanking', 'cod', 'razorpay'].includes(
-        req.body?.paymentMethod,
-      )
+      const paymentMethod = [
+        'card',
+        'upi',
+        'netbanking',
+        'cod',
+        'razorpay',
+      ].includes(req.body?.paymentMethod)
         ? req.body.paymentMethod
         : 'card';
       const paymentTransactionId =
@@ -2439,7 +3034,8 @@ const createCustomerRouter = () => {
 
       // Dispatch real-time mobile notification to customer via Arattai
       const customerPhone =
-        (req.body?.deliveryAddress && typeof req.body.deliveryAddress.phone === 'string'
+        (req.body?.deliveryAddress &&
+        typeof req.body.deliveryAddress.phone === 'string'
           ? req.body.deliveryAddress.phone
           : '') ||
         (typeof req.body?.phone === 'string' ? req.body.phone : '') ||
@@ -2454,7 +3050,9 @@ const createCustomerRouter = () => {
             status: 'placed',
             amount: totalAmount,
           })
-          .catch((err) => console.error('[Arattai Order Notification Error]:', err));
+          .catch((err) =>
+            console.error('[Arattai Order Notification Error]:', err),
+          );
       }
 
       return res.status(201).json({
@@ -2525,18 +3123,19 @@ const createCustomerRouter = () => {
       });
       if (!order) return res.status(404).json({ message: 'Order not found' });
 
-      const [restaurantUser, shopUser, customerUser, adminGsn] = await Promise.all([
-        order.restaurantId
-          ? await Restaurant.findById(order.restaurantId).lean()
-          : null,
-        order.restaurantId
-          ? await Shop.findById(order.restaurantId).lean()
-          : null,
-        order.customerId
-          ? await Customer.findById(order.customerId).lean()
-          : null,
-        resolveAdminGsnNumber(),
-      ]);
+      const [restaurantUser, shopUser, customerUser, adminGsn] =
+        await Promise.all([
+          order.restaurantId
+            ? await Restaurant.findById(order.restaurantId).lean()
+            : null,
+          order.restaurantId
+            ? await Shop.findById(order.restaurantId).lean()
+            : null,
+          order.customerId
+            ? await Customer.findById(order.customerId).lean()
+            : null,
+          resolveAdminGsnNumber(),
+        ]);
 
       const bill = formatBill(
         order,
@@ -2561,7 +3160,9 @@ const createCustomerRouter = () => {
           return res.status(401).json({ message: 'Authentication required' });
         const orderId = String(req.params.orderId || '');
         if (!orderId || !mongoose.isValidObjectId(orderId)) {
-          return res.status(400).json({ message: 'Valid order ID is required' });
+          return res
+            .status(400)
+            .json({ message: 'Valid order ID is required' });
         }
 
         const order = await Order.findOne({
@@ -2573,13 +3174,17 @@ const createCustomerRouter = () => {
         const rawCodes: string[] = Array.isArray(req.body?.couponCodes)
           ? req.body.couponCodes
           : req.body?.couponCode
-          ? [String(req.body.couponCode)]
-          : [];
+            ? [String(req.body.couponCode)]
+            : [];
 
         const cleanCodes = Array.from(
           new Set(
             rawCodes
-              .map((c) => String(c || '').trim().toUpperCase())
+              .map((c) =>
+                String(c || '')
+                  .trim()
+                  .toUpperCase(),
+              )
               .filter(Boolean),
           ),
         );
@@ -2659,8 +3264,7 @@ const createCustomerRouter = () => {
         if (!evalResult.valid) {
           return res.status(400).json({
             message:
-              evalResult.message ||
-              'Coupon code is not valid for this bill.',
+              evalResult.message || 'Coupon code is not valid for this bill.',
             rejectedCoupons: evalResult.rejectedCoupons,
           });
         }
@@ -2678,7 +3282,10 @@ const createCustomerRouter = () => {
           Number(order.subtotal || 0) +
           Number(order.tax || 0) +
           Number(order.deliveryFee ?? 40);
-        const newTotal = Math.max(1, Number((gross - discountAmount).toFixed(2)));
+        const newTotal = Math.max(
+          1,
+          Number((gross - discountAmount).toFixed(2)),
+        );
 
         order.discountAmount = discountAmount;
         order.couponCodes = couponCodes;

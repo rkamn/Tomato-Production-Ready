@@ -17,6 +17,12 @@ import {
 	getServiceablePincodes,
 } from '../../utils/bankHelpers.js';
 import { getOrCreateUserWallet } from '../wallet/walletService.js';
+import {
+	createSession,
+	revokeSession,
+	revokeAllUserSessions,
+	getUserActiveSessions,
+} from '../../services/sessionService.js';
 
 const getPublicBaseUrl = () => process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 5050}`;
 
@@ -102,6 +108,7 @@ export const createToken = (user: {
 	_id: { toString: () => string };
 	email?: string;
 	phone?: string;
+	name?: string;
 	role: string;
 	permissions?: string[];
 	adminRoleTitle?: string;
@@ -112,16 +119,18 @@ export const createToken = (user: {
 	adminId?: string;
 	employeeId?: string;
 	shopId?: string;
-}) => {
+}, sessionId?: string) => {
 	const jwtSecret = process.env.JWT_SECRET || 'tomato-local-development-secret';
 
 	return jwt.sign(
 		{
+			...(sessionId ? { sessionId } : {}),
 			userId: user._id.toString(),
 			id: user._id.toString(),
 			_id: user._id.toString(),
 			email: user.email,
 			phone: user.phone,
+			name: user.name,
 			role: user.role,
 			permissions: user.permissions || [],
 			adminRoleTitle: user.adminRoleTitle || '',
@@ -208,6 +217,8 @@ export const userResponse = (user: {
 		image: user.image || '',
 		role: user.role,
 		isApproved: user.isApproved ?? true,
+		approvalStatus: (user as any).approvalStatus || (user.isApproved === false ? 'pending' : 'approved'),
+		rejectionReason: (user as any).rejectionReason || '',
 		restaurantId,
 		shopId,
 		riderId,
@@ -245,8 +256,8 @@ export const registerUser = async (req: Request, res: Response) => {
 	const password = typeof req.body?.password === 'string' ? req.body.password : '';
 	const requestedRole = typeof req.body?.role === 'string' ? req.body.role : 'customer';
 
-	if (requestedRole === 'subadmin' || requestedRole === 'employee' || requestedRole === 'admin') {
-		return res.status(403).json({ message: 'Administrative and staff accounts can only be created by an administrator' });
+	if (requestedRole === 'subadmin' || requestedRole === 'admin') {
+		return res.status(403).json({ message: 'Administrative accounts can only be created by an administrator' });
 	}
 
 	const role = USER_ROLES.includes(requestedRole as UserRole) ? requestedRole as UserRole : null;
@@ -349,9 +360,11 @@ export const registerUser = async (req: Request, res: Response) => {
 				type: 'service',
 			});
 
+			const { token, session } = await createSession(shop as any, req);
 			return res.status(201).json({
-				token: createToken(shop as any),
+				token,
 				user: userResponse(shop as any),
+				session: { sessionId: session.sessionId, expiresAt: session.expiresAt },
 				message: 'Registration received. Awaiting admin approval.',
 			});
 		}
@@ -389,9 +402,11 @@ export const registerUser = async (req: Request, res: Response) => {
 				type: 'service',
 			});
 
+			const { token, session } = await createSession(restaurant as any, req);
 			return res.status(201).json({
-				token: createToken(restaurant as any),
+				token,
 				user: userResponse(restaurant as any),
+				session: { sessionId: session.sessionId, expiresAt: session.expiresAt },
 				message: 'Registration received. Awaiting admin approval.',
 			});
 		}
@@ -420,9 +435,11 @@ export const registerUser = async (req: Request, res: Response) => {
 				type: 'service',
 			});
 
+			const { token, session } = await createSession(customer as any, req);
 			return res.status(201).json({
-				token: createToken(customer as any),
+				token,
 				user: userResponse(customer as any),
+				session: { sessionId: session.sessionId, expiresAt: session.expiresAt },
 				message: 'Registration successful',
 			});
 		}
@@ -461,27 +478,34 @@ export const registerUser = async (req: Request, res: Response) => {
 				type: 'service',
 			});
 
+			const { token, session } = await createSession(rider as any, req);
 			return res.status(201).json({
-				token: createToken(rider as any),
+				token,
 				user: userResponse(rider as any),
+				session: { sessionId: session.sessionId, expiresAt: session.expiresAt },
 				message: 'Registration received. Awaiting admin approval.',
 			});
 		}
 
-		const isApproved = true;
+		const isEmployee = role === 'employee';
+		const isApproved = !isEmployee; // Employee accounts require admin/superadmin approval!
+		const approvalStatus = isEmployee ? 'pending' : 'approved';
 		const adminId = role === 'admin' ? await generateAdminId() : undefined;
 		const subadminId = role === 'subadmin' ? await generateSubAdminId() : undefined;
+		const employeeId = isEmployee ? await generateEmployeeId() : undefined;
 		const employeePayload: Record<string, unknown> = {
 			name,
 			...registrationData,
 			passwordHash: await hashPassword(password),
 			role,
-			adminRoleTitle: role === 'admin' ? 'Platform Administrator' : 'Operations Sub-Admin',
+			adminRoleTitle: role === 'admin' ? 'Platform Administrator' : role === 'subadmin' ? 'Operations Sub-Admin' : 'Employee (Pending Role Assignment)',
 			isApproved,
+			approvalStatus,
 			isBlocked: false,
-			permissions: role === 'admin' ? ['*'] : ['orders_manage'],
+			permissions: role === 'admin' ? ['*'] : role === 'subadmin' ? ['orders_manage'] : [],
 			...(adminId ? { adminId } : {}),
 			...(subadminId ? { subadminId } : {}),
+			...(employeeId ? { employeeId } : {}),
 		};
 
 		const employee = await Employee.create(employeePayload);
@@ -491,14 +515,20 @@ export const registerUser = async (req: Request, res: Response) => {
 			userId: String(employee._id),
 			role: employee.role,
 			title: 'Welcome to Tomato',
-			message: `Your ${employee.role} account is ready.`,
+			message: isEmployee
+				? 'Your employee registration has been submitted and is pending administrator approval and role assignment.'
+				: `Your ${employee.role} account is ready.`,
 			type: 'service',
 		});
 
+		const { token, session } = await createSession(employee as any, req);
 		return res.status(201).json({
-			token: createToken(employee as any),
+			token,
 			user: userResponse(employee as any),
-			message: 'Registration successful',
+			session: { sessionId: session.sessionId, expiresAt: session.expiresAt },
+			message: isEmployee
+				? 'Employee registration submitted successfully. Awaiting administrator approval and role assignment.'
+				: 'Registration successful',
 		});
 	} catch (error) {
 		console.error('Registration failed:', error);
@@ -581,7 +611,33 @@ export const loginUser = async (req: Request, res: Response) => {
 			return res.status(403).json({ message: 'This account has been blocked by an administrator. Please contact support.' });
 		}
 
-		return res.status(200).json({ token: createToken(user), user: userResponse(user) });
+		if (user.role === 'employee' && user.isApproved === false) {
+			if ((user as any).approvalStatus === 'rejected') {
+				return res.status(403).json({
+					message: 'Your employee registration has been rejected by an administrator. Please contact support.',
+					isApproved: false,
+					approvalStatus: 'rejected',
+				});
+			}
+			return res.status(403).json({
+				message: 'Your employee account is pending approval and role assignment by an administrator. Please wait for approval before signing in.',
+				isApproved: false,
+				approvalStatus: 'pending',
+			});
+		}
+
+		const { token, session } = await createSession(user, req);
+		return res.status(200).json({
+			token,
+			user: userResponse(user),
+			session: {
+				sessionId: session.sessionId,
+				deviceType: session.deviceType,
+				browser: session.browser,
+				os: session.os,
+				expiresAt: session.expiresAt,
+			},
+		});
 	} catch (error) {
 		console.error('Login failed:', error);
 		return res.status(500).json({ message: 'Unable to log in' });
@@ -714,6 +770,9 @@ export const resetPassword = async (req: Request, res: Response) => {
 		user.set('resetPasswordTokenHash', undefined);
 		user.set('resetPasswordExpiresAt', undefined);
 		await user.save();
+
+		// Revoke all existing sessions across devices on password reset
+		await revokeAllUserSessions(String(user._id), 'password_reset').catch(() => {});
 
 		return res.status(200).json({ message: 'Password reset successful' });
 	} catch (error) {
@@ -892,5 +951,72 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 			return res.status(409).json({ message: 'An account with that email or mobile number already exists' });
 		}
 		return res.status(500).json({ message: 'Unable to update profile' });
+	}
+};
+
+export const logoutUser = async (req: AuthenticatedRequest, res: Response) => {
+	try {
+		const sessionId = req.user?.sessionId;
+		if (sessionId) {
+			await revokeSession(sessionId, 'user_logout');
+		}
+		return res.status(200).json({ message: 'Signed out successfully' });
+	} catch (error) {
+		console.error('Logout failed:', error);
+		return res.status(500).json({ message: 'Unable to sign out' });
+	}
+};
+
+export const logoutAllSessions = async (req: AuthenticatedRequest, res: Response) => {
+	try {
+		const userId = req.user?.userId;
+		if (!userId) {
+			return res.status(401).json({ message: 'Authentication required' });
+		}
+		const count = await revokeAllUserSessions(userId, 'user_logout_all');
+		return res.status(200).json({ message: `Successfully signed out of ${count} active session(s)` });
+	} catch (error) {
+		console.error('Logout all sessions failed:', error);
+		return res.status(500).json({ message: 'Unable to sign out of all sessions' });
+	}
+};
+
+export const getActiveSessions = async (req: AuthenticatedRequest, res: Response) => {
+	try {
+		const userId = req.user?.userId;
+		if (!userId) {
+			return res.status(401).json({ message: 'Authentication required' });
+		}
+		const sessions = await getUserActiveSessions(userId, req.user?.sessionId);
+		return res.status(200).json({ sessions });
+	} catch (error) {
+		console.error('Get active sessions failed:', error);
+		return res.status(500).json({ message: 'Unable to retrieve active sessions' });
+	}
+};
+
+export const revokeSingleSession = async (req: AuthenticatedRequest, res: Response) => {
+	try {
+		const userId = req.user?.userId;
+		const rawSessionId = req.params.sessionId;
+		const sessionId = Array.isArray(rawSessionId) ? rawSessionId[0] : rawSessionId;
+		if (!userId) {
+			return res.status(401).json({ message: 'Authentication required' });
+		}
+		if (!sessionId || typeof sessionId !== 'string') {
+			return res.status(400).json({ message: 'Session ID is required' });
+		}
+
+		const sessions = await getUserActiveSessions(userId);
+		const targetSession = sessions.find((s) => s.sessionId === sessionId);
+		if (!targetSession) {
+			return res.status(404).json({ message: 'Session not found or already expired' });
+		}
+
+		await revokeSession(sessionId, 'user_revoked');
+		return res.status(200).json({ message: 'Session revoked successfully' });
+	} catch (error) {
+		console.error('Revoke session failed:', error);
+		return res.status(500).json({ message: 'Unable to revoke session' });
 	}
 };

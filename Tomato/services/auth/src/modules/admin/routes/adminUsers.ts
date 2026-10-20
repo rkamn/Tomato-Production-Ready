@@ -2100,6 +2100,168 @@ const router = Router();
   router.delete('/employees/:id', requireRole('admin', 'superadmin'), handleDeleteStaff);
 
   // =========================================================================
+  // CONTROL PANEL / STAFF: APPROVE & REJECT EMPLOYEE ONBOARDING
+  // =========================================================================
+  router.put(
+    '/employees/:id/approve',
+    requireRole('admin', 'superadmin'),
+    async (req: Request, res: Response) => {
+      try {
+        const caller = (req as AuthenticatedRequest).user;
+        const targetId = String(req.params.id || '').trim();
+        const { role, adminRoleTitle, permissions } = req.body;
+
+        let targetEmployee: any = null;
+        if (mongoose.isValidObjectId(targetId)) {
+          targetEmployee = await Employee.findById(targetId);
+        }
+        if (!targetEmployee) {
+          targetEmployee = await Employee.findOne({
+            $or: [
+              { employeeId: targetId },
+              { subadminId: targetId },
+              { adminId: targetId },
+              { email: targetId.toLowerCase() },
+            ],
+          });
+        }
+
+        if (!targetEmployee) {
+          return res.status(404).json({ message: 'Employee not found' });
+        }
+
+        const isCallerSuperAdmin = caller?.role === 'superadmin';
+
+        // Role assignment if provided
+        let roleDoc: any = null;
+        if (role) {
+          const cleanRoleKey = String(role).trim().toLowerCase();
+          if (cleanRoleKey === 'superadmin' && !isCallerSuperAdmin) {
+            return res.status(403).json({ message: 'Only Super Administrator can assign Super Admin role' });
+          }
+          roleDoc = await Role.findOne({ roleKey: cleanRoleKey });
+          const effectiveRoleKey = roleDoc ? roleDoc.roleKey : cleanRoleKey;
+          const effectiveBaseRole = roleDoc ? roleDoc.baseRole : (['admin', 'subadmin', 'employee'].includes(effectiveRoleKey) ? effectiveRoleKey : 'subadmin');
+
+          targetEmployee.role = effectiveRoleKey;
+          targetEmployee.baseRole = effectiveBaseRole;
+
+          if (effectiveBaseRole === 'admin' && !targetEmployee.adminId) {
+            targetEmployee.adminId = await generateAdminId();
+          } else if (effectiveBaseRole === 'subadmin' && !targetEmployee.subadminId) {
+            targetEmployee.subadminId = await generateSubAdminId();
+          } else if (effectiveBaseRole === 'employee' && !targetEmployee.employeeId) {
+            targetEmployee.employeeId = await generateEmployeeId();
+          }
+
+          if (roleDoc && Array.isArray(roleDoc.permissions) && roleDoc.permissions.length > 0 && (!permissions || !permissions.length)) {
+            targetEmployee.permissions = roleDoc.permissions;
+          }
+        }
+
+        if (typeof adminRoleTitle === 'string' && adminRoleTitle.trim()) {
+          targetEmployee.adminRoleTitle = adminRoleTitle.trim();
+        } else if (roleDoc && roleDoc.displayName) {
+          targetEmployee.adminRoleTitle = roleDoc.displayName;
+        } else if (!targetEmployee.adminRoleTitle || targetEmployee.adminRoleTitle.includes('Pending')) {
+          targetEmployee.adminRoleTitle = targetEmployee.role === 'admin' ? 'Platform Administrator' : targetEmployee.role === 'subadmin' ? 'Operations Sub-Admin' : 'Operations Associate';
+        }
+
+        if (Array.isArray(permissions)) {
+          targetEmployee.permissions = permissions;
+        } else if (targetEmployee.role === 'admin' || targetEmployee.baseRole === 'admin') {
+          targetEmployee.permissions = ['*'];
+        }
+
+        targetEmployee.isApproved = true;
+        targetEmployee.approvalStatus = 'approved';
+        targetEmployee.rejectionReason = '';
+        await targetEmployee.save();
+
+        await Notification.create({
+          userId: String(targetEmployee._id),
+          role: targetEmployee.role,
+          title: 'Account Approved!',
+          message: `Your employee account has been approved by ${caller?.name || 'Administrator'} and assigned the role "${targetEmployee.adminRoleTitle || targetEmployee.role}". Your account is now active.`,
+          type: 'service',
+        }).catch(() => {});
+
+        return res.json({
+          success: true,
+          message: `Employee "${targetEmployee.name}" has been approved with role "${targetEmployee.adminRoleTitle || targetEmployee.role}" and is now active!`,
+          employee: userResponse(targetEmployee),
+        });
+      } catch (err: any) {
+        console.error('Approve employee error:', err);
+        return res.status(500).json({ message: 'Unable to approve employee', error: err.message });
+      }
+    },
+  );
+
+  const handleRejectEmployee = async (req: Request, res: Response) => {
+    try {
+      const caller = (req as AuthenticatedRequest).user;
+      const targetId = String(req.params.id || '').trim();
+      const reason =
+        typeof req.body?.reason === 'string' && req.body.reason.trim()
+          ? req.body.reason.trim()
+          : 'Application rejected by administrator';
+
+      let targetEmployee: any = null;
+      if (mongoose.isValidObjectId(targetId)) {
+        targetEmployee = await Employee.findById(targetId);
+      }
+      if (!targetEmployee) {
+        targetEmployee = await Employee.findOne({
+          $or: [
+            { employeeId: targetId },
+            { subadminId: targetId },
+            { adminId: targetId },
+            { email: targetId.toLowerCase() },
+          ],
+        });
+      }
+
+      if (!targetEmployee) {
+        return res.status(404).json({ message: 'Employee not found' });
+      }
+
+      if (targetEmployee.role === 'superadmin') {
+        return res
+          .status(403)
+          .json({ message: 'Cannot reject Super Admin account' });
+      }
+
+      targetEmployee.isApproved = false;
+      targetEmployee.approvalStatus = 'rejected';
+      targetEmployee.rejectionReason = reason;
+      await targetEmployee.save();
+
+      return res.json({
+        success: true,
+        message: `Employee application for "${targetEmployee.name}" has been rejected.`,
+        employee: userResponse(targetEmployee),
+      });
+    } catch (err: any) {
+      console.error('Reject employee error:', err);
+      return res
+        .status(500)
+        .json({ message: 'Unable to reject employee', error: err.message });
+    }
+  };
+
+  router.put(
+    '/employees/:id/reject',
+    requireRole('admin', 'superadmin'),
+    handleRejectEmployee,
+  );
+  router.post(
+    '/employees/:id/reject',
+    requireRole('admin', 'superadmin'),
+    handleRejectEmployee,
+  );
+
+  // =========================================================================
   // CONTROL PANEL: SUMMARY & DIRECTORY OF ADMINS & OPERATING ADDRESSES
   // =========================================================================
   router.get(
@@ -2421,6 +2583,12 @@ const router = Router();
           targetEmployee.permissions = permissions;
         } else if (targetEmployee.role === 'admin' || targetEmployee.baseRole === 'admin') {
           targetEmployee.permissions = ['*'];
+        }
+
+        if (targetEmployee.isApproved === false || targetEmployee.approvalStatus === 'pending') {
+          targetEmployee.isApproved = true;
+          targetEmployee.approvalStatus = 'approved';
+          targetEmployee.rejectionReason = '';
         }
 
         await targetEmployee.save();

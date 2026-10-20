@@ -337,6 +337,22 @@
             throw new Error(data.message || 'Unable to sign in.');
           }
 
+          if (mode === 'register' && data.user?.role === 'employee' && data.user?.isApproved === false) {
+            localStorage.removeItem('tomatoToken');
+            localStorage.removeItem('tomatoUser');
+            accountHeading.textContent = 'Registration Received';
+            document.getElementById('account-name').textContent = data.user.displayName || data.user.name;
+            document.getElementById('account-email').textContent = data.user.email || 'Not provided';
+            document.getElementById('account-phone').textContent = data.user.phone || 'Not provided';
+            document.getElementById('account-role').textContent = 'Employee (Pending Approval)';
+            account.classList.add('visible');
+            message.textContent = 'Your employee registration has been submitted and is pending administrator approval and role assignment. You will be able to sign in once approved.';
+            message.className = 'message success';
+            submitButton.disabled = false;
+            submitButton.textContent = 'Create account';
+            return;
+          }
+
           localStorage.setItem('tomatoToken', data.token);
           if (data.user) {
             delete data.user.walletBalance;

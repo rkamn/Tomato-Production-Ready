@@ -3207,7 +3207,7 @@
             <button type="button" class="btn btn-outline btn-sm" style="font-size:0.74rem; padding:0.2rem 0.6rem;" onclick="switchToAddressManagement()">+ Add / Manage</button>
           </div>
           <div id="checkout-address-container">
-            <select id="checkout-address-select" style="width:100%; padding:0.5rem; border:1px solid var(--line); border-radius:6px; font-size:0.84rem; margin-bottom:0.4rem; background:#fff;" onchange="updateCheckoutAddressPreview()">
+            <select id="checkout-address-select" style="width:100%; padding:0.5rem; border:1px solid var(--line); border-radius:6px; font-size:0.84rem; margin-bottom:0.4rem; background:#fff;" onchange="handleCheckoutAddressChange()">
               <!-- Options populated dynamically -->
             </select>
             <div id="checkout-address-preview" style="font-size:0.81rem; color:var(--muted); background:#faf8f5; padding:0.5rem 0.7rem; border-radius:6px; line-height:1.4;">
@@ -5069,6 +5069,98 @@
           <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:0.65rem;">
             <button type="button" class="btn btn-outline" onclick="closeModal('control-panel-change-role-modal')">Cancel</button>
             <button type="submit" class="btn btn-primary" id="cp-change-role-submit-btn" style="background:#a21caf; border-color:#a21caf;">🛡️ Update Platform Role</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- =====================================================================
+         CONTROL PANEL: APPROVE EMPLOYEE & ASSIGN ROLE MODAL
+         ===================================================================== -->
+    <div id="control-panel-approve-employee-modal" class="modal-overlay">
+      <div class="modal-box" style="max-width:520px;">
+        <div class="modal-header">
+          <div>
+            <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:#059669; font-weight:700;">✅ Staff Onboarding</span>
+            <h2 style="font-size:1.25rem; margin-top:0.2rem;">Approve Employee &amp; Assign Role</h2>
+          </div>
+          <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('control-panel-approve-employee-modal')">&times;</button>
+        </div>
+
+        <form id="control-panel-approve-employee-form" onsubmit="submitControlPanelApproveEmployee(event)">
+          <input type="hidden" id="cp-approve-emp-id" value="" />
+
+          <div id="cp-approve-emp-summary">
+            <!-- Populated dynamically via openApproveEmployeeModal -->
+          </div>
+
+          <div class="form-group" style="margin-bottom:1rem;">
+            <label for="cp-approve-role-select">Assign Platform Role *</label>
+            <select id="cp-approve-role-select" class="form-control" required style="font-weight:700;" onchange="handleApproveRoleSelectChange()">
+              <!-- Populated dynamically from roles -->
+            </select>
+            <small style="display:block; margin-top:0.35rem; font-size:0.78rem; color:var(--muted);">
+              Assigning a role approves this employee and activates their account for login.
+            </small>
+          </div>
+
+          <div class="form-group" style="margin-bottom:1.25rem;">
+            <label for="cp-approve-role-title">Designation / Role Title *</label>
+            <input
+              type="text"
+              id="cp-approve-role-title"
+              class="form-control"
+              required
+              placeholder="e.g. Operations Associate, Quality Staff, Platform Administrator"
+            />
+          </div>
+
+          <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:0.65rem;">
+            <button type="button" class="btn btn-outline" onclick="closeModal('control-panel-approve-employee-modal')">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="cp-approve-submit-btn" style="background:#059669; border-color:#059669;">✅ Approve &amp; Activate Account</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- =====================================================================
+         CONTROL PANEL: REJECT EMPLOYEE MODAL
+         ===================================================================== -->
+    <div id="control-panel-reject-employee-modal" class="modal-overlay">
+      <div class="modal-box" style="max-width:480px;">
+        <div class="modal-header">
+          <div>
+            <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:#b91c1c; font-weight:700;">✕ Staff Onboarding</span>
+            <h2 style="font-size:1.25rem; margin-top:0.2rem;">Reject Employee Application</h2>
+          </div>
+          <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('control-panel-reject-employee-modal')">&times;</button>
+        </div>
+
+        <form id="control-panel-reject-employee-form" onsubmit="submitControlPanelRejectEmployee(event)">
+          <input type="hidden" id="cp-reject-emp-id" value="" />
+
+          <div id="cp-reject-emp-summary">
+            <!-- Populated dynamically via openRejectEmployeeModal -->
+          </div>
+
+          <div class="form-group" style="margin-bottom:1.25rem;">
+            <label for="cp-reject-reason">Rejection Reason *</label>
+            <textarea
+              id="cp-reject-reason"
+              class="form-control"
+              rows="3"
+              required
+              placeholder="e.g. Incomplete verification details, position unavailable, or rejected by administrator."
+              style="resize:vertical; font-size:0.9rem;"
+            >Application rejected by administrator</textarea>
+            <small style="display:block; margin-top:0.35rem; font-size:0.78rem; color:var(--muted);">
+              This reason will be recorded on the employee profile.
+            </small>
+          </div>
+
+          <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:0.65rem;">
+            <button type="button" class="btn btn-outline" onclick="closeModal('control-panel-reject-employee-modal')">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="cp-reject-submit-btn" style="background:#dc2626; border-color:#dc2626;">✕ Confirm Rejection</button>
           </div>
         </form>
       </div>

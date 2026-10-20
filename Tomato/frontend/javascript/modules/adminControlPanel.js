@@ -17,11 +17,13 @@ let currentControlPanelData = {
     updatedBy: 'System Default',
   },
 };
-let controlPanelActiveTab = 'addresses'; // 'addresses' | 'roles' | 'support'
+let controlPanelActiveTab = 'addresses'; // 'addresses' | 'roles' | 'employees' | 'support'
 let controlPanelSearchFilter = '';
 let controlPanelRoleFilter = 'all'; // 'all' | 'admin' | 'subadmin' | 'employee'
 let controlPanelRolesTabFilter = 'all'; // 'all' | 'custom' | 'system'
 let controlPanelRolesSearch = '';
+let controlPanelEmpStatusFilter = 'all'; // 'all' | 'pending' | 'approved' | 'rejected'
+let controlPanelEmpSearch = '';
 
 const CONTROL_PANEL_PERMS_MAP = {
   dashboard_view: { label: 'Analytics Dashboard', icon: '📊', color: '#0284c7' },
@@ -92,7 +94,7 @@ async function loadAdminControlPanel(force = false) {
  * Toggle Control Panel Tab
  */
 function setControlPanelTab(tab) {
-  controlPanelActiveTab = tab === 'roles' ? 'roles' : tab === 'support' ? 'support' : 'addresses';
+  controlPanelActiveTab = tab === 'roles' ? 'roles' : tab === 'support' ? 'support' : tab === 'employees' ? 'employees' : 'addresses';
   renderAdminControlPanelView();
 }
 
@@ -121,6 +123,11 @@ function renderAdminControlPanelView() {
 
   const totalRoles = currentControlPanelData.roles.length;
   const customRolesCount = currentControlPanelData.roles.filter(r => !r.isSystem).length;
+  const pendingEmployeesCount = currentControlPanelData.admins.filter(a =>
+    (a.role === 'employee' || a.baseRole === 'employee' || a.approvalStatus === 'pending') &&
+    a.approvalStatus !== 'rejected' &&
+    (a.isApproved === false || a.approvalStatus === 'pending')
+  ).length;
 
   container.innerHTML = `
     <!-- Top Summary Banner: Current Caller's Assigned Location -->
@@ -201,6 +208,19 @@ function renderAdminControlPanelView() {
 
         <button
           type="button"
+          class="btn btn-sm ${controlPanelActiveTab === 'employees' ? 'btn-primary' : 'btn-outline'}"
+          style="display:inline-flex; align-items:center; gap:0.4rem; font-weight:700; ${controlPanelActiveTab === 'employees' ? 'background:#059669; border-color:#059669; color:#fff;' : ''}"
+          onclick="setControlPanelTab('employees')"
+        >
+          <span>👥 Employee Approvals</span>
+          ${pendingEmployeesCount > 0
+            ? `<span class="badge" style="background:#ef4444; color:#fff; font-size:0.7rem; border-radius:999px; padding:0.15rem 0.5rem;">${pendingEmployeesCount} Pending</span>`
+            : `<span class="badge" style="background:${controlPanelActiveTab === 'employees' ? 'rgba(255,255,255,0.25)' : '#dcfce7'}; color:${controlPanelActiveTab === 'employees' ? '#fff' : '#15803d'}; font-size:0.7rem; border-radius:999px;">${totalEmployees}</span>`
+          }
+        </button>
+
+        <button
+          type="button"
           class="btn btn-sm ${controlPanelActiveTab === 'support' ? 'btn-primary' : 'btn-outline'}"
           style="display:inline-flex; align-items:center; gap:0.4rem; font-weight:700; ${controlPanelActiveTab === 'support' ? 'background:#0891b2; border-color:#0891b2; color:#fff;' : ''}"
           onclick="setControlPanelTab('support')"
@@ -230,6 +250,8 @@ function renderAdminControlPanelView() {
       ? renderAddressesTabHtml(isSuper, totalPlatformAdmins, totalSubAdmins, totalEmployees, totalWithAssignedLocation)
       : controlPanelActiveTab === 'roles'
       ? renderRolesTabHtml(isSuper, totalRoles, customRolesCount)
+      : controlPanelActiveTab === 'employees'
+      ? renderEmployeeApprovalsTabHtml(isSuper)
       : renderSupportTabHtml(isSuper)
     }
   `;
@@ -1673,6 +1695,482 @@ async function saveControlPanelSupportContact() {
   }
 }
 
+/**
+ * Render Employee Approvals Tab (Approve / Reject & Assign Role)
+ */
+function renderEmployeeApprovalsTabHtml(isSuper) {
+  const staff = currentControlPanelData.admins || [];
+  const employeeAccounts = staff.filter(a =>
+    a.role === 'employee' ||
+    a.baseRole === 'employee' ||
+    Boolean(a.employeeId) ||
+    a.approvalStatus === 'pending' ||
+    a.approvalStatus === 'rejected' ||
+    a.isApproved === false
+  );
+
+  const pendingCount = employeeAccounts.filter(a => a.approvalStatus === 'pending' || (a.isApproved === false && a.approvalStatus !== 'rejected')).length;
+  const approvedCount = employeeAccounts.filter(a => a.approvalStatus === 'approved' && a.isApproved !== false).length;
+  const rejectedCount = employeeAccounts.filter(a => a.approvalStatus === 'rejected').length;
+
+  let filtered = employeeAccounts;
+
+  if (controlPanelEmpStatusFilter === 'pending') {
+    filtered = filtered.filter(a => a.approvalStatus === 'pending' || (a.isApproved === false && a.approvalStatus !== 'rejected'));
+  } else if (controlPanelEmpStatusFilter === 'approved') {
+    filtered = filtered.filter(a => a.approvalStatus === 'approved' && a.isApproved !== false);
+  } else if (controlPanelEmpStatusFilter === 'rejected') {
+    filtered = filtered.filter(a => a.approvalStatus === 'rejected');
+  }
+
+  if (controlPanelEmpSearch) {
+    const q = controlPanelEmpSearch.toLowerCase();
+    filtered = filtered.filter(a =>
+      (a.name && a.name.toLowerCase().includes(q)) ||
+      (a.email && a.email.toLowerCase().includes(q)) ||
+      (a.phone && a.phone.includes(q)) ||
+      (a.employeeId && a.employeeId.toLowerCase().includes(q)) ||
+      (a.adminRoleTitle && a.adminRoleTitle.toLowerCase().includes(q))
+    );
+  }
+
+  return `
+    <div style="background:#fff; border:1px solid var(--line); border-radius:12px; padding:1.25rem 1.5rem; margin-bottom:1.5rem; box-shadow:0 2px 8px rgba(0,0,0,0.04);">
+      <!-- Summary metrics cards -->
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:1rem; margin-bottom:1.25rem;">
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:1rem;">
+          <div style="font-size:0.75rem; text-transform:uppercase; font-weight:700; color:#64748b;">Total Staff Applicants</div>
+          <div style="font-size:1.75rem; font-weight:800; color:#0f172a; margin-top:0.25rem;">${employeeAccounts.length}</div>
+          <small style="color:#64748b; font-size:0.75rem;">Registered employee applicants</small>
+        </div>
+
+        <div style="background:#fefce8; border:1px solid #fef08a; border-radius:10px; padding:1rem;">
+          <div style="font-size:0.75rem; text-transform:uppercase; font-weight:700; color:#854d0e;">Pending Approval</div>
+          <div style="font-size:1.75rem; font-weight:800; color:#b45309; margin-top:0.25rem;">${pendingCount}</div>
+          <small style="color:#a16207; font-size:0.75rem;">Awaiting admin review &amp; role</small>
+        </div>
+
+        <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:1rem;">
+          <div style="font-size:0.75rem; text-transform:uppercase; font-weight:700; color:#166534;">Approved &amp; Active</div>
+          <div style="font-size:1.75rem; font-weight:800; color:#15803d; margin-top:0.25rem;">${approvedCount}</div>
+          <small style="color:#166534; font-size:0.75rem;">Active with assigned roles</small>
+        </div>
+
+        <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:10px; padding:1rem;">
+          <div style="font-size:0.75rem; text-transform:uppercase; font-weight:700; color:#991b1b;">Rejected Applications</div>
+          <div style="font-size:1.75rem; font-weight:800; color:#b91c1c; margin-top:0.25rem;">${rejectedCount}</div>
+          <small style="color:#991b1b; font-size:0.75rem;">Declined registrations</small>
+        </div>
+      </div>
+
+      <!-- Search & Status Filter Controls -->
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem; padding-bottom:1rem; border-bottom:1px solid var(--line);">
+        <div style="display:flex; gap:0.35rem; flex-wrap:wrap;">
+          <button type="button" class="btn btn-sm ${controlPanelEmpStatusFilter === 'all' ? 'btn-primary' : 'btn-outline'}" onclick="setControlPanelEmpStatusFilter('all')">All (${employeeAccounts.length})</button>
+          <button type="button" class="btn btn-sm ${controlPanelEmpStatusFilter === 'pending' ? 'btn-primary' : 'btn-outline'}" style="${controlPanelEmpStatusFilter === 'pending' ? 'background:#d97706; border-color:#d97706;' : ''}" onclick="setControlPanelEmpStatusFilter('pending')">⏳ Pending (${pendingCount})</button>
+          <button type="button" class="btn btn-sm ${controlPanelEmpStatusFilter === 'approved' ? 'btn-primary' : 'btn-outline'}" style="${controlPanelEmpStatusFilter === 'approved' ? 'background:#16a34a; border-color:#16a34a;' : ''}" onclick="setControlPanelEmpStatusFilter('approved')">✓ Approved (${approvedCount})</button>
+          <button type="button" class="btn btn-sm ${controlPanelEmpStatusFilter === 'rejected' ? 'btn-primary' : 'btn-outline'}" style="${controlPanelEmpStatusFilter === 'rejected' ? 'background:#dc2626; border-color:#dc2626;' : ''}" onclick="setControlPanelEmpStatusFilter('rejected')">✕ Rejected (${rejectedCount})</button>
+        </div>
+
+        <div style="display:flex; gap:0.5rem; align-items:center;">
+          <div style="position:relative;">
+            <input
+              type="text"
+              id="control-panel-emp-search-input"
+              class="form-control form-control-sm"
+              placeholder="Search by name, ID, email..."
+              value="${escapeHtml(controlPanelEmpSearch)}"
+              oninput="handleControlPanelEmpSearchInput(this.value)"
+              style="padding-left:1.8rem; font-size:0.82rem; min-width:220px;"
+            />
+            <span style="position:absolute; left:0.6rem; top:50%; transform:translateY(-50%); font-size:0.85rem; color:var(--muted); pointer-events:none;">🔍</span>
+          </div>
+          ${controlPanelEmpSearch ? `<button type="button" class="btn btn-outline btn-sm" onclick="clearControlPanelEmpSearch()">✕</button>` : ''}
+        </div>
+      </div>
+
+      <!-- Employee Table -->
+      ${filtered.length === 0 ? `
+        <div style="text-align:center; padding:3rem 1rem; color:var(--muted);">
+          <div style="font-size:2.5rem; margin-bottom:0.5rem;">👥</div>
+          <p style="font-size:0.95rem; font-weight:600;">No employees found matching the filter criteria.</p>
+        </div>
+      ` : `
+        <div style="overflow-x:auto; margin-top:1rem;">
+          <table style="width:100%; border-collapse:collapse; font-size:0.86rem; text-align:left;">
+            <thead>
+              <tr style="border-bottom:2px solid var(--line); color:var(--muted); font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em;">
+                <th style="padding:0.75rem 0.85rem;">Employee &amp; ID</th>
+                <th style="padding:0.75rem 0.85rem;">Contact</th>
+                <th style="padding:0.75rem 0.85rem;">Applied On</th>
+                <th style="padding:0.75rem 0.85rem;">Approval Status</th>
+                <th style="padding:0.75rem 0.85rem;">Assigned Role &amp; Designation</th>
+                <th style="padding:0.75rem 0.85rem; text-align:right;">Governance Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${filtered.map(emp => {
+                const isRejected = emp.approvalStatus === 'rejected';
+                const isApproved = emp.approvalStatus === 'approved' && emp.isApproved !== false;
+                const isPending = !isRejected && (emp.approvalStatus === 'pending' || emp.isApproved === false);
+                const joined = emp.createdAt ? new Date(emp.createdAt).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Recently';
+
+                return `
+                  <tr style="border-bottom:1px solid var(--line); vertical-align:middle;">
+                    <td style="padding:0.85rem;">
+                      <div style="font-weight:700; color:var(--ink);">${escapeHtml(emp.name || 'Unnamed Staff')}</div>
+                      <div style="font-size:0.75rem; color:var(--muted); margin-top:0.15rem;">ID: <code>${escapeHtml(emp.employeeId || emp.subadminId || emp.adminId || emp._id)}</code></div>
+                    </td>
+                    <td style="padding:0.85rem;">
+                      <div>${escapeHtml(emp.email || 'N/A')}</div>
+                      <div style="font-size:0.78rem; color:var(--muted);">${escapeHtml(emp.phone || 'N/A')}</div>
+                    </td>
+                    <td style="padding:0.85rem; color:var(--muted); font-size:0.8rem;">
+                      ${escapeHtml(joined)}
+                    </td>
+                    <td style="padding:0.85rem;">
+                      ${isPending
+                        ? `<span class="badge" style="background:#fef3c7; color:#b45309; border:1px solid #fde68a; font-weight:700; font-size:0.75rem; padding:0.25rem 0.55rem; border-radius:999px;">⏳ Pending Approval</span>`
+                        : isRejected
+                        ? `<span class="badge" style="background:#fee2e2; color:#b91c1c; border:1px solid #fecaca; font-weight:700; font-size:0.75rem; padding:0.25rem 0.55rem; border-radius:999px;" title="${escapeHtml(emp.rejectionReason || 'Rejected')}">✕ Rejected</span>`
+                        : `<span class="badge" style="background:#dcfce7; color:#15803d; border:1px solid #bbf7d0; font-weight:700; font-size:0.75rem; padding:0.25rem 0.55rem; border-radius:999px;">✓ Active &amp; Approved</span>`
+                      }
+                    </td>
+                    <td style="padding:0.85rem;">
+                      ${isApproved
+                        ? `
+                          <div style="display:inline-flex; align-items:center; gap:0.35rem; background:#f1f5f9; padding:0.2rem 0.5rem; border-radius:6px; border:1px solid #e2e8f0;">
+                            <span style="font-weight:700; color:#0f172a; font-size:0.8rem;">${escapeHtml((emp.role || 'employee').toUpperCase())}</span>
+                            <span style="color:#64748b; font-size:0.75rem;">• ${escapeHtml(emp.adminRoleTitle || 'Staff')}</span>
+                          </div>
+                        `
+                        : isRejected
+                        ? `<span style="color:#b91c1c; font-size:0.78rem; font-weight:600;">✕ Application Rejected</span>`
+                        : `<span style="color:#d97706; font-size:0.78rem; font-weight:600;">⚠️ Role Pending Assignment</span>`
+                      }
+                    </td>
+                    <td style="padding:0.85rem; text-align:right;">
+                      <div style="display:inline-flex; gap:0.4rem; justify-content:flex-end; flex-wrap:wrap;">
+                        ${isPending ? `
+                          <button
+                            type="button"
+                            class="btn btn-sm btn-primary"
+                            style="background:#059669; border-color:#059669; font-size:0.78rem; padding:0.3rem 0.65rem; font-weight:700;"
+                            onclick="openApproveEmployeeModal('${emp._id}')"
+                          >
+                            ✅ Approve &amp; Assign Role
+                          </button>
+                          <button
+                            type="button"
+                            class="btn btn-outline btn-sm"
+                            style="color:#b91c1c; border-color:#fca5a5; font-size:0.78rem; padding:0.3rem 0.65rem;"
+                            onclick="openRejectEmployeeModal('${emp._id}')"
+                          >
+                            ✕ Reject
+                          </button>
+                        ` : isApproved ? `
+                          <button
+                            type="button"
+                            class="btn btn-outline btn-sm"
+                            style="font-size:0.78rem; padding:0.3rem 0.65rem; color:#7c3aed; border-color:#c4b5fd;"
+                            onclick="openControlPanelChangeRoleModal(currentControlPanelData.admins.find(x => x._id === '${emp._id}'))"
+                          >
+                            🎭 Reassign Role
+                          </button>
+                          <button
+                            type="button"
+                            class="btn btn-outline btn-sm"
+                            style="font-size:0.78rem; padding:0.3rem 0.65rem; color:${emp.isBlocked ? '#15803d' : '#b91c1c'}; border-color:${emp.isBlocked ? '#86efac' : '#fecaca'};"
+                            onclick="toggleStaffStatusFromControlPanel('${emp._id}', ${Boolean(emp.isBlocked)})"
+                          >
+                            ${emp.isBlocked ? '🔓 Unblock' : '🚫 Block'}
+                          </button>
+                        ` : `
+                          <button
+                            type="button"
+                            class="btn btn-sm btn-primary"
+                            style="background:#059669; border-color:#059669; font-size:0.78rem; padding:0.3rem 0.65rem; font-weight:700;"
+                            onclick="openApproveEmployeeModal('${emp._id}')"
+                          >
+                            ↻ Re-evaluate &amp; Approve
+                          </button>
+                        `}
+                      </div>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `}
+    </div>
+  `;
+}
+
+function openApproveEmployeeModal(employeeId) {
+  const emp = currentControlPanelData.admins.find(a => String(a._id) === String(employeeId) || String(a.id) === String(employeeId));
+  if (!emp) {
+    alert('Employee account not found.');
+    return;
+  }
+
+  const idInput = document.getElementById('cp-approve-emp-id');
+  const summaryEl = document.getElementById('cp-approve-emp-summary');
+  const roleSelect = document.getElementById('cp-approve-role-select');
+  const titleInput = document.getElementById('cp-approve-role-title');
+
+  if (idInput) idInput.value = emp._id;
+
+  if (summaryEl) {
+    summaryEl.innerHTML = `
+      <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:0.85rem 1rem; margin-bottom:1rem; font-size:0.86rem; color:#166534;">
+        <div style="font-weight:800; font-size:1.05rem; color:#0f172a;">${escapeHtml(emp.name || 'Unnamed Staff')}</div>
+        <div style="margin-top:0.3rem; font-size:0.78rem; color:#15803d; line-height:1.5;">
+          <strong>Email:</strong> ${escapeHtml(emp.email || 'N/A')} &nbsp;•&nbsp; <strong>Phone:</strong> ${escapeHtml(emp.phone || 'N/A')}<br>
+          <strong>Employee ID:</strong> <code>${escapeHtml(emp.employeeId || emp._id)}</code> &nbsp;•&nbsp; <strong>Registered:</strong> ${emp.createdAt ? new Date(emp.createdAt).toLocaleDateString('en-IN') : 'Recently'}
+        </div>
+      </div>
+    `;
+  }
+
+  if (roleSelect) {
+    const rolesList = currentControlPanelData.roles || [];
+    let opts = `
+      <optgroup label="Standard System Roles">
+        <option value="employee" selected>👔 Operations Staff / Employee (Standard Staff View)</option>
+        <option value="subadmin">🛡️ Operations Sub-Admin (Delegated RBAC operations)</option>
+        <option value="admin">👑 Platform Administrator (Full system management)</option>
+      </optgroup>
+    `;
+
+    const customRoles = rolesList.filter(r => !r.isSystem);
+    if (customRoles.length > 0) {
+      opts += `
+        <optgroup label="Custom Platform Roles">
+          ${customRoles.map(r => `
+            <option value="${escapeHtml(r.roleKey)}">${escapeHtml(r.roleName || r.displayName || r.roleKey)} (${r.baseRole || 'subadmin'})</option>
+          `).join('')}
+        </optgroup>
+      `;
+    }
+    roleSelect.innerHTML = opts;
+  }
+
+  if (titleInput) {
+    titleInput.value = 'Operations Associate';
+  }
+
+  openModal('control-panel-approve-employee-modal');
+}
+window.openApproveEmployeeModal = openApproveEmployeeModal;
+
+function handleApproveRoleSelectChange() {
+  const roleSelect = document.getElementById('cp-approve-role-select');
+  const titleInput = document.getElementById('cp-approve-role-title');
+  if (!roleSelect || !titleInput) return;
+
+  const val = roleSelect.value;
+  if (val === 'admin') {
+    titleInput.value = 'Platform Administrator';
+  } else if (val === 'subadmin') {
+    titleInput.value = 'Operations Sub-Admin';
+  } else if (val === 'employee') {
+    titleInput.value = 'Operations Associate';
+  } else {
+    const customRole = (currentControlPanelData.roles || []).find(r => r.roleKey === val);
+    titleInput.value = customRole?.roleName || customRole?.displayName || val.toUpperCase();
+  }
+}
+window.handleApproveRoleSelectChange = handleApproveRoleSelectChange;
+
+async function submitControlPanelApproveEmployee(event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  const idInput = document.getElementById('cp-approve-emp-id');
+  const roleSelect = document.getElementById('cp-approve-role-select');
+  const titleInput = document.getElementById('cp-approve-role-title');
+  const submitBtn = document.getElementById('cp-approve-submit-btn');
+
+  const empId = idInput?.value?.trim();
+  const roleVal = roleSelect?.value?.trim();
+  const titleVal = titleInput?.value?.trim();
+
+  if (!empId || !roleVal) {
+    alert('Please select a valid role to assign to this employee.');
+    return;
+  }
+
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Approving & Activating...';
+  }
+
+  try {
+    const res = await apiFetch(`/api/admin/employees/${encodeURIComponent(empId)}/approve`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        role: roleVal,
+        adminRoleTitle: titleVal || '',
+      }),
+    });
+
+    closeModal('control-panel-approve-employee-modal');
+
+    if (typeof showToastNotification === 'function') {
+      showToastNotification({
+        title: '✅ Employee Approved',
+        message: res.message || 'Employee account approved and activated successfully!',
+        type: 'success',
+        duration: 4000,
+      });
+    } else {
+      alert(`✅ ${res.message || 'Employee approved and activated successfully!'}`);
+    }
+
+    loadAdminControlPanel(true);
+    if (typeof fetchAdminSubAdmins === 'function') {
+      fetchAdminSubAdmins(true);
+    }
+  } catch (err) {
+    console.error('Failed to approve employee:', err);
+    alert(`Failed to approve employee: ${err.message}`);
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = '✅ Approve & Activate Account';
+    }
+  }
+}
+window.submitControlPanelApproveEmployee = submitControlPanelApproveEmployee;
+
+function openRejectEmployeeModal(employeeId) {
+  const emp = currentControlPanelData?.admins?.find(a => String(a._id) === String(employeeId) || String(a.id) === String(employeeId));
+  if (!emp) {
+    alert('Employee account not found.');
+    return;
+  }
+
+  const idInput = document.getElementById('cp-reject-emp-id');
+  const summaryEl = document.getElementById('cp-reject-emp-summary');
+  const reasonInput = document.getElementById('cp-reject-reason');
+
+  if (idInput) idInput.value = emp._id || employeeId;
+
+  if (summaryEl) {
+    summaryEl.innerHTML = `
+      <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:10px; padding:0.85rem 1rem; margin-bottom:1rem; font-size:0.86rem; color:#991b1b;">
+        <div style="font-weight:800; font-size:1.05rem; color:#991b1b;">${escapeHtml(emp.name || 'Unnamed Staff')}</div>
+        <div style="margin-top:0.3rem; font-size:0.78rem; color:#b91c1c; line-height:1.5;">
+          <strong>Email:</strong> ${escapeHtml(emp.email || 'N/A')} &nbsp;•&nbsp; <strong>Phone:</strong> ${escapeHtml(emp.phone || 'N/A')}<br>
+          <strong>Employee ID:</strong> <code>${escapeHtml(emp.employeeId || emp._id)}</code> &nbsp;•&nbsp; <strong>Registered:</strong> ${emp.createdAt ? new Date(emp.createdAt).toLocaleDateString('en-IN') : 'Recently'}
+        </div>
+      </div>
+    `;
+  }
+
+  if (reasonInput) {
+    reasonInput.value = 'Application rejected by administrator';
+  }
+
+  if (typeof openModal === 'function') {
+    openModal('control-panel-reject-employee-modal');
+  } else {
+    const m = document.getElementById('control-panel-reject-employee-modal');
+    if (m) m.classList.add('visible');
+  }
+}
+window.openRejectEmployeeModal = openRejectEmployeeModal;
+
+async function submitControlPanelRejectEmployee(event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  const idInput = document.getElementById('cp-reject-emp-id');
+  const reasonInput = document.getElementById('cp-reject-reason');
+  const submitBtn = document.getElementById('cp-reject-submit-btn');
+
+  const empId = idInput?.value?.trim();
+  const reasonVal = reasonInput?.value?.trim() || 'Application rejected by administrator';
+
+  if (!empId) {
+    alert('Employee ID is missing.');
+    return;
+  }
+
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Rejecting...';
+  }
+
+  try {
+    const res = await apiFetch(`/api/admin/employees/${encodeURIComponent(empId)}/reject`, {
+      method: 'PUT',
+      body: JSON.stringify({ reason: reasonVal }),
+    });
+
+    if (typeof closeModal === 'function') {
+      closeModal('control-panel-reject-employee-modal');
+    } else {
+      const m = document.getElementById('control-panel-reject-employee-modal');
+      if (m) m.classList.remove('visible');
+    }
+
+    if (typeof showToastNotification === 'function') {
+      showToastNotification({
+        title: '✕ Employee Rejected',
+        message: res.message || 'Employee application has been rejected.',
+        type: 'info',
+        duration: 4000,
+      });
+    } else {
+      alert(`✕ ${res.message || 'Employee application has been rejected.'}`);
+    }
+
+    loadAdminControlPanel(true);
+    if (typeof fetchAdminSubAdmins === 'function') {
+      fetchAdminSubAdmins(true);
+    }
+  } catch (err) {
+    console.error('Failed to reject employee:', err);
+    alert(`Failed to reject employee: ${err.message}`);
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = '✕ Confirm Rejection';
+    }
+  }
+}
+window.submitControlPanelRejectEmployee = submitControlPanelRejectEmployee;
+
+async function rejectEmployeeFromControlPanel(empId) {
+  openRejectEmployeeModal(empId);
+}
+window.rejectEmployeeFromControlPanel = rejectEmployeeFromControlPanel;
+
+function setControlPanelEmpStatusFilter(status) {
+  controlPanelEmpStatusFilter = status || 'all';
+  renderAdminControlPanelView();
+}
+window.setControlPanelEmpStatusFilter = setControlPanelEmpStatusFilter;
+
+function handleControlPanelEmpSearchInput(val) {
+  controlPanelEmpSearch = String(val || '').trim();
+  renderAdminControlPanelView();
+}
+window.handleControlPanelEmpSearchInput = handleControlPanelEmpSearchInput;
+
+function clearControlPanelEmpSearch() {
+  controlPanelEmpSearch = '';
+  renderAdminControlPanelView();
+}
+window.clearControlPanelEmpSearch = clearControlPanelEmpSearch;
+
 async function toggleStaffStatusFromControlPanel(staffId, currentlyBlocked, name = 'Staff Member', role = 'employee') {
   const isEmp = role === 'employee';
   const roleName = isEmp ? 'employee' : role === 'subadmin' ? 'sub-administrator' : 'staff member';
@@ -1763,5 +2261,13 @@ window.resetControlPanelSupportContactDefaults = resetControlPanelSupportContact
 window.saveControlPanelSupportContact = saveControlPanelSupportContact;
 window.toggleStaffStatusFromControlPanel = toggleStaffStatusFromControlPanel;
 window.deleteStaffFromControlPanel = deleteStaffFromControlPanel;
+window.renderEmployeeApprovalsTabHtml = renderEmployeeApprovalsTabHtml;
+window.openApproveEmployeeModal = openApproveEmployeeModal;
+window.handleApproveRoleSelectChange = handleApproveRoleSelectChange;
+window.submitControlPanelApproveEmployee = submitControlPanelApproveEmployee;
+window.rejectEmployeeFromControlPanel = rejectEmployeeFromControlPanel;
+window.setControlPanelEmpStatusFilter = setControlPanelEmpStatusFilter;
+window.handleControlPanelEmpSearchInput = handleControlPanelEmpSearchInput;
+window.clearControlPanelEmpSearch = clearControlPanelEmpSearch;
 window.CONTROL_PANEL_PERMS_MAP = CONTROL_PANEL_PERMS_MAP;
 

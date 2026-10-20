@@ -9,6 +9,10 @@ import {
   resetPassword,
   updateProfile,
   userResponse,
+  logoutUser,
+  logoutAllSessions,
+  getActiveSessions,
+  revokeSingleSession,
 } from './authController.js';
 import {
   authenticate,
@@ -20,7 +24,7 @@ import Restaurant from '../../model/Restaurant.js';
 import Shop from '../../model/Shop.js';
 import Rider from '../../model/Rider.js';
 import Employee from '../../model/Employee.js';
-import { resolvePartnerPincode, getServiceablePincodes } from '../../utils/bankHelpers.js';
+import { resolvePartnerPincode, getServiceablePincodes, getAdminPincodeMap } from '../../utils/bankHelpers.js';
 import {
   getWalletBalances,
   WalletServiceError,
@@ -31,8 +35,11 @@ const createAuthRouter = (upload: multer.Multer) => {
 
   router.get('/serviceable-pincodes', async (_req, res) => {
     try {
-      const pincodes = await getServiceablePincodes();
-      return res.json({ pincodes });
+      const [pincodes, adminZones] = await Promise.all([
+        getServiceablePincodes(),
+        getAdminPincodeMap(),
+      ]);
+      return res.json({ pincodes, adminZones });
     } catch (error) {
       console.error('Serviceable pincodes fetch failed:', error);
       return res.status(500).json({ message: 'Unable to fetch serviceable pincodes' });
@@ -322,6 +329,12 @@ const createAuthRouter = (upload: multer.Multer) => {
   router.put('/profile', authenticate, upload.single('photo'), updateProfile);
   router.post('/password-reset/request', requestPasswordReset);
   router.post('/password-reset/confirm', resetPassword);
+
+  // Active Session Management & Server-Side Revocation
+  router.post('/logout', authenticate, logoutUser);
+  router.post('/logout-all', authenticate, logoutAllSessions);
+  router.get('/sessions', authenticate, getActiveSessions);
+  router.delete('/sessions/:sessionId', authenticate, revokeSingleSession);
 
   return router;
 };

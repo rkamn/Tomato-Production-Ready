@@ -5,10 +5,12 @@ import Restaurant from '../model/Restaurant.js';
 import Customer from '../model/Customer.js';
 import Rider from '../model/Rider.js';
 import Shop from '../model/Shop.js';
+import { validateSession } from '../services/sessionService.js';
 
 export interface AuthenticatedRequest extends Request {
 	user?: {
 		userId: string;
+		sessionId?: string;
 		email?: string;
 		phone?: string;
 		name?: string;
@@ -41,8 +43,21 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 		const payload = jwt.verify(token, jwtSecret);
 		const uid = (payload as any)?.userId || (payload as any)?.id || (payload as any)?._id;
 		const uRole = (payload as any)?.role;
+		const sessionId = typeof (payload as any)?.sessionId === 'string' ? (payload as any).sessionId : undefined;
+
 		if (typeof payload !== 'object' || typeof uid !== 'string' || typeof uRole !== 'string') {
 			return res.status(401).json({ message: 'Invalid authentication token' });
+		}
+
+		// 1. Session Validation: Validate active session against Session Store / Memory Cache
+		if (sessionId) {
+			const activeSession = await validateSession(sessionId, uid);
+			if (!activeSession) {
+				return res.status(401).json({
+					message: 'Session has been invalidated or expired. Please sign in again.',
+					code: 'SESSION_INVALID',
+				});
+			}
 		}
 
 		let permissions: string[] = [];
@@ -59,23 +74,23 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 		try {
 			let dbUser: any = null;
 			if (uRole === 'restaurant') {
-				dbUser = await Restaurant.findById(uid).select('isBlocked isApproved name role restaurantId');
+				dbUser = await Restaurant.findById(uid).select('isBlocked isApproved name role restaurantId').lean();
 			} else if (uRole === 'shop') {
-				dbUser = await Shop.findById(uid).select('isBlocked isApproved name role shopId');
+				dbUser = await Shop.findById(uid).select('isBlocked isApproved name role shopId').lean();
 			} else if (uRole === 'deliveryPartner' || uRole === 'rider') {
-				dbUser = await Rider.findById(uid).select('isBlocked isApproved name role riderId');
+				dbUser = await Rider.findById(uid).select('isBlocked isApproved name role riderId').lean();
 			} else if (uRole === 'customer') {
-				dbUser = await Customer.findById(uid).select('isBlocked isApproved name role customerId');
+				dbUser = await Customer.findById(uid).select('isBlocked isApproved name role customerId').lean();
 			} else {
-				dbUser = await Employee.findById(uid).select('isBlocked isApproved name role baseRole permissions adminRoleTitle restaurantId riderId customerId subadminId adminId employeeId');
+				dbUser = await Employee.findById(uid).select('isBlocked isApproved name role baseRole permissions adminRoleTitle restaurantId riderId customerId subadminId adminId employeeId').lean();
 			}
 
 			if (!dbUser) {
-				dbUser = (await Customer.findById(uid).select('isBlocked isApproved name role customerId'))
-					|| (await Shop.findById(uid).select('isBlocked isApproved name role shopId'))
-					|| (await Rider.findById(uid).select('isBlocked isApproved name role riderId'))
-					|| (await Restaurant.findById(uid).select('isBlocked isApproved name role restaurantId'))
-					|| (await Employee.findById(uid).select('isBlocked isApproved name role baseRole permissions adminRoleTitle restaurantId riderId customerId subadminId adminId employeeId'));
+				dbUser = (await Customer.findById(uid).select('isBlocked isApproved name role customerId').lean())
+					|| (await Shop.findById(uid).select('isBlocked isApproved name role shopId').lean())
+					|| (await Rider.findById(uid).select('isBlocked isApproved name role riderId').lean())
+					|| (await Restaurant.findById(uid).select('isBlocked isApproved name role restaurantId').lean())
+					|| (await Employee.findById(uid).select('isBlocked isApproved name role baseRole permissions adminRoleTitle restaurantId riderId customerId subadminId adminId employeeId').lean());
 			}
 			if (dbUser && dbUser.isBlocked) {
 				return res.status(403).json({ message: 'Your account has been blocked by administrator. Please contact support.' });
@@ -129,6 +144,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 
 		const authenticatedUser: NonNullable<AuthenticatedRequest['user']> = {
 			userId: uid,
+			sessionId,
 			role: uRole as UserRole,
 			baseRole,
 			permissions,
@@ -141,8 +157,9 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 			adminId,
 			employeeId,
 		};
-		if (typeof payload.email === 'string') authenticatedUser.email = payload.email;
-		if (typeof payload.phone === 'string') authenticatedUser.phone = payload.phone;
+		if (typeof (payload as any).email === 'string') authenticatedUser.email = (payload as any).email;
+		if (typeof (payload as any).phone === 'string') authenticatedUser.phone = (payload as any).phone;
+		if (typeof (payload as any).name === 'string') authenticatedUser.name = (payload as any).name;
 		(req as AuthenticatedRequest).user = authenticatedUser;
 		return next();
 	} catch {

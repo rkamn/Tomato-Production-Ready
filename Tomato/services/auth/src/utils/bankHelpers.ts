@@ -537,6 +537,92 @@ export async function removeServiceablePincode(
   return { pincodes, unapprovedPartnersCount };
 }
 
+export interface AdminPincodeInfo {
+  adminId: string;
+  adminName: string;
+  role: string;
+  pincodes: string[];
+}
+
+export async function getAdminPincodeMap(): Promise<AdminPincodeInfo[]> {
+  try {
+    const admins = await Employee.find({
+      role: { $in: ['admin', 'superadmin', 'subadmin'] },
+      isBlocked: { $ne: true },
+    })
+      .select('_id name role assignedLocation')
+      .lean();
+
+    const adminList: AdminPincodeInfo[] = [];
+
+    // Also check global configured serviceable pincodes
+    const doc = await Counter.findById(SERVICEABLE_PINCODES_DOC_ID).lean();
+    const globalPincodes: string[] = [];
+    if (doc && Array.isArray(doc.pincodes)) {
+      for (const p of doc.pincodes) {
+        const clean = String(p || '').trim();
+        if (/^\d{5,6}$/.test(clean)) globalPincodes.push(clean);
+      }
+    }
+
+    for (const admin of admins) {
+      const pinSet = new Set<string>();
+      const assignedPin = resolveAddressPincode(admin.assignedLocation);
+      if (assignedPin && /^\d{5,6}$/.test(assignedPin)) {
+        pinSet.add(assignedPin);
+      }
+      // If admin has multiple serviceable pincodes explicitly configured in assignedLocation
+      if (admin.assignedLocation && Array.isArray((admin.assignedLocation as any).serviceablePincodes)) {
+        for (const p of (admin.assignedLocation as any).serviceablePincodes) {
+          const clean = String(p || '').trim();
+          if (/^\d{5,6}$/.test(clean)) pinSet.add(clean);
+        }
+      }
+      adminList.push({
+        adminId: String(admin._id),
+        adminName: admin.name || 'Admin',
+        role: admin.role,
+        pincodes: Array.from(pinSet),
+      });
+    }
+
+    return adminList;
+  } catch (err) {
+    console.error('getAdminPincodeMap error:', err);
+    return [];
+  }
+}
+
+export function matchAdminForPincodes(
+  customerPin: string,
+  storePin: string,
+  adminList: AdminPincodeInfo[],
+): { matched: boolean; commonAdmin?: AdminPincodeInfo } {
+  if (!customerPin || !storePin) return { matched: false };
+  const cleanCustomerPin = customerPin.trim();
+  const cleanStorePin = storePin.trim();
+
+  // Find if there is an admin whose serviceable pincodes contain BOTH customerPin and storePin
+  for (const admin of adminList) {
+    const coversCustomer = admin.pincodes.includes(cleanCustomerPin);
+    const coversStore = admin.pincodes.includes(cleanStorePin);
+    if (coversCustomer && coversStore) {
+      return { matched: true, commonAdmin: admin };
+    }
+  }
+
+  // If customerPin and storePin are identical and covered by any active admin, they match
+  if (cleanCustomerPin === cleanStorePin) {
+    for (const admin of adminList) {
+      if (admin.pincodes.includes(cleanCustomerPin)) {
+        return { matched: true, commonAdmin: admin };
+      }
+    }
+  }
+
+  return { matched: false };
+}
+
 export const DEFAULT_SUPPORT_CONTACT = {
   priorityEmail: 'lightbits.infotech@gmail.com',
   helpline: '9523654737',

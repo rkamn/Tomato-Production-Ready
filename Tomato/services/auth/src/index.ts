@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import axios from 'axios';
-import connectDB from './config/db.js';
+import connectDB from './config/index.js';
 import {
   authRoute,
   notificationRoutes,
@@ -17,11 +17,11 @@ import {
   shopRoutes,
   riderRoutes,
   supportRoutes,
-} from './modules/index.js';
+} from './routes/index.js';
 import { cleanupExpiredClosedComplaints, Restaurant, Shop } from './model/index.js';
 import { attachWebSocketServer } from './utils/websocket.js';
 
-import { upload, uploadDir } from './middleware/upload.js';
+import { upload, uploadDir } from './middleware/index.js';
 
 dotenv.config({ path: fileURLToPath(new URL('../.env', import.meta.url)) });
 

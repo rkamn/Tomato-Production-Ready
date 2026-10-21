@@ -204,7 +204,6 @@ export const migrateUsersToEmployeesAndDropUsersTable = async () => {
             console.log(`[DB Setup] Super Administrator created in database (username: ${initialUsername}).`);
         } else {
             // Retain credentials from database! Never overwrite username or password with hardcoded values.
-            const currentUsername = superAdmin.username || superAdmin.email || 'super';
             if (process.env.SUPERADMIN_EMAIL && process.env.SUPERADMIN_EMAIL.includes('@')) {
                 const targetSuperEmail = process.env.SUPERADMIN_EMAIL.trim().toLowerCase();
                 if (superAdmin.email !== targetSuperEmail) {
@@ -213,7 +212,6 @@ export const migrateUsersToEmployeesAndDropUsersTable = async () => {
                     console.log(`[DB Setup] Super Administrator email updated to: ${targetSuperEmail}`);
                 }
             }
-            console.log(`[DB Setup] Super Administrator loaded from database (username: ${currentUsername}, role: ${superAdmin.role}, email: ${superAdmin.email}). Database credentials preserved.`);
         }
 
         // Initialize default built-in platform roles if not yet seeded

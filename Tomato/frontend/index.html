@@ -196,14 +196,15 @@
           <form id="reset-form" class="reset-form hidden">
             <h3>Reset your password</h3>
             <p id="reset-intro">
-              Enter your email or mobile number to start a password reset.
+              Enter your email, mobile number, username, or account ID to receive a 6-digit verification code.
             </p>
             <div id="reset-identifier-field" class="field">
-              <label for="reset-identifier">Email or mobile number</label>
+              <label for="reset-identifier">Email, Mobile, Username, or Account ID</label>
               <input
                 id="reset-identifier"
                 type="text"
                 autocomplete="username"
+                placeholder="e.g. user@email.com, 9876543210, super, CUST-1001"
                 required
               />
             </div>
@@ -278,6 +279,7 @@
       </section>
     </main>
 
+    <script src="./javascript/security.js"></script>
     <script src="./javascript/index.js"></script>
   </body>
 </html>

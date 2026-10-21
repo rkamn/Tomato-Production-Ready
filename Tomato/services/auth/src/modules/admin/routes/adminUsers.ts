@@ -40,6 +40,9 @@ import {
   getServiceablePincodes,
   resolvePartnerPincode,
 } from '../../../utils/bankHelpers.js';
+import mailService from '../../../services/mailService.js';
+
+const getPublicBaseUrl = () => process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 5050}`;
 
 const router = Router();
 
@@ -491,6 +494,18 @@ const router = Router();
         });
         await getOrCreateUserWallet(String(restaurant._id), 'restaurant', restaurant.name).catch(() => {});
 
+        if (restaurant.email) {
+          mailService.sendWelcomeAccountMail({
+            userEmail: restaurant.email,
+            userName: restaurant.name,
+            role: 'restaurant',
+            accountId: restaurant.restaurantId,
+            phone: restaurant.phone,
+            isApproved: canAutoApprove,
+            loginUrl: `${getPublicBaseUrl()}`,
+          }).catch((err) => console.error('[Admin] Failed to send restaurant welcome mail:', err));
+        }
+
         return res.status(201).json({
           message: canAutoApprove
             ? 'Restaurant created and approved with verified Bank, PAN & serviceable pincode'
@@ -573,6 +588,18 @@ const router = Router();
         });
         await getOrCreateUserWallet(String(shop._id), 'shop', shop.name).catch(() => {});
 
+        if (shop.email) {
+          mailService.sendWelcomeAccountMail({
+            userEmail: shop.email,
+            userName: shop.name,
+            role: 'shop',
+            accountId: shop.shopId,
+            phone: shop.phone,
+            isApproved: canAutoApprove,
+            loginUrl: `${getPublicBaseUrl()}`,
+          }).catch((err) => console.error('[Admin] Failed to send shop welcome mail:', err));
+        }
+
         return res.status(201).json({
           message: canAutoApprove
             ? 'Shop created and approved with verified Bank, PAN & serviceable pincode'
@@ -596,6 +623,18 @@ const router = Router();
           customerId,
         } as unknown as ICustomer);
         await getOrCreateUserWallet(String(customer._id), 'customer', customer.name).catch(() => {});
+
+        if (customer.email) {
+          mailService.sendWelcomeAccountMail({
+            userEmail: customer.email,
+            userName: customer.name,
+            role: 'customer',
+            accountId: customer.customerId,
+            phone: customer.phone,
+            isApproved: true,
+            loginUrl: `${getPublicBaseUrl()}`,
+          }).catch((err) => console.error('[Admin] Failed to send customer welcome mail:', err));
+        }
 
         return res.status(201).json({
           message: 'Customer created successfully',
@@ -648,6 +687,18 @@ const router = Router();
         } as unknown as IRider);
         await getOrCreateUserWallet(String(rider._id), 'deliveryPartner', rider.name).catch(() => {});
 
+        if (rider.email) {
+          mailService.sendWelcomeAccountMail({
+            userEmail: rider.email,
+            userName: rider.name,
+            role: 'deliveryPartner',
+            accountId: rider.riderId,
+            phone: rider.phone,
+            isApproved: riderBankCheck.valid,
+            loginUrl: `${getPublicBaseUrl()}`,
+          }).catch((err) => console.error('[Admin] Failed to send rider welcome mail:', err));
+        }
+
         return res.status(201).json({
           message: riderBankCheck.valid
             ? 'Delivery partner created and approved with verified Bank & PAN details'
@@ -677,6 +728,18 @@ const router = Router();
 
       const employee = await Employee.create(employeeData);
       await getOrCreateUserWallet(String(employee._id), employee.role, employee.name).catch(() => {});
+
+      if (employee.email) {
+        mailService.sendWelcomeAccountMail({
+          userEmail: employee.email,
+          userName: employee.name,
+          role: employee.role,
+          accountId: employee.adminId || employee.subadminId || employee.employeeId,
+          phone: employee.phone,
+          isApproved: true,
+          loginUrl: `${getPublicBaseUrl()}`,
+        }).catch((err) => console.error('[Admin] Failed to send employee welcome mail:', err));
+      }
 
       return res.status(201).json({
         message: 'Account created successfully in Employees table',
@@ -1459,14 +1522,16 @@ const router = Router();
       try {
         const { search, role: queryRole } = req.query;
         let roleFilter: any;
-        if (queryRole === 'admin') {
-          roleFilter = 'admin';
+        if (queryRole === 'superadmin') {
+          roleFilter = 'superadmin';
+        } else if (queryRole === 'admin') {
+          roleFilter = { $in: ['admin', 'superadmin'] };
         } else if (queryRole === 'subadmin') {
           roleFilter = 'subadmin';
         } else if (queryRole === 'employee') {
           roleFilter = 'employee';
         } else {
-          roleFilter = { $in: ['admin', 'subadmin', 'employee'] };
+          roleFilter = { $in: ['superadmin', 'admin', 'subadmin', 'employee'] };
         }
         const filter: Record<string, any> = { role: roleFilter };
 
@@ -1502,7 +1567,14 @@ const router = Router();
           filter.$or = orConditions;
         }
 
-        const subadmins = await Employee.find(filter).sort({ createdAt: -1 });
+        const rawSubadmins = await Employee.find(filter).sort({ createdAt: -1 });
+        const roleRank: Record<string, number> = { superadmin: 1, admin: 2, subadmin: 3, employee: 4 };
+        const subadmins = rawSubadmins.sort((a, b) => {
+          const rankA = roleRank[a.role] || 5;
+          const rankB = roleRank[b.role] || 5;
+          if (rankA !== rankB) return rankA - rankB;
+          return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+        });
         return res.json({
           subadmins: subadmins.map((u) => userResponse(u)),
           total: subadmins.length,
@@ -1610,6 +1682,18 @@ const router = Router();
           type: 'system',
         });
 
+        if (cleanEmail) {
+          mailService.sendWelcomeAccountMail({
+            userEmail: cleanEmail,
+            userName: subAdmin.name,
+            role: 'subadmin',
+            accountId: subAdmin.subadminId,
+            phone: subAdmin.phone,
+            isApproved: true,
+            loginUrl: `${getPublicBaseUrl()}`,
+          }).catch((err) => console.error('[Admin] Failed to send subadmin welcome mail:', err));
+        }
+
         return res.status(201).json({
           message: `Sub-admin "${subAdmin.name}" created successfully with assigned role`,
           subadmin: userResponse(subAdmin),
@@ -1682,6 +1766,18 @@ const router = Router();
           message: `Your employee account (${emp.adminRoleTitle}) has been created by the Administrator.`,
           type: 'system',
         });
+
+        if (cleanEmail) {
+          mailService.sendWelcomeAccountMail({
+            userEmail: cleanEmail,
+            userName: emp.name,
+            role: 'employee',
+            accountId: emp.employeeId,
+            phone: emp.phone,
+            isApproved: true,
+            loginUrl: `${getPublicBaseUrl()}`,
+          }).catch((err) => console.error('[Admin] Failed to send employee welcome mail:', err));
+        }
 
         return res.status(201).json({
           message: `Employee "${emp.name}" created successfully!`,
@@ -2285,9 +2381,16 @@ const router = Router();
         }
 
         // 2. Fetch all platform staff (superadmin, admin, subadmin, employee, custom roles)
-        const admins = await Employee.find({})
-          .sort({ role: 1, createdAt: 1 })
+        const rawAdmins = await Employee.find({})
+          .sort({ createdAt: 1 })
           .lean();
+        const roleRank: Record<string, number> = { superadmin: 1, admin: 2, subadmin: 3, employee: 4 };
+        const admins = rawAdmins.sort((a: any, b: any) => {
+          const rankA = roleRank[a.role] || 5;
+          const rankB = roleRank[b.role] || 5;
+          if (rankA !== rankB) return rankA - rankB;
+          return (a.name || '').localeCompare(b.name || '');
+        });
 
         // 3. Fetch roles with assigned counts
         await ensureDefaultRoles();

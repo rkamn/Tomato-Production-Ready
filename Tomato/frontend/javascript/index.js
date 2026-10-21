@@ -418,7 +418,9 @@
             resetTokenField.classList.remove('hidden');
             resetToken.value = '';
             resetToken.required = true;
-            resetIntro.textContent = 'Enter the 6-digit verification code sent to your registered email.';
+            resetIntro.textContent = data.maskedEmail
+              ? `Enter the 6-digit verification code sent to ${data.maskedEmail}.`
+              : 'Enter the 6-digit verification code sent to your registered email.';
             message.textContent = data.message || '6-digit verification code sent to your email. Valid for 10 minutes.';
             message.className = 'message success';
             startResendCooldown();
@@ -570,8 +572,12 @@
           }
 
           if (mode === 'register' && data.user?.role === 'employee' && data.user?.isApproved === false) {
-            localStorage.removeItem('tomatoToken');
-            localStorage.removeItem('tomatoUser');
+            if (window.TomatoSecurity && window.TomatoSecurity.clearClientSession) {
+              window.TomatoSecurity.clearClientSession();
+            } else {
+              localStorage.removeItem('tomatoToken');
+              localStorage.removeItem('tomatoUser');
+            }
             accountHeading.textContent = 'Registration Received';
             document.getElementById('account-name').textContent = data.user.displayName || data.user.name;
             document.getElementById('account-email').textContent = data.user.email || 'Not provided';
@@ -625,7 +631,7 @@
         }
       });
 
-      // Automatically handle password reset if customer arrives via email link
+      // Automatically handle password reset if user arrives via email link
       try {
         const urlParams = new URLSearchParams(window.location.search);
         const urlResetToken = urlParams.get('token') || urlParams.get('resetToken');
@@ -633,16 +639,15 @@
           forgotPassword.click();
           resetToken.value = urlResetToken;
           resetIdentifierField.classList.add('hidden');
+          resetSubmit.classList.add('hidden');
           resetTokenField.classList.remove('hidden');
-          newPasswordField.classList.remove('hidden');
-          confirmPasswordField.classList.remove('hidden');
           resetToken.required = true;
-          newPassword.required = true;
-          confirmPassword.required = true;
-          resetSubmit.textContent = 'Set new password';
-          resetIntro.textContent = 'Enter your new password below.';
-          message.textContent = 'Verification token applied from email link.';
+          // Trigger dynamic verification input event
+          resetToken.dispatchEvent(new Event('input'));
+          message.textContent = 'Verification code applied from email link.';
           message.className = 'message success';
-          if (newPassword) newPassword.focus();
+          if (window.TomatoSecurity && window.TomatoSecurity.scrubSensitiveUrlParams) {
+            window.TomatoSecurity.scrubSensitiveUrlParams();
+          }
         }
       } catch (_) {}

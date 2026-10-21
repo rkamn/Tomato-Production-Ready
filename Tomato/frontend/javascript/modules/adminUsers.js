@@ -57,16 +57,17 @@ function clearAdminSubAdminsSearch() {
   fetchAdminSubAdmins(true);
 }
 
-let currentStaffRoleFilter = 'all'; // 'all' | 'admin' | 'subadmin' | 'employee'
+let currentStaffRoleFilter = 'all'; // 'all' | 'superadmin' | 'admin' | 'subadmin' | 'employee'
 
 function filterStaffRole(filterRole) {
   currentStaffRoleFilter = filterRole || 'all';
   const tabAll = document.getElementById('staff-filter-all');
+  const tabSuper = document.getElementById('staff-filter-superadmin');
   const tabAdmin = document.getElementById('staff-filter-admin');
   const tabSub = document.getElementById('staff-filter-subadmin');
   const tabEmp = document.getElementById('staff-filter-employee');
 
-  [tabAll, tabAdmin, tabSub, tabEmp].forEach(tab => {
+  [tabAll, tabSuper, tabAdmin, tabSub, tabEmp].forEach(tab => {
     if (tab) {
       tab.className = 'btn btn-outline btn-sm';
       tab.style.background = '';
@@ -75,7 +76,7 @@ function filterStaffRole(filterRole) {
     }
   });
 
-  const activeTab = filterRole === 'admin' ? tabAdmin : filterRole === 'subadmin' ? tabSub : filterRole === 'employee' ? tabEmp : tabAll;
+  const activeTab = filterRole === 'superadmin' ? tabSuper : filterRole === 'admin' ? tabAdmin : filterRole === 'subadmin' ? tabSub : filterRole === 'employee' ? tabEmp : tabAll;
   if (activeTab) {
     activeTab.className = 'btn btn-sm';
     activeTab.style.background = 'var(--primary)';
@@ -94,7 +95,9 @@ function renderStaffMembersTable() {
 
   let filtered = currentSubAdminsList;
   if (currentStaffRoleFilter !== 'all') {
-    if (currentStaffRoleFilter === 'admin') {
+    if (currentStaffRoleFilter === 'superadmin') {
+      filtered = filtered.filter(s => s.role === 'superadmin');
+    } else if (currentStaffRoleFilter === 'admin') {
       filtered = filtered.filter(s => s.role === 'admin' || s.role === 'superadmin');
     } else {
       filtered = filtered.filter(s => s.role === currentStaffRoleFilter);
@@ -286,6 +289,8 @@ async function fetchAdminSubAdmins(force = false) {
 
     // Render stats
     const totalStaff = subadmins.length;
+    const superAdminCount = subadmins.filter(s => s.role === 'superadmin').length;
+    const adminCount = subadmins.filter(s => s.role === 'admin').length;
     const subAdminCount = subadmins.filter(s => s.role === 'subadmin').length;
     const employeeCount = subadmins.filter(s => s.role === 'employee').length;
     const activeCount = subadmins.filter(s => !s.isBlocked).length;
@@ -295,7 +300,7 @@ async function fetchAdminSubAdmins(force = false) {
 
     if (statsContainer) {
       statsContainer.innerHTML = `
-        <div class="stat-card"><span class="stat-label">Total Staff</span><div class="stat-value">${totalStaff}</div><span class="stat-note">${subAdminCount} Sub-Admins • ${employeeCount} Employees</span></div>
+        <div class="stat-card"><span class="stat-label">Total Staff</span><div class="stat-value">${totalStaff}</div><span class="stat-note">${superAdminCount ? '1 Super Admin • ' : ''}${adminCount ? `${adminCount} Admins • ` : ''}${subAdminCount} Sub-Admins • ${employeeCount} Employees</span></div>
         <div class="stat-card"><span class="stat-label">Active Team</span><div class="stat-value" style="color:var(--green);">${activeCount}</div><span class="stat-note">${blockedCount} blocked</span></div>
         <div class="stat-card"><span class="stat-label">Monthly Payroll</span><div class="stat-value" style="color:#7c3aed;">₹${totalSalary.toLocaleString('en-IN')}</div><span class="stat-note">Base commitment / mo</span></div>
         <div class="stat-card"><span class="stat-label">Bank Verified</span><div class="stat-value" style="color:var(--green);">${approvedBankCount} / ${totalStaff}</div><span class="stat-note">Approved for payouts</span></div>

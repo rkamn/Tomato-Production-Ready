@@ -18,7 +18,6 @@ const schema: Schema<IWallet> = new Schema(
       type: String,
       required: true,
       unique: true,
-      index: true,
       trim: true,
     },
     name: {
@@ -59,9 +58,6 @@ const schema: Schema<IWallet> = new Schema(
     collection: 'wallet',
   },
 );
-
-schema.index({ userId: 1 }, { unique: true });
-schema.index({ role: 1 });
 
 const Wallet = mongoose.model<IWallet>('Wallet', schema);
 

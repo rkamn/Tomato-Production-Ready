@@ -71,7 +71,7 @@ export const getOrCreateUserWallet = async (
         phone: userRecord?.phone || '',
       },
     },
-    { upsert: true, new: true, returnDocument: 'after' },
+    { upsert: true, returnDocument: 'after' },
   );
 
   return walletDoc!;
@@ -163,7 +163,7 @@ export const getAdminWalletSnapshot = async (
             snapshotAt: new Date(),
           },
         },
-        { upsert: true, new: true, returnDocument: 'after' },
+        { upsert: true, returnDocument: 'after' },
       );
     } catch {
       snapshot = await WalletCreditTrack.findOne({
@@ -697,7 +697,7 @@ export const transferCreditPoints = async (
           phone: updatedRecipient.phone || recipient.record.phone || '',
         },
       },
-      { upsert: true, new: true, returnDocument: 'after' },
+      { upsert: true, returnDocument: 'after' },
     );
 
     // 3. Log transfer record in 'wallet_transfers' collection
@@ -906,7 +906,7 @@ export const transferWalletBalance = async (
           phone: recipient.record.phone || '',
         },
       },
-      { upsert: true, new: true, returnDocument: 'after' },
+      { upsert: true, returnDocument: 'after' },
     );
 
     // 3. Log transfer record in wallet_transfers

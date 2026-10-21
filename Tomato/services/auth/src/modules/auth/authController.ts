@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { promisify } from 'node:util';
 import { createHash, randomBytes, randomInt, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import jwt from 'jsonwebtoken';
@@ -24,6 +25,13 @@ import {
 	getUserActiveSessions,
 } from '../../services/sessionService.js';
 import mailService from '../../services/mailService.js';
+import {
+	credentialAttemptTracker,
+	escapeRegex,
+	logAuthEvent,
+	logSecurityEvent,
+	getClientIp,
+} from '../../security/index.js';
 
 const getPublicBaseUrl = () => process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 5050}`;
 
@@ -228,7 +236,7 @@ export const userResponse = (user: {
 		adminId,
 		employeeId,
 		username: (user as any).username || '',
-		isSuperAdmin: user.role === 'superadmin' || (user as any).username === 'super',
+		isSuperAdmin: user.role === 'superadmin',
 		assignedLocation: (user as any).assignedLocation || null,
 		salary: Math.max(0, Number((user as any).salary || 0)),
 		digipin: user.digipin || '',
@@ -361,6 +369,18 @@ export const registerUser = async (req: Request, res: Response) => {
 				type: 'service',
 			});
 
+			if (email) {
+				mailService.sendWelcomeAccountMail({
+					userEmail: email,
+					userName: shop.name,
+					role: 'shop',
+					accountId: shop.shopId,
+					phone: shop.phone,
+					isApproved: false,
+					loginUrl: `${getPublicBaseUrl()}`,
+				}).catch((err) => console.error('[Auth] Failed to send shop welcome mail:', err));
+			}
+
 			const { token, session } = await createSession(shop as any, req);
 			return res.status(201).json({
 				token,
@@ -403,6 +423,18 @@ export const registerUser = async (req: Request, res: Response) => {
 				type: 'service',
 			});
 
+			if (email) {
+				mailService.sendWelcomeAccountMail({
+					userEmail: email,
+					userName: restaurant.name,
+					role: 'restaurant',
+					accountId: restaurant.restaurantId,
+					phone: restaurant.phone,
+					isApproved: false,
+					loginUrl: `${getPublicBaseUrl()}`,
+				}).catch((err) => console.error('[Auth] Failed to send restaurant welcome mail:', err));
+			}
+
 			const { token, session } = await createSession(restaurant as any, req);
 			return res.status(201).json({
 				token,
@@ -435,6 +467,18 @@ export const registerUser = async (req: Request, res: Response) => {
 				message: `Your customer account (${customer.name}) is ready. Service updates will appear here.`,
 				type: 'service',
 			});
+
+			if (email) {
+				mailService.sendWelcomeAccountMail({
+					userEmail: email,
+					userName: customer.name,
+					role: 'customer',
+					accountId: customer.customerId,
+					phone: customer.phone,
+					isApproved: true,
+					loginUrl: `${getPublicBaseUrl()}`,
+				}).catch((err) => console.error('[Auth] Failed to send customer welcome mail:', err));
+			}
 
 			const { token, session } = await createSession(customer as any, req);
 			return res.status(201).json({
@@ -479,6 +523,18 @@ export const registerUser = async (req: Request, res: Response) => {
 				type: 'service',
 			});
 
+			if (email) {
+				mailService.sendWelcomeAccountMail({
+					userEmail: email,
+					userName: rider.name,
+					role: 'deliveryPartner',
+					accountId: rider.riderId,
+					phone: rider.phone,
+					isApproved: false,
+					loginUrl: `${getPublicBaseUrl()}`,
+				}).catch((err) => console.error('[Auth] Failed to send delivery partner welcome mail:', err));
+			}
+
 			const { token, session } = await createSession(rider as any, req);
 			return res.status(201).json({
 				token,
@@ -522,6 +578,19 @@ export const registerUser = async (req: Request, res: Response) => {
 			type: 'service',
 		});
 
+		const empEmail = employee.email || email;
+		if (empEmail) {
+			mailService.sendWelcomeAccountMail({
+				userEmail: empEmail,
+				userName: employee.name,
+				role: employee.role,
+				accountId: employee.adminId || employee.subadminId || employee.employeeId,
+				phone: employee.phone,
+				isApproved,
+				loginUrl: `${getPublicBaseUrl()}`,
+			}).catch((err) => console.error('[Auth] Failed to send employee welcome mail:', err));
+		}
+
 		const { token, session } = await createSession(employee as any, req);
 		return res.status(201).json({
 			token,
@@ -554,20 +623,38 @@ export const loginUser = async (req: Request, res: Response) => {
 		return res.status(400).json({ message: 'Email or mobile number and password are required' });
 	}
 
+	// 0. Check password guessing lockout status
+	const lockoutCheck = credentialAttemptTracker.isLockedOut(rawValue);
+	if (lockoutCheck.locked) {
+		logSecurityEvent({
+			eventType: 'AUTH_LOGIN_FAILURE',
+			severity: 'WARN',
+			identifier: rawValue,
+			ip: getClientIp(req),
+			method: req.method,
+			path: req.originalUrl || req.path,
+			message: `Login rejected: Account locked (${lockoutCheck.remainingSeconds}s remaining)`,
+		});
+		return res.status(429).json({
+			success: false,
+			message: `Account temporarily locked due to multiple failed login attempts. Please try again in ${Math.ceil(lockoutCheck.remainingSeconds / 60)} minute(s).`,
+			code: 'ACCOUNT_LOCKED',
+			retryAfterSeconds: lockoutCheck.remainingSeconds,
+		});
+	}
+
 	try {
 		let user: any = null;
 
-		// 1. Check direct username match (e.g. 'super' for Super Admin)
+		// 1. Check direct username match against database records
+		const escapedRaw = escapeRegex(rawValue);
 		user = await (Employee as any).findOne({
-			$or: [
-				{ username: rawValue.toLowerCase() },
-				...(rawValue.toLowerCase() === 'super' ? [{ role: 'superadmin' }] : []),
-			],
+			username: { $regex: new RegExp(`^${escapedRaw}$`, 'i') },
 		}).select('+passwordHash');
 
 		if (!user && rawValue.includes('@')) {
 			const emailClean = rawValue.toLowerCase();
-			const escaped = emailClean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+			const escaped = escapeRegex(emailClean);
 			const emailQuery = { email: { $regex: new RegExp(`^${escaped}$`, 'i') } };
 			user = await Customer.findOne(emailQuery).select('+passwordHash');
 			if (!user) user = await Rider.findOne(emailQuery).select('+passwordHash');
@@ -594,7 +681,7 @@ export const loginUser = async (req: Request, res: Response) => {
 			const phoneQuery = {
 				$or: [
 					{ phone: { $in: Array.from(phoneVariants) } },
-					{ email: { $regex: new RegExp(`^${rawValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } },
+					{ email: { $regex: new RegExp(`^${escapeRegex(rawValue)}$`, 'i') } },
 				],
 			};
 			user = await Customer.findOne(phoneQuery).select('+passwordHash');
@@ -605,8 +692,34 @@ export const loginUser = async (req: Request, res: Response) => {
 		}
 
 		if (!user || !(await verifyPassword(password, user.passwordHash))) {
+			const failure = credentialAttemptTracker.recordFailure(rawValue);
+			logAuthEvent(false, rawValue, req, 'Invalid user credentials provided');
+			if (failure.isLocked) {
+				logSecurityEvent({
+					eventType: 'AUTH_LOGIN_FAILURE',
+					severity: 'WARN',
+					identifier: rawValue,
+					ip: getClientIp(req),
+					method: req.method,
+					path: req.originalUrl || req.path,
+					message: `Account temporarily locked for ${failure.lockMinutes} minutes due to repeated failed logins`,
+				});
+				return res.status(429).json({
+					success: false,
+					message: `Too many failed login attempts. Account temporarily locked for ${failure.lockMinutes} minutes to prevent password guessing.`,
+					code: 'ACCOUNT_LOCKED',
+					retryAfterSeconds: failure.lockMinutes * 60,
+				});
+			}
 			return res.status(401).json({ message: 'Invalid email, mobile number, or password' });
 		}
+
+		// Login succeeded -> reset failed attempt tracking and log security event
+		credentialAttemptTracker.recordSuccess(rawValue);
+		logAuthEvent(true, rawValue, req, 'User authenticated successfully', {
+			userId: String(user._id || user.id),
+			role: user.role,
+		});
 
 		if (user.isBlocked) {
 			return res.status(403).json({ message: 'This account has been blocked by an administrator. Please contact support.' });
@@ -645,6 +758,149 @@ export const loginUser = async (req: Request, res: Response) => {
 	}
 };
 
+/**
+ * Universal Multi-Entity User Lookup for Global Authentication & Password Reset
+ * Supports Customer, Restaurant, Shop, Rider, and Employee (Admin, Sub-Admin, Super Admin)
+ * Matches by Entity ID (customerId, restaurantId, shopId, riderId, adminId, employeeId),
+ * ObjectId, Username, Case-insensitive Email, Phone variants, or Name.
+ */
+export const findUserByIdentifier = async (rawValue: string) => {
+	const raw = String(rawValue || '').trim().replace(/^["']|["']$/g, '');
+	if (!raw) return null;
+
+	const rawLower = raw.toLowerCase();
+	const escapedRaw = escapeRegex(raw);
+	const regex = new RegExp(`^${escapedRaw}$`, 'i');
+
+	// 0. Super Admin & Platform Admin Keywords & Aliases Lookup
+	const superAdminEmail = (process.env.SUPERADMIN_EMAIL || 'lightbits.infotech@gmail.com').toLowerCase().trim();
+	const smtpUser = (process.env.SMTP_USER || '').toLowerCase().trim();
+	const isSuperAdminKeyword = [
+		'super',
+		'superadmin',
+		'super admin',
+		'super_admin',
+		'super-admin',
+		'superadministrator',
+		'super administrator',
+		'super@tomato.com',
+		'superadmin@tomato.com',
+		'superadmin@gmail.com',
+		'sup-0001',
+	].includes(rawLower) || rawLower === superAdminEmail || (smtpUser && rawLower === smtpUser);
+
+	if (isSuperAdminKeyword) {
+		let superUser: any = await Employee.findOne({
+			$or: [
+				{ role: 'superadmin' },
+				{ username: 'super' },
+				{ email: superAdminEmail },
+				{ adminId: 'SUP-0001' },
+			],
+		}).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+
+		if (superUser) {
+			if (!superUser.email && superAdminEmail) {
+				superUser.email = superAdminEmail;
+				await superUser.save().catch(() => {});
+			}
+			return superUser;
+		}
+	}
+
+	if (['admin', 'administrator', 'platform admin', 'platform administrator'].includes(rawLower)) {
+		const adminUser: any = await Employee.findOne({
+			$or: [
+				{ role: 'admin' },
+				{ adminId: 'ADM-1001' },
+			],
+		}).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+		if (adminUser) return adminUser;
+	}
+
+	// 1. Direct specific Entity IDs, Username & Role lookup
+	let user: any = await Customer.findOne({ customerId: regex }).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+	if (!user) user = await Restaurant.findOne({ restaurantId: regex }).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+	if (!user) user = await Shop.findOne({ shopId: regex }).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+	if (!user) user = await Rider.findOne({ riderId: regex }).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+	if (!user) {
+		user = await Employee.findOne({
+			$or: [
+				{ username: regex },
+				{ adminId: regex },
+				{ subadminId: regex },
+				{ employeeId: regex },
+				{ role: regex },
+				{ adminRoleTitle: regex },
+			],
+		}).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+	}
+
+	// 2. Direct ObjectId match if rawValue is a 24-character hex ObjectId
+	if (!user && mongoose.isValidObjectId(raw)) {
+		const objId = new mongoose.Types.ObjectId(raw);
+		user = await Employee.findById(objId).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+		if (!user) user = await Customer.findById(objId).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+		if (!user) user = await Restaurant.findById(objId).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+		if (!user) user = await Shop.findById(objId).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+		if (!user) user = await Rider.findById(objId).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+	}
+
+	// 3. Email match (case-insensitive across all models, Employee checked first)
+	if (!user && raw.includes('@')) {
+		const emailClean = rawLower;
+		const emailRegex = new RegExp(`^${escapeRegex(emailClean)}$`, 'i');
+		const emailQuery = { email: emailRegex };
+		user = await Employee.findOne(emailQuery).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+		if (!user) user = await Customer.findOne(emailQuery).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+		if (!user) user = await Rider.findOne(emailQuery).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+		if (!user) user = await Restaurant.findOne(emailQuery).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+		if (!user) user = await Shop.findOne(emailQuery).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+	}
+
+	// 4. Phone variants match
+	if (!user) {
+		const digits = raw.replace(/\D/g, '');
+		const phoneVariants = new Set<string>();
+		phoneVariants.add(raw);
+		phoneVariants.add(raw.replace(/[\s()-]/g, ''));
+		if (digits) {
+			phoneVariants.add(digits);
+			if (digits.length >= 10) {
+				const last10 = digits.slice(-10);
+				phoneVariants.add(last10);
+				phoneVariants.add(`+91${last10}`);
+				phoneVariants.add(`+91 ${last10}`);
+				phoneVariants.add(`0${last10}`);
+				phoneVariants.add(`91${last10}`);
+			}
+		}
+
+		const phoneQuery = {
+			$or: [
+				{ phone: { $in: Array.from(phoneVariants) } },
+				{ email: regex },
+			],
+		};
+		user = await Employee.findOne(phoneQuery).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+		if (!user) user = await Customer.findOne(phoneQuery).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+		if (!user) user = await Rider.findOne(phoneQuery).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+		if (!user) user = await Restaurant.findOne(phoneQuery).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+		if (!user) user = await Shop.findOne(phoneQuery).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+	}
+
+	// 5. Fallback by name / username
+	if (!user) {
+		user = await Employee.findOne({ name: regex }).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+		if (!user) user = await Customer.findOne({ name: regex }).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+		if (!user) user = await Restaurant.findOne({ name: regex }).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+		if (!user) user = await Shop.findOne({ name: regex }).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+		if (!user) user = await Rider.findOne({ name: regex }).select('+passwordHash +resetPasswordTokenHash +resetPasswordExpiresAt');
+	}
+
+	return user;
+};
+
 export const requestPasswordReset = async (req: Request, res: Response) => {
 	const rawValue = typeof req.body?.identifier === 'string'
 		? req.body.identifier.trim()
@@ -655,70 +911,35 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
 				: '';
 
 	if (!rawValue) {
-		return res.status(400).json({ message: 'Email or mobile number is required' });
+		return res.status(400).json({ message: 'Email, mobile number, username, or account ID is required' });
 	}
 
 	try {
-		let user: any = null;
-		if (rawValue.includes('@')) {
-			const emailClean = rawValue.toLowerCase();
-			const escaped = emailClean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-			const emailQuery = { email: { $regex: new RegExp(`^${escaped}$`, 'i') } };
-			user = await Customer.findOne(emailQuery).select('+resetPasswordExpiresAt');
-			if (!user) user = await Rider.findOne(emailQuery).select('+resetPasswordExpiresAt');
-			if (!user) user = await Restaurant.findOne(emailQuery).select('+resetPasswordExpiresAt');
-			if (!user) user = await Shop.findOne(emailQuery).select('+resetPasswordExpiresAt');
-			if (!user) user = await Employee.findOne(emailQuery).select('+resetPasswordExpiresAt');
-		} else {
-			const digits = rawValue.replace(/\D/g, '');
-			const phoneVariants = new Set<string>();
-			phoneVariants.add(rawValue);
-			phoneVariants.add(rawValue.replace(/[\s()-]/g, ''));
-			if (digits) {
-				phoneVariants.add(digits);
-				if (digits.length >= 10) {
-					const last10 = digits.slice(-10);
-					phoneVariants.add(last10);
-					phoneVariants.add(`+91${last10}`);
-					phoneVariants.add(`+91 ${last10}`);
-					phoneVariants.add(`0${last10}`);
-					phoneVariants.add(`91${last10}`);
-				}
-			}
-			const phoneQuery = {
-				$or: [
-					{ phone: { $in: Array.from(phoneVariants) } },
-					{ email: { $regex: new RegExp(`^${rawValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } },
-				],
-			};
-			user = await Customer.findOne(phoneQuery).select('+resetPasswordExpiresAt');
-			if (!user) user = await Rider.findOne(phoneQuery).select('+resetPasswordExpiresAt');
-			if (!user) user = await Restaurant.findOne(phoneQuery).select('+resetPasswordExpiresAt');
-			if (!user) user = await Shop.findOne(phoneQuery).select('+resetPasswordExpiresAt');
-			if (!user) user = await Employee.findOne(phoneQuery).select('+resetPasswordExpiresAt');
-		}
+		const user = await findUserByIdentifier(rawValue);
 
 		if (!user) {
-			return res.status(404).json({ message: 'No account found for that email or mobile number' });
+			return res.status(404).json({ message: 'No account found matching that email, phone, username, or account ID' });
 		}
 
-		const isResend = Boolean(req.body?.isResend);
-		const now = Date.now();
-		const hasActiveCode =
-			user.resetPasswordExpiresAt &&
-			new Date(user.resetPasswordExpiresAt).getTime() > now;
-
-		// Do not automatically send the verification code a 2nd time until user explicitly asks to resend it
-		if (hasActiveCode && !isResend) {
-			const recipientEmail = user.email || (rawValue.includes('@') ? rawValue : undefined);
-			return res.status(200).json({
-				message: recipientEmail
-					? `A 6-digit verification code has already been sent to ${recipientEmail}. It is valid for 10 minutes. Click 'Resend code?' if you need a new code.`
-					: 'A 6-digit verification code is already active. Please enter it or click Resend code.',
-				emailSent: false,
-				expiresInMinutes: 10,
-			});
+		// Ensure superadmin has email populated if missing
+		if (user.role === 'superadmin' && !user.email) {
+			user.email = (process.env.SUPERADMIN_EMAIL || process.env.SMTP_USER || 'lightbits.infotech@gmail.com').trim().toLowerCase();
+			await user.save().catch(() => {});
 		}
+
+		// Allow linking an email if user profile has no email and client supplied one
+		if (!user.email && typeof req.body?.email === 'string' && req.body.email.includes('@')) {
+			user.email = req.body.email.trim().toLowerCase();
+			await user.save();
+		}
+
+		// Helper to mask email for user security in responses (e.g. li***ch@gmail.com)
+		const maskEmail = (em: string) => {
+			const [userPart, domain] = em.split('@');
+			if (!userPart || !domain) return em;
+			if (userPart.length <= 3) return `${userPart[0]}***@${domain}`;
+			return `${userPart.slice(0, 2)}***${userPart.slice(-2)}@${domain}`;
+		};
 
 		// Generate cryptographically secure 6-digit random number
 		const sixDigitCode = randomInt(100000, 1000000).toString();
@@ -727,28 +948,49 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
 		user.resetPasswordExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
 		await user.save();
 
+		// Log security event (without logging the code or token)
+		logSecurityEvent({
+			eventType: 'PASSWORD_RESET_REQUESTED',
+			severity: 'INFO',
+			identifier: rawValue,
+			ip: getClientIp(req),
+			method: req.method,
+			path: req.originalUrl || req.path,
+			message: 'Password reset code generated and dispatched',
+		});
+
 		// Construct secure frontend reset URL
 		const frontendOrigin = req.headers.origin || req.headers.referer || process.env.FRONTEND_URL || 'http://127.0.0.1:3000';
 		const cleanFrontendUrl = String(frontendOrigin).replace(/\/$/, '');
 		const resetUrl = `${cleanFrontendUrl}/index.html?action=reset-password&token=${sixDigitCode}`;
 
-		// Send secure password reset email with 6-digit code if customer email exists
+		// Dispatch secure password reset email with 6-digit code
 		const recipientEmail = user.email || (rawValue.includes('@') ? rawValue : undefined);
+		let emailDelivered = false;
 		if (recipientEmail) {
-			mailService.sendPasswordResetMail({
-				customerEmail: recipientEmail,
-				customerName: user.name || 'Tomato User',
-				resetToken: sixDigitCode,
-				resetUrl,
-				expiresInMinutes: 10,
-			}).catch((err) => console.error('[Mail Service] Password reset mail error:', err));
+			try {
+				const mailResult = await mailService.sendPasswordResetMail({
+					customerEmail: recipientEmail,
+					customerName: user.name || (user.displayName || 'Tomato User'),
+					resetToken: sixDigitCode,
+					resetUrl,
+					expiresInMinutes: 10,
+				});
+				emailDelivered = Boolean(mailResult.success);
+			} catch (err: any) {
+				console.error('[Mail Service] Password reset mail error:', err?.message || err);
+			}
 		}
+
+		const displayEmail = recipientEmail ? maskEmail(recipientEmail) : null;
 
 		return res.status(200).json({
 			message: recipientEmail
-				? `A 6-digit verification code has been sent to ${recipientEmail}. It is valid for 10 minutes.`
+				? `A 6-digit verification code has been sent to your registered email (${displayEmail}). It is valid for 10 minutes.`
 				: 'A 6-digit verification code has been generated. It is valid for 10 minutes.',
-			emailSent: Boolean(recipientEmail),
+			emailSent: emailDelivered,
+			targetEmail: recipientEmail,
+			maskedEmail: displayEmail,
 			expiresInMinutes: 10,
 		});
 	} catch (error) {
@@ -758,7 +1000,8 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
 };
 
 export const verifyResetCode = async (req: Request, res: Response) => {
-	const token = typeof req.body?.resetToken === 'string' ? req.body.resetToken.trim() : '';
+	const rawToken = req.body?.resetToken || req.body?.token || req.body?.code;
+	const token = typeof rawToken === 'string' ? rawToken.trim() : '';
 
 	if (!token || token.length !== 6 || !/^\d{6}$/.test(token)) {
 		return res.status(400).json({ valid: false, message: 'A 6-digit verification code is required.' });
@@ -795,8 +1038,10 @@ export const verifyResetCode = async (req: Request, res: Response) => {
 };
 
 export const resetPassword = async (req: Request, res: Response) => {
-	const token = typeof req.body?.resetToken === 'string' ? req.body.resetToken.trim() : '';
-	const password = typeof req.body?.password === 'string' ? req.body.password : '';
+	const rawToken = req.body?.resetToken || req.body?.token || req.body?.code;
+	const token = typeof rawToken === 'string' ? rawToken.trim() : '';
+	const rawPassword = req.body?.password || req.body?.newPassword;
+	const password = typeof rawPassword === 'string' ? rawPassword : '';
 
 	if (!token || !password) {
 		return res.status(400).json({ message: '6-digit verification code and new password are required' });
@@ -841,6 +1086,14 @@ export const resetPassword = async (req: Request, res: Response) => {
 		}
 
 		if (!user) {
+			logSecurityEvent({
+				eventType: 'PASSWORD_RESET_FAILED',
+				severity: 'WARN',
+				ip: getClientIp(req),
+				method: req.method,
+				path: req.originalUrl || req.path,
+				message: 'Password reset attempted with invalid or expired 6-digit verification code',
+			});
 			return res.status(400).json({ message: 'Invalid or expired 6-digit verification code. Please request a new code.' });
 		}
 
@@ -851,6 +1104,17 @@ export const resetPassword = async (req: Request, res: Response) => {
 
 		// Revoke all existing sessions across devices on password reset
 		await revokeAllUserSessions(String(user._id), 'password_reset').catch(() => {});
+
+		logSecurityEvent({
+			eventType: 'PASSWORD_RESET_SUCCESS',
+			severity: 'INFO',
+			identifier: user.email || user.username || String(user._id),
+			userId: String(user._id),
+			ip: getClientIp(req),
+			method: req.method,
+			path: req.originalUrl || req.path,
+			message: 'Password reset successfully completed and active sessions revoked',
+		});
 
 		// Send password changed security alert email
 		if (user.email) {
@@ -865,6 +1129,91 @@ export const resetPassword = async (req: Request, res: Response) => {
 	} catch (error) {
 		console.error('Password reset failed:', error);
 		return res.status(500).json({ message: 'Unable to reset password' });
+	}
+};
+
+/**
+ * Authenticated Password Change
+ * Allows any logged-in user (Customer, Restaurant, Shop, Rider, Employee/Admin)
+ * to update their password from their profile/dashboard settings.
+ */
+export const changePassword = async (req: AuthenticatedRequest, res: Response) => {
+	const userId = req.user?.userId;
+	if (!userId) {
+		return res.status(401).json({ message: 'Authentication required' });
+	}
+
+	const currentPassword = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
+	const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
+
+	if (!currentPassword || !newPassword) {
+		return res.status(400).json({ message: 'Current password and new password are required' });
+	}
+
+	if (newPassword.length < 8) {
+		return res.status(400).json({ message: 'New password must be at least 8 characters long' });
+	}
+
+	try {
+		let user: any = null;
+		if (mongoose.isValidObjectId(userId)) {
+			const objId = new mongoose.Types.ObjectId(userId);
+			user = await Customer.findById(objId).select('+passwordHash');
+			if (!user) user = await Rider.findById(objId).select('+passwordHash');
+			if (!user) user = await Restaurant.findById(objId).select('+passwordHash');
+			if (!user) user = await Shop.findById(objId).select('+passwordHash');
+			if (!user) user = await Employee.findById(objId).select('+passwordHash');
+		}
+
+		if (!user) {
+			return res.status(404).json({ message: 'User account not found' });
+		}
+
+		const isValid = await verifyPassword(currentPassword, user.passwordHash);
+		if (!isValid) {
+			logSecurityEvent({
+				eventType: 'PASSWORD_RESET_FAILED',
+				severity: 'WARN',
+				userId: String(userId),
+				ip: getClientIp(req),
+				method: req.method,
+				path: req.originalUrl || req.path,
+				message: 'Password change failed: Current password incorrect',
+			});
+			return res.status(400).json({ message: 'Current password is incorrect' });
+		}
+
+		user.passwordHash = await hashPassword(newPassword);
+		user.set('resetPasswordTokenHash', undefined);
+		user.set('resetPasswordExpiresAt', undefined);
+		await user.save();
+
+		// Revoke other active sessions across devices
+		await revokeAllUserSessions(String(user._id), 'password_change').catch(() => {});
+
+		logSecurityEvent({
+			eventType: 'PASSWORD_CHANGED',
+			severity: 'INFO',
+			userId: String(userId),
+			identifier: user.email || user.username || String(user._id),
+			ip: getClientIp(req),
+			method: req.method,
+			path: req.originalUrl || req.path,
+			message: 'Password updated successfully via authenticated settings',
+		});
+
+		if (user.email) {
+			mailService.sendPasswordChangedMail({
+				customerEmail: user.email,
+				customerName: user.name || (user.displayName || 'Tomato User'),
+				changedAt: new Date(),
+			}).catch(() => {});
+		}
+
+		return res.status(200).json({ message: 'Password changed successfully' });
+	} catch (error) {
+		console.error('Change password failed:', error);
+		return res.status(500).json({ message: 'Unable to change password' });
 	}
 };
 

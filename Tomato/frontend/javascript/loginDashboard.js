@@ -98,6 +98,9 @@ function resolveImageUrl(img) {
   if (!img || typeof img !== 'string' || !img.trim()) return '';
   const trimmed = img.trim();
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:')) {
+    if (window.TomatoSecurity && typeof window.TomatoSecurity.sanitizeUrl === 'function') {
+      return window.TomatoSecurity.sanitizeUrl(trimmed, '');
+    }
     return trimmed;
   }
   if (trimmed.startsWith('/')) {
@@ -321,8 +324,12 @@ async function apiFetch(endpoint, options = {}) {
   const res = await fetch(`${API_ROOT}${endpoint}`, { ...options, headers });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) {
-    localStorage.removeItem('tomatoToken');
-    localStorage.removeItem('tomatoUser');
+    if (window.TomatoSecurity && typeof window.TomatoSecurity.clearClientSession === 'function') {
+      window.TomatoSecurity.clearClientSession();
+    } else {
+      localStorage.removeItem('tomatoToken');
+      localStorage.removeItem('tomatoUser');
+    }
     window.location.href = '../index.html?auth=expired';
     throw new Error('Your session has expired. Please sign in again.');
   }
@@ -1635,17 +1642,32 @@ window.handleSidebarTransferClick = handleSidebarTransferClick;
 
   const initials = (user.name || 'T').split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase();
   const miniAvatar = document.getElementById('mini-avatar');
-  miniAvatar.textContent = initials;
-  if (user.image) {
-    miniAvatar.innerHTML = `<img src="${user.image}" alt="" />`;
+  if (miniAvatar) {
+    miniAvatar.textContent = initials;
+    if (user.image) {
+      const safeAvatarUrl = window.TomatoSecurity ? window.TomatoSecurity.sanitizeUrl(user.image, '') : user.image;
+      if (safeAvatarUrl) {
+        const img = document.createElement('img');
+        img.src = safeAvatarUrl;
+        img.alt = escapeHtml(user.name || 'Avatar');
+        img.onerror = () => {
+          img.remove();
+          miniAvatar.textContent = initials;
+        };
+        miniAvatar.replaceChildren(img);
+      }
+    }
   }
 
-  document.getElementById('today-date').textContent = new Intl.DateTimeFormat(undefined, {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  }).format(new Date());
+  const todayDateEl = document.getElementById('today-date');
+  if (todayDateEl) {
+    todayDateEl.textContent = new Intl.DateTimeFormat(undefined, {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }).format(new Date());
+  }
 
   // Populate Location: <stateCode>,<City>,<locality>,<pincode>
   fetchUserLocation();
@@ -1758,12 +1780,16 @@ function executeSignOut() {
       }).catch(() => {});
     } catch (_) {}
   }
-  localStorage.removeItem('tomatoToken');
-  localStorage.removeItem('tomatoUser');
-  try {
-    sessionStorage.removeItem(getActiveViewStorageKey());
-    sessionStorage.removeItem('tomato_active_view');
-  } catch (_) {}
+  if (window.TomatoSecurity && typeof window.TomatoSecurity.clearClientSession === 'function') {
+    window.TomatoSecurity.clearClientSession();
+  } else {
+    localStorage.removeItem('tomatoToken');
+    localStorage.removeItem('tomatoUser');
+    try {
+      sessionStorage.removeItem(getActiveViewStorageKey());
+      sessionStorage.removeItem('tomato_active_view');
+    } catch (_) {}
+  }
   window.location.href = '../index.html';
 }
 
@@ -4326,7 +4352,138 @@ function drawLiveOrderRadar(canvas, rawData) {
 }
 
 
+// =========================================================================
+// GLOBAL USER: CHANGE & RESET PASSWORD HANDLERS (ANY USER ROLE)
+// =========================================================================
+function openGlobalChangePasswordModal() {
+  const form = document.getElementById('global-change-password-form');
+  if (form) form.reset();
+  const notice = document.getElementById('global-change-pwd-notice');
+  if (notice) {
+    notice.style.display = 'none';
+    notice.textContent = '';
+  }
+  openModal('global-change-password-modal');
+  setTimeout(() => {
+    document.getElementById('global-curr-pwd')?.focus();
+  }, 100);
+}
+
+async function submitGlobalChangePassword(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const currPwd = document.getElementById('global-curr-pwd')?.value || '';
+  const newPwd = document.getElementById('global-new-pwd')?.value || '';
+  const confirmPwd = document.getElementById('global-confirm-pwd')?.value || '';
+  const notice = document.getElementById('global-change-pwd-notice');
+  const btn = document.getElementById('btn-submit-global-change-pwd');
+
+  if (!currPwd || !newPwd) {
+    if (notice) {
+      notice.style.display = 'block';
+      notice.style.color = '#dc2626';
+      notice.textContent = 'Current password and new password are required.';
+    }
+    return;
+  }
+
+  if (newPwd.length < 8) {
+    if (notice) {
+      notice.style.display = 'block';
+      notice.style.color = '#dc2626';
+      notice.textContent = 'New password must be at least 8 characters long.';
+    }
+    return;
+  }
+
+  if (newPwd !== confirmPwd) {
+    if (notice) {
+      notice.style.display = 'block';
+      notice.style.color = '#dc2626';
+      notice.textContent = 'New passwords do not match.';
+    }
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+  }
+
+  try {
+    const res = await apiFetch('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword: currPwd, newPassword: newPwd }),
+    });
+
+    closeModal('global-change-password-modal');
+    showToastNotification(res.message || 'Password updated successfully! Other sessions revoked.', 'success');
+    const statusMsg = document.getElementById('global-pwd-status-msg');
+    if (statusMsg) {
+      statusMsg.style.display = 'block';
+      statusMsg.style.color = 'var(--green)';
+      statusMsg.textContent = '✓ Your password was updated successfully.';
+      setTimeout(() => { statusMsg.style.display = 'none'; }, 6000);
+    }
+  } catch (err) {
+    if (notice) {
+      notice.style.display = 'block';
+      notice.style.color = '#dc2626';
+      notice.textContent = err.message || 'Failed to change password.';
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Save New Password';
+    }
+  }
+}
+
+async function triggerGlobalResetCodeForCurrentUser() {
+  const btn = document.getElementById('btn-global-send-reset-code');
+  const statusMsg = document.getElementById('global-pwd-status-msg');
+  const identifier = user?.email || user?.username || user?.phone || user?.customerId || user?.restaurantId || user?.shopId || user?.riderId || user?.adminId || user?.id || '';
+
+  if (!identifier) {
+    showToastNotification('No user identifier found in active session.', 'error');
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+  }
+
+  try {
+    const res = await apiFetch('/api/auth/password-reset/request', {
+      method: 'POST',
+      body: JSON.stringify({ identifier, isResend: true }),
+    });
+
+    showToastNotification(res.message || '6-digit verification code sent to your registered email!', 'success');
+    if (statusMsg) {
+      statusMsg.style.display = 'block';
+      statusMsg.style.color = 'var(--green)';
+      statusMsg.textContent = res.message || '✓ Verification code sent to your registered email.';
+    }
+  } catch (err) {
+    showToastNotification(err.message || 'Unable to trigger reset code.', 'error');
+    if (statusMsg) {
+      statusMsg.style.display = 'block';
+      statusMsg.style.color = '#dc2626';
+      statusMsg.textContent = `✕ ${err.message || 'Unable to send code.'}`;
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '✉️ Send Reset Code to Email';
+    }
+  }
+}
+
 // Explicit window exports for modular domain controllers
+window.openGlobalChangePasswordModal = openGlobalChangePasswordModal;
+window.submitGlobalChangePassword = submitGlobalChangePassword;
+window.triggerGlobalResetCodeForCurrentUser = triggerGlobalResetCodeForCurrentUser;
 window.API_ROOT = API_ROOT;
 window.token = token;
 window.storedUser = storedUser;

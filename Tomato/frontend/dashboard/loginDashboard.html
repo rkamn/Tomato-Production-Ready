@@ -1470,6 +1470,29 @@
               <p id="profile-notice" style="margin-top:0.8rem; font-size:0.85rem; font-weight:600;"></p>
             </form>
             <div id="admin-settings-pincodes-bar" class="admin-serviceable-pincodes-bar" style="display:none; margin-top:1.25rem;"></div>
+
+            <!-- Global Security & Password Section -->
+            <div class="panel" style="margin-top:1.5rem; background:#f8fafc; border:1px solid var(--line); border-radius:12px; padding:1.25rem 1.5rem;">
+              <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
+                <div>
+                  <h3 style="font-size:1.05rem; font-weight:700; color:var(--ink); margin:0 0 0.25rem; display:flex; align-items:center; gap:0.4rem;">
+                    <span>🔒</span> <span>Account Security &amp; Password Management</span>
+                  </h3>
+                  <p style="font-size:0.83rem; color:var(--muted); margin:0;">
+                    Update your account password or request a 6-digit verification code to reset your password.
+                  </p>
+                </div>
+                <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                  <button type="button" class="btn btn-outline btn-sm" onclick="openGlobalChangePasswordModal()" style="display:inline-flex; align-items:center; gap:0.35rem; font-weight:600;">
+                    <span>🔑</span> <span>Change Password</span>
+                  </button>
+                  <button type="button" class="btn btn-primary btn-sm" onclick="triggerGlobalResetCodeForCurrentUser()" id="btn-global-send-reset-code" style="display:inline-flex; align-items:center; gap:0.35rem; font-weight:600; background:var(--primary);">
+                    <span>✉️</span> <span>Send Reset Code to Email</span>
+                  </button>
+                </div>
+              </div>
+              <div id="global-pwd-status-msg" style="margin-top:0.6rem; font-size:0.85rem; font-weight:600; display:none;"></div>
+            </div>
           </div>
         </section>
 
@@ -1505,6 +1528,7 @@
             <!-- Role Filter Tabs -->
             <div style="display:flex; gap:0.5rem; margin-bottom:1.2rem; flex-wrap:wrap;">
               <button type="button" class="btn btn-sm" id="staff-filter-all" onclick="filterStaffRole('all')" style="background:var(--primary); color:#fff; font-weight:700;">All Staff</button>
+              <button type="button" class="btn btn-outline btn-sm" id="staff-filter-superadmin" onclick="filterStaffRole('superadmin')">👑 Super Admin</button>
               <button type="button" class="btn btn-outline btn-sm" id="staff-filter-admin" onclick="filterStaffRole('admin')">👑 Platform Admins</button>
               <button type="button" class="btn btn-outline btn-sm" id="staff-filter-subadmin" onclick="filterStaffRole('subadmin')">Sub-Admins</button>
               <button type="button" class="btn btn-outline btn-sm" id="staff-filter-employee" onclick="filterStaffRole('employee')">Normal Employees</button>
@@ -4954,6 +4978,65 @@
     </div>
 
     <!-- =====================================================================
+         GLOBAL USER: CHANGE PASSWORD MODAL (Accessible by Any Logged-in User)
+         ===================================================================== -->
+    <div id="global-change-password-modal" class="modal-overlay">
+      <div class="modal-box" style="max-width:440px;">
+        <div class="modal-header">
+          <div>
+            <span style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--primary); font-weight:700;">🔒 Security Settings</span>
+            <h2 style="font-size:1.25rem; margin-top:0.2rem;">Change Your Password</h2>
+          </div>
+          <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('global-change-password-modal')">&times;</button>
+        </div>
+
+        <form id="global-change-password-form" onsubmit="submitGlobalChangePassword(event)" style="margin-top:1rem;">
+          <div class="form-group" style="margin-bottom:0.85rem;">
+            <label style="font-size:0.82rem; font-weight:600; color:var(--ink); display:block; margin-bottom:0.35rem;">Current Password <span style="color:var(--tomato);">*</span></label>
+            <input
+              type="password"
+              id="global-curr-pwd"
+              placeholder="Enter your current password"
+              required
+              style="width:100%; padding:0.5rem 0.75rem; border:1px solid var(--line); border-radius:6px; font-size:0.9rem;"
+            />
+          </div>
+
+          <div class="form-group" style="margin-bottom:0.85rem;">
+            <label style="font-size:0.82rem; font-weight:600; color:var(--ink); display:block; margin-bottom:0.35rem;">New Password (min 8 chars) <span style="color:var(--tomato);">*</span></label>
+            <input
+              type="password"
+              id="global-new-pwd"
+              placeholder="At least 8 characters"
+              required
+              minlength="8"
+              style="width:100%; padding:0.5rem 0.75rem; border:1px solid var(--line); border-radius:6px; font-size:0.9rem;"
+            />
+          </div>
+
+          <div class="form-group" style="margin-bottom:0.85rem;">
+            <label style="font-size:0.82rem; font-weight:600; color:var(--ink); display:block; margin-bottom:0.35rem;">Confirm New Password <span style="color:var(--tomato);">*</span></label>
+            <input
+              type="password"
+              id="global-confirm-pwd"
+              placeholder="Re-enter your new password"
+              required
+              minlength="8"
+              style="width:100%; padding:0.5rem 0.75rem; border:1px solid var(--line); border-radius:6px; font-size:0.9rem;"
+            />
+          </div>
+
+          <div id="global-change-pwd-notice" style="font-size:0.82rem; margin-bottom:0.75rem; display:none;"></div>
+
+          <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:0.65rem; margin-top:1.25rem;">
+            <button type="button" class="btn btn-outline" onclick="closeModal('global-change-password-modal')">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="btn-submit-global-change-pwd">Save New Password</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- =====================================================================
          SUPER ADMIN: ASSIGN DEFAULT OPERATING LOCATION MODAL
          ===================================================================== -->
     <div id="assign-admin-location-modal" class="modal-overlay">
@@ -5912,6 +5995,8 @@
     </div>
 
     <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+    <!-- FRONTEND SECURITY MODULE (Sanitization, XSS protection, safe URL & tokens) -->
+    <script src="../javascript/security.js"></script>
     <!-- WEBSOCKET LIVE RIDER TRACKING -->
     <script src="../javascript/websocket.js"></script>
     <!-- SCRIPT: CORE APPLICATION SHELL -->

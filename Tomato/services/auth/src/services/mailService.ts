@@ -79,6 +79,16 @@ export interface PasswordChangedMailParams {
   changedAt?: Date | undefined;
 }
 
+export interface WelcomeAccountMailParams {
+  userEmail: string;
+  userName: string;
+  role: string;
+  accountId?: string | undefined;
+  phone?: string | undefined;
+  isApproved?: boolean | undefined;
+  loginUrl?: string | undefined;
+}
+
 export interface MailSendResult {
   success: boolean;
   messageId?: string;
@@ -782,6 +792,243 @@ class MailService {
       };
     } catch (err: any) {
       console.error(`[Mail Service] Failed to send password changed email to ${data.customerEmail}:`, err.message);
+      return {
+        success: false,
+        error: err.message,
+      };
+    }
+  }
+
+  /**
+   * Generate branded welcome email HTML when a new user account is registered
+   */
+  private generateWelcomeAccountHtml(data: WelcomeAccountMailParams): string {
+    const roleLabels: Record<string, string> = {
+      customer: 'Customer',
+      restaurant: 'Restaurant Partner',
+      shop: 'Shop Merchant',
+      deliveryPartner: 'Delivery Partner',
+      rider: 'Delivery Partner',
+      employee: 'Platform Staff',
+      subadmin: 'Operations Sub-Admin',
+      admin: 'Platform Administrator',
+      superadmin: 'Super Administrator',
+    };
+
+    const roleName = roleLabels[data.role] || data.role;
+    const isApproved = data.isApproved ?? (data.role === 'customer');
+    const statusText = isApproved ? 'Active & Ready' : 'Pending Verification / Approval';
+    const statusBg = isApproved ? '#dcfce7' : '#fef3c7';
+    const statusColor = isApproved ? '#15803d' : '#b45309';
+    const statusBorder = isApproved ? '#86efac' : '#fcd34d';
+
+    let roleIcon = '🎉';
+    let welcomeMessage = 'Your account has been created successfully. Delicious food and grocery delivery are just a tap away!';
+    let roleActionHint = 'Start exploring top-rated restaurants, local grocery shops, and order fresh meals right to your doorstep.';
+
+    if (data.role === 'restaurant') {
+      roleIcon = '🍽️';
+      welcomeMessage = 'Thank you for registering your restaurant with the Tomato Partner Network!';
+      roleActionHint = isApproved
+        ? 'Your restaurant account is active. You can log in to customize your menu items, operational hours, and manage live orders.'
+        : 'Our partner onboarding team will verify your establishment, bank details, and menu. Once verified, your kitchen will go live.';
+    } else if (data.role === 'shop') {
+      roleIcon = '🛍️';
+      welcomeMessage = 'Thank you for partnering with the Tomato Merchant Network!';
+      roleActionHint = isApproved
+        ? 'Your shop account is active. You can log in to manage your grocery inventory, product catalog, and incoming orders.'
+        : 'Our merchant onboarding team will verify your store and bank details. Once approved, customers can shop from your store.';
+    } else if (data.role === 'deliveryPartner' || data.role === 'rider') {
+      roleIcon = '🛵';
+      welcomeMessage = 'Welcome to the Tomato Delivery Fleet!';
+      roleActionHint = isApproved
+        ? 'Your delivery partner account is active. Log in to check active delivery zones and start earning.'
+        : 'Our fleet management team will review your vehicle and identification details. Once approved, you can start accepting deliveries.';
+    } else if (['admin', 'subadmin', 'employee', 'superadmin'].includes(data.role)) {
+      roleIcon = '🏢';
+      welcomeMessage = 'Welcome to the Tomato Platform & Operations Management Team!';
+      roleActionHint = isApproved
+        ? 'Your staff account is enabled with your assigned permissions. Log in to the management dashboard to coordinate operations.'
+        : 'Your account has been registered and is pending role assignment by a platform administrator.';
+    }
+
+    const loginUrl = data.loginUrl || 'http://localhost:5050';
+    const formattedDate = new Date().toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    });
+
+    return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome to Tomato</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 24px 12px; }
+    .email-container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.06); border: 1px solid #e2e8f0; }
+    .header { background: linear-gradient(135deg, #e23744 0%, #c41c2a 100%); color: #ffffff; padding: 36px 24px; text-align: center; }
+    .header h1 { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
+    .header p { margin: 6px 0 0 0; font-size: 15px; opacity: 0.95; }
+    .content { padding: 32px 28px; color: #334155; line-height: 1.6; }
+    .badge { display: inline-block; padding: 6px 14px; border-radius: 9999px; font-size: 12px; font-weight: 700; border: 1px solid ${statusBorder}; background-color: ${statusBg}; color: ${statusColor}; margin-bottom: 12px; }
+    .details-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px 20px; margin: 22px 0; }
+    .details-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed #e2e8f0; font-size: 13.5px; }
+    .details-row:last-child { border-bottom: none; }
+    .details-label { color: #64748b; font-weight: 500; }
+    .details-val { color: #0f172a; font-weight: 600; text-align: right; }
+    .cta-container { text-align: center; margin: 28px 0 16px 0; }
+    .cta-button { display: inline-block; background: #e23744; color: #ffffff !important; font-size: 15px; font-weight: 700; text-decoration: none; padding: 13px 32px; border-radius: 8px; box-shadow: 0 3px 10px rgba(226,55,68,0.25); }
+    .info-box { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 14px 18px; font-size: 13px; color: #1e40af; margin-top: 20px; line-height: 1.5; }
+    .security-note { font-size: 12px; color: #94a3b8; text-align: center; margin-top: 24px; padding-top: 16px; border-top: 1px solid #f1f5f9; }
+    .footer { text-align: center; padding: 24px; font-size: 12px; color: #94a3b8; border-top: 1px solid #f1f5f9; background: #fafafa; }
+  </style>
+</head>
+<body>
+  <div class="email-container">
+    <div class="header">
+      <div style="font-size: 44px; margin-bottom: 8px;">${roleIcon}</div>
+      <h1>Welcome to Tomato!</h1>
+      <p>Fastest Food &amp; Grocery Delivery Platform</p>
+    </div>
+
+    <div class="content">
+      <div style="text-align: center; margin-bottom: 20px;">
+        <span class="badge">${statusText}</span>
+      </div>
+
+      <p style="margin-top: 0; font-size: 16px;">Hi <strong>${escapeHtml(data.userName)}</strong>,</p>
+      <p style="font-size: 14.5px; color: #475569;">
+        ${escapeHtml(welcomeMessage)}
+      </p>
+
+      <div class="details-card">
+        <div style="font-size: 13px; font-weight: 700; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">
+          Account Summary
+        </div>
+        ${data.accountId ? `
+        <div class="details-row">
+          <span class="details-label">Account ID:</span>
+          <span class="details-val">${escapeHtml(data.accountId)}</span>
+        </div>` : ''}
+        <div class="details-row">
+          <span class="details-label">Account Role:</span>
+          <span class="details-val">${escapeHtml(roleName)}</span>
+        </div>
+        <div class="details-row">
+          <span class="details-label">Registered Email:</span>
+          <span class="details-val">${escapeHtml(data.userEmail)}</span>
+        </div>
+        ${data.phone ? `
+        <div class="details-row">
+          <span class="details-label">Mobile Number:</span>
+          <span class="details-val">${escapeHtml(data.phone)}</span>
+        </div>` : ''}
+        <div class="details-row">
+          <span class="details-label">Registered On:</span>
+          <span class="details-val">${formattedDate}</span>
+        </div>
+        <div class="details-row">
+          <span class="details-label">Account Status:</span>
+          <span class="details-val" style="color: ${statusColor};">${statusText}</span>
+        </div>
+      </div>
+
+      <div class="info-box">
+        <strong>💡 Next Steps:</strong><br/>
+        ${escapeHtml(roleActionHint)}
+      </div>
+
+      <div class="cta-container">
+        <a href="${escapeHtml(loginUrl)}" class="cta-button" target="_blank">
+          Go to Tomato
+        </a>
+      </div>
+
+      <div class="security-note">
+        🔒 <strong>Security Tip:</strong> Tomato will never ask for your password or verification OTP. Keep your login details confidential.
+      </div>
+    </div>
+
+    <div class="footer">
+      <p style="margin: 0 0 6px 0;">Have questions or need help? Reach our 24/7 support at <strong>support@tomato.com</strong>.</p>
+      <p style="margin: 0;">&copy; ${new Date().getFullYear()} Tomato Technologies Inc. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>
+`;
+  }
+
+  /**
+   * Send branded welcome email when any new account is created
+   */
+  public async sendWelcomeAccountMail(data: WelcomeAccountMailParams): Promise<MailSendResult> {
+    if (!data.userEmail || !data.userEmail.includes('@')) {
+      return {
+        success: false,
+        error: 'Invalid or missing user email address',
+      };
+    }
+
+    const config = getMailConfig();
+    const transporter = this.getTransporter();
+
+    const roleLabels: Record<string, string> = {
+      customer: 'Customer',
+      restaurant: 'Restaurant Partner',
+      shop: 'Shop Merchant',
+      deliveryPartner: 'Delivery Partner',
+      rider: 'Delivery Partner',
+      employee: 'Platform Staff',
+      subadmin: 'Operations Sub-Admin',
+      admin: 'Platform Administrator',
+      superadmin: 'Super Administrator',
+    };
+
+    const roleName = roleLabels[data.role] || data.role;
+    let subject = `🎉 Welcome to Tomato, ${data.userName}! Your Account is Ready`;
+    if (data.role === 'restaurant') {
+      subject = `🍽️ Welcome to Tomato Partner, ${data.userName}!`;
+    } else if (data.role === 'shop') {
+      subject = `🛍️ Welcome to Tomato Merchant, ${data.userName}!`;
+    } else if (data.role === 'deliveryPartner' || data.role === 'rider') {
+      subject = `🛵 Welcome to Tomato Delivery Fleet, ${data.userName}!`;
+    } else if (['admin', 'subadmin', 'employee', 'superadmin'].includes(data.role)) {
+      subject = `🏢 Welcome to the Tomato Platform Team, ${data.userName}!`;
+    }
+
+    const html = this.generateWelcomeAccountHtml(data);
+    const text = `Welcome to Tomato, ${data.userName}!\n\nYour ${roleName} account has been created successfully.\nEmail: ${data.userEmail}\n${data.accountId ? `Account ID: ${data.accountId}\n` : ''}${data.phone ? `Phone: ${data.phone}\n` : ''}Status: ${data.isApproved ? 'Active & Ready' : 'Pending Verification / Approval'}\n\nLogin at: ${data.loginUrl || 'http://localhost:5050'}\n\nThank you for choosing Tomato!`;
+
+    if (!transporter || !config.enabled) {
+      console.log(
+        `[Mail Service] SMTP credentials not set or disabled in .env. Welcome account email simulated for ${data.userEmail} (Role: ${data.role}, ID: ${data.accountId || 'N/A'}).`,
+      );
+      return {
+        success: true,
+        simulated: true,
+      };
+    }
+
+    try {
+      const info = await transporter.sendMail({
+        from: `"${config.fromName}" <${config.fromEmail}>`,
+        to: data.userEmail,
+        subject,
+        text,
+        html,
+      });
+
+      console.log(`[Mail Service] Welcome email sent successfully to ${data.userEmail} (${data.role}). Message ID: ${info.messageId}`);
+      return {
+        success: true,
+        messageId: info.messageId,
+      };
+    } catch (err: any) {
+      console.error(`[Mail Service] Failed to send welcome email to ${data.userEmail}:`, err.message);
       return {
         success: false,
         error: err.message,

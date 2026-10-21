@@ -161,17 +161,23 @@ export const migrateUsersToEmployeesAndDropUsersTable = async () => {
             console.log("[DB Migration] Default Platform Administrator (admin@tomato.com) created in employees table.");
         }
 
-        // Ensure Super Admin exists with username "super" and password "superadmin"
-        const superPassHash = await hashPassword('superadmin');
-        let superAdmin = await Employee.findOne({
-            $or: [{ username: 'super' }, { email: 'super@tomato.com' }, { role: 'superadmin' }],
-        });
+        // Ensure Super Administrator exists in database without overwriting credentials
+        let superAdmin = await Employee.findOne({ role: 'superadmin' }).select('+passwordHash');
+        if (!superAdmin) {
+            superAdmin = await Employee.findOne({
+                $or: [{ username: 'super' }, { email: 'super@tomato.com' }],
+            }).select('+passwordHash');
+        }
 
         if (!superAdmin) {
-            console.log("[DB Setup] Creating Super Administrator account (username: super, password: superadmin)...");
+            const initialUsername = process.env.SUPERADMIN_USERNAME || 'super';
+            const initialPassword = process.env.SUPERADMIN_PASSWORD || 'superadmin';
+            const superPassHash = await hashPassword(initialPassword);
+
+            console.log(`[DB Setup] Initializing default Super Administrator account in database (username: ${initialUsername})...`);
             await Employee.create({
                 name: 'Super Admin',
-                username: 'super',
+                username: initialUsername,
                 email: 'super@tomato.com',
                 phone: '+919999999999',
                 role: 'superadmin',
@@ -195,18 +201,19 @@ export const migrateUsersToEmployeesAndDropUsersTable = async () => {
                     },
                 },
             });
-            console.log("[DB Setup] Super Administrator (username: super, password: superadmin) created successfully.");
+            console.log(`[DB Setup] Super Administrator created in database (username: ${initialUsername}).`);
         } else {
-            // Guarantee username is 'super', role is 'superadmin', and password is 'superadmin'
-            superAdmin.username = 'super';
-            superAdmin.role = 'superadmin' as any;
-            superAdmin.adminRoleTitle = 'Super Administrator';
-            superAdmin.passwordHash = superPassHash;
-            superAdmin.isApproved = true;
-            superAdmin.isBlocked = false;
-            superAdmin.permissions = ['*'];
-            await superAdmin.save();
-            console.log("[DB Setup] Super Administrator credentials synchronized (username: super, password: superadmin).");
+            // Retain credentials from database! Never overwrite username or password with hardcoded values.
+            const currentUsername = superAdmin.username || superAdmin.email || 'super';
+            if (process.env.SUPERADMIN_EMAIL && process.env.SUPERADMIN_EMAIL.includes('@')) {
+                const targetSuperEmail = process.env.SUPERADMIN_EMAIL.trim().toLowerCase();
+                if (superAdmin.email !== targetSuperEmail) {
+                    superAdmin.email = targetSuperEmail;
+                    await superAdmin.save();
+                    console.log(`[DB Setup] Super Administrator email updated to: ${targetSuperEmail}`);
+                }
+            }
+            console.log(`[DB Setup] Super Administrator loaded from database (username: ${currentUsername}, role: ${superAdmin.role}, email: ${superAdmin.email}). Database credentials preserved.`);
         }
 
         // Initialize default built-in platform roles if not yet seeded

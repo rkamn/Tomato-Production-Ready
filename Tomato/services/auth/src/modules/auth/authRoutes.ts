@@ -8,6 +8,7 @@ import {
   requestPasswordReset,
   verifyResetCode,
   resetPassword,
+  changePassword,
   updateProfile,
   userResponse,
   logoutUser,
@@ -30,6 +31,18 @@ import {
   getWalletBalances,
   WalletServiceError,
 } from '../wallet/walletService.js';
+import {
+  authRateLimiter,
+  passwordResetRateLimiter,
+  otpRateLimiter,
+  validateBody,
+  LoginSchema,
+  PasswordResetRequestSchema,
+  PasswordResetVerifySchema,
+  PasswordResetConfirmSchema,
+  ChangePasswordSchema,
+  RegisterSchema,
+} from '../../security/index.js';
 
 const createAuthRouter = (upload: multer.Multer) => {
   const router = express.Router();
@@ -47,8 +60,8 @@ const createAuthRouter = (upload: multer.Multer) => {
     }
   });
 
-  router.post('/register', registerUser);
-  router.post('/login', loginUser);
+  router.post('/register', validateBody(RegisterSchema), registerUser);
+  router.post('/login', authRateLimiter, validateBody(LoginSchema), loginUser);
   router.get('/wallet', authenticate, async (req, res) => {
     const currentUser = (req as AuthenticatedRequest).user;
     if (!currentUser?.userId) {
@@ -328,9 +341,10 @@ const createAuthRouter = (upload: multer.Multer) => {
     }
   });
   router.put('/profile', authenticate, upload.single('photo'), updateProfile);
-  router.post('/password-reset/request', requestPasswordReset);
-  router.post('/password-reset/verify-code', verifyResetCode);
-  router.post('/password-reset/confirm', resetPassword);
+  router.post('/password-reset/request', passwordResetRateLimiter, validateBody(PasswordResetRequestSchema), requestPasswordReset);
+  router.post('/password-reset/verify-code', otpRateLimiter, validateBody(PasswordResetVerifySchema), verifyResetCode);
+  router.post('/password-reset/confirm', passwordResetRateLimiter, validateBody(PasswordResetConfirmSchema), resetPassword);
+  router.post('/change-password', authenticate, validateBody(ChangePasswordSchema), changePassword);
 
   // Active Session Management & Server-Side Revocation
   router.post('/logout', authenticate, logoutUser);

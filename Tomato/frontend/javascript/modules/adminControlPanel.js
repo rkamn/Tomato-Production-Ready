@@ -116,7 +116,8 @@ function renderAdminControlPanelView() {
   const myAssignedAt = myLoc.assignedAt ? new Date(myLoc.assignedAt).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
 
   // Stats calculation
-  const totalPlatformAdmins = currentControlPanelData.admins.filter(a => a.role === 'admin' || a.role === 'superadmin' || a.baseRole === 'admin').length;
+  const totalSuperAdmins = currentControlPanelData.admins.filter(a => a.role === 'superadmin').length;
+  const totalPlatformAdmins = currentControlPanelData.admins.filter(a => a.role === 'admin' || a.baseRole === 'admin').length;
   const totalSubAdmins = currentControlPanelData.admins.filter(a => a.role === 'subadmin' || a.baseRole === 'subadmin').length;
   const totalEmployees = currentControlPanelData.admins.filter(a => a.role === 'employee' || a.baseRole === 'employee').length;
   const totalWithAssignedLocation = currentControlPanelData.admins.filter(a => a.assignedLocation?.city && a.assignedLocation?.postalCode).length;
@@ -247,7 +248,7 @@ function renderAdminControlPanelView() {
 
     <!-- Active Tab Body -->
     ${controlPanelActiveTab === 'addresses'
-      ? renderAddressesTabHtml(isSuper, totalPlatformAdmins, totalSubAdmins, totalEmployees, totalWithAssignedLocation)
+      ? renderAddressesTabHtml(isSuper, totalSuperAdmins, totalPlatformAdmins, totalSubAdmins, totalEmployees, totalWithAssignedLocation)
       : controlPanelActiveTab === 'roles'
       ? renderRolesTabHtml(isSuper, totalRoles, customRolesCount)
       : controlPanelActiveTab === 'employees'
@@ -260,11 +261,13 @@ function renderAdminControlPanelView() {
 /**
  * Render Addresses Tab (Regional Directory)
  */
-function renderAddressesTabHtml(isSuper, totalPlatformAdmins, totalSubAdmins, totalEmployees, totalWithAssignedLocation) {
+function renderAddressesTabHtml(isSuper, totalSuperAdmins, totalPlatformAdmins, totalSubAdmins, totalEmployees, totalWithAssignedLocation) {
   // Filter admins list
   let filtered = currentControlPanelData.admins;
   if (controlPanelRoleFilter !== 'all') {
-    if (controlPanelRoleFilter === 'admin') {
+    if (controlPanelRoleFilter === 'superadmin') {
+      filtered = filtered.filter(a => a.role === 'superadmin');
+    } else if (controlPanelRoleFilter === 'admin') {
       filtered = filtered.filter(a => a.role === 'admin' || a.role === 'superadmin' || a.baseRole === 'admin');
     } else {
       filtered = filtered.filter(a => a.role === controlPanelRoleFilter || a.baseRole === controlPanelRoleFilter);
@@ -287,7 +290,18 @@ function renderAddressesTabHtml(isSuper, totalPlatformAdmins, totalSubAdmins, to
 
   return `
     <!-- Quick Stats Cards (Interactive Filters) -->
-    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:1rem; margin-bottom:1.5rem;">
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:1rem; margin-bottom:1.5rem;">
+      <div
+        class="stat-card clickable"
+        onclick="setControlPanelRoleFilter('superadmin')"
+        style="background:${controlPanelRoleFilter === 'superadmin' ? '#fef3c7' : '#fff'}; border:2px solid ${controlPanelRoleFilter === 'superadmin' ? '#b45309' : 'var(--line)'}; border-radius:10px; padding:1rem; cursor:pointer; transition:all 0.15s ease;"
+        title="Filter Super Administrator"
+      >
+        <span class="stat-label">Super Admin</span>
+        <div class="stat-value" style="color:#b45309;">${totalSuperAdmins}</div>
+        <span class="stat-note" style="color:${controlPanelRoleFilter === 'superadmin' ? '#b45309' : ''}; font-weight:${controlPanelRoleFilter === 'superadmin' ? '700' : 'normal'};">Supreme Authority ${controlPanelRoleFilter === 'superadmin' ? '● Active' : '↗'}</span>
+      </div>
+
       <div
         class="stat-card clickable"
         onclick="setControlPanelRoleFilter('admin')"
@@ -337,6 +351,7 @@ function renderAddressesTabHtml(isSuper, totalPlatformAdmins, totalSubAdmins, to
     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem; margin-bottom:1rem;">
       <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
         <button type="button" class="btn btn-sm ${controlPanelRoleFilter === 'all' ? 'btn-primary' : 'btn-outline'}" onclick="setControlPanelRoleFilter('all')">All Staff (${currentControlPanelData.admins.length})</button>
+        <button type="button" class="btn btn-sm ${controlPanelRoleFilter === 'superadmin' ? 'btn-primary' : 'btn-outline'}" onclick="setControlPanelRoleFilter('superadmin')">👑 Super Admin (${totalSuperAdmins})</button>
         <button type="button" class="btn btn-sm ${controlPanelRoleFilter === 'admin' ? 'btn-primary' : 'btn-outline'}" onclick="setControlPanelRoleFilter('admin')">👑 Platform Admins (${totalPlatformAdmins})</button>
         <button type="button" class="btn btn-sm ${controlPanelRoleFilter === 'subadmin' ? 'btn-primary' : 'btn-outline'}" onclick="setControlPanelRoleFilter('subadmin')">🛡️ Sub-Admins (${totalSubAdmins})</button>
         <button type="button" class="btn btn-sm ${controlPanelRoleFilter === 'employee' ? 'btn-primary' : 'btn-outline'}" onclick="setControlPanelRoleFilter('employee')">👔 Normal Employees (${totalEmployees})</button>
@@ -446,6 +461,9 @@ function renderAddressesTabHtml(isSuper, totalPlatformAdmins, totalSubAdmins, to
                 </td>
                 <td style="text-align:right; white-space:nowrap;">
                   <div style="display:inline-flex; align-items:center; justify-content:flex-end; gap:0.35rem;">
+                    ${isTargetSuper && !isSuper ? `
+                      <span class="badge" style="background:#fef3c7; color:#b45309; border:1px solid #fde68a; font-weight:700; font-size:0.75rem;">👑 Supreme Authority</span>
+                    ` : ''}
                     ${isSuper ? `
                       <button
                         type="button"

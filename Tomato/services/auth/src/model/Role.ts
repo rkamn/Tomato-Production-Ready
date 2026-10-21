@@ -105,7 +105,7 @@ export async function ensureDefaultRoles(): Promise<void> {
             createdBy: sysRole.createdBy,
           },
         },
-        { upsert: true, new: true },
+        { upsert: true, returnDocument: 'after' },
       );
     }
   } catch (err) {

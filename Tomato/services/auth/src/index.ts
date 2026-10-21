@@ -22,8 +22,9 @@ import { cleanupExpiredClosedComplaints, Restaurant, Shop } from './model/index.
 import { attachWebSocketServer } from './utils/websocket.js';
 
 import { upload, uploadDir } from './middleware/index.js';
+import { applySecurityMiddleware, corsOptions, apiRateLimiter } from './security/index.js';
 
-dotenv.config({ path: fileURLToPath(new URL('../.env', import.meta.url)) });
+dotenv.config({ path: fileURLToPath(new URL('../.env', import.meta.url)), quiet: true });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,8 +36,18 @@ const FRONTEND_PORT = Number(process.env.FRONTEND_PORT || 3000);
 const PUBLIC_BASE_URL =
   process.env.PUBLIC_BASE_URL || `http://localhost:${PORT}`;
 
-app.use(cors({ origin: process.env.CORS_ORIGIN || true }));
-app.use(express.json());
+// 1. Configure CORS with explicit trusted origins
+app.use(cors(corsOptions));
+
+// 2. Appropriate Request-Size Limits to prevent payload flooding / DoS
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+// 3. Apply comprehensive security layers (Helmet, CSP, XSS, NoSQL/SQL Injection Guard, Output Scrubber)
+applySecurityMiddleware(app);
+
+// 4. Global API rate limiter on all API routes
+app.use('/api', apiRateLimiter);
 app.use('/uploads', express.static(uploadDir));
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
@@ -161,6 +172,29 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/frontend', express.static(frontendDir));
 app.use(express.static(frontendDir));
 app.use((_req, res) => res.status(404).json({ message: 'Route not found.' }));
+
+// Global Security & Operational Error Handler
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (err?.message?.includes('CORS blocked')) {
+    return res.status(403).json({
+      success: false,
+      error: 'Forbidden',
+      message: err.message,
+    });
+  }
+  if (err?.type === 'entity.too.large' || err?.status === 413) {
+    return res.status(413).json({
+      success: false,
+      error: 'Payload Too Large',
+      message: 'Request payload exceeded maximum allowed size limit (1MB).',
+    });
+  }
+  console.error('[Unhandled Error]:', err?.message || err);
+  return res.status(err.status || 500).json({
+    success: false,
+    message: process.env.NODE_ENV === 'production' ? 'An unexpected internal error occurred' : (err.message || 'Error'),
+  });
+});
 
 const startServer = async () => {
   try {

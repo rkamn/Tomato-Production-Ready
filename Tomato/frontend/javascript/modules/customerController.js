@@ -148,9 +148,11 @@ function setCustomerBrowseMode(mode) {
   if (customerBrowseMode === 'shop') {
     mainCustomerTab = 'all_shops';
     currentSelectedShopId = 'all';
+    inlineShopSearchQuery = '';
   } else {
     mainCustomerTab = 'all_restaurants';
     currentSelectedRestaurantId = 'all';
+    inlineRestaurantSearchQuery = '';
   }
   selectedCategory = 'all';
   selectedMenuItemId = 'all';
@@ -451,6 +453,194 @@ function getOrderedRestaurantsByVisitAndProduct() {
   };
 }
 
+function getVisitedShopMetaKey() {
+  const uid = (user && (user._id || user.id)) || 'guest';
+  return `tomato_visited_shop_meta_v2_${uid}`;
+}
+
+function getVisitedShopMeta() {
+  try {
+    const raw = localStorage.getItem(getVisitedShopMetaKey());
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed && typeof parsed === 'object') return parsed;
+  } catch {
+    // ignore
+  }
+  return { byShop: {}, lastShopId: null, lastCategory: null, lastProductNames: [], lastCategories: [] };
+}
+
+function recordVisitedShop(shopId, categoryName = null) {
+  if (!shopId || shopId === 'all') return;
+  const idStr = String(shopId);
+  recordVisitedItem('shops', idStr);
+
+  try {
+    const meta = getVisitedShopMeta();
+    if (!meta.byShop) meta.byShop = {};
+
+    const shopItems = allShopItems.filter((m) => String(m.restaurantId) === idStr);
+    const effectiveCategory =
+      categoryName && categoryName !== 'all'
+        ? categoryName
+        : meta.byShop[idStr]?.lastCategory || null;
+
+    let relevantItems = shopItems;
+    if (effectiveCategory) {
+      const catLower = effectiveCategory.trim().toLowerCase();
+      const catMatches = shopItems.filter(
+        (m) => (m.category || 'Retail Goods').trim().toLowerCase() === catLower
+      );
+      if (catMatches.length > 0) {
+        relevantItems = catMatches;
+      }
+    }
+
+    const productNames = Array.from(
+      new Set(relevantItems.map((m) => (m.name || '').trim().toLowerCase()).filter(Boolean))
+    );
+    const categories = Array.from(
+      new Set(relevantItems.map((m) => (m.category || 'Retail Goods').trim().toLowerCase()).filter(Boolean))
+    );
+
+    meta.byShop[idStr] = {
+      lastVisitedAt: Date.now(),
+      lastCategory: effectiveCategory,
+      productNames,
+      categories,
+    };
+    meta.lastShopId = idStr;
+    meta.lastCategory = effectiveCategory;
+    meta.lastProductNames = productNames;
+    meta.lastCategories = categories;
+
+    localStorage.setItem(getVisitedShopMetaKey(), JSON.stringify(meta));
+  } catch (e) {
+    console.warn('Could not save visited shop metadata', e);
+  }
+}
+
+function getOrderedShopsByVisitAndProduct() {
+  const visitedIds = getVisitedItems('shops').map(String);
+  const meta = getVisitedShopMeta();
+  const visitedShops = [];
+  const visitedIdSet = new Set();
+
+  visitedIds.forEach((vId) => {
+    const found = allShops.find((s) => String(s.id || s._id) === vId);
+    if (found && !visitedIdSet.has(vId)) {
+      visitedShops.push(found);
+      visitedIdSet.add(vId);
+    }
+  });
+
+  const primaryProductNames = new Set((meta.lastProductNames || []).map((s) => s.toLowerCase()));
+  const primaryCategories = new Set((meta.lastCategories || []).map((s) => s.toLowerCase()));
+  if (meta.lastCategory) {
+    primaryCategories.add(meta.lastCategory.trim().toLowerCase());
+  }
+
+  const secondaryProductNames = new Set();
+  const secondaryCategories = new Set();
+  visitedShops.forEach((s) => {
+    const sId = String(s.id || s._id);
+    const sMeta = meta.byShop?.[sId];
+    if (sMeta) {
+      (sMeta.productNames || []).forEach((n) => secondaryProductNames.add(n.toLowerCase()));
+      (sMeta.categories || []).forEach((c) => secondaryCategories.add(c.toLowerCase()));
+    } else {
+      const sItems = allShopItems.filter((m) => String(m.restaurantId) === sId);
+      sItems.forEach((m) => {
+        if (m.name) secondaryProductNames.add(m.name.trim().toLowerCase());
+        if (m.category) secondaryCategories.add(m.category.trim().toLowerCase());
+      });
+    }
+  });
+
+  const sameProductEntries = [];
+  const remainingShops = [];
+  const featuredItemByShopId = new Map();
+
+  visitedShops.forEach((s) => {
+    const sId = String(s.id || s._id);
+    const sItems = allShopItems.filter((m) => String(m.restaurantId) === sId);
+    const lastCat = meta.byShop?.[sId]?.lastCategory;
+    let featured = sItems[0] || null;
+    if (lastCat) {
+      const catMatch = sItems.find(
+        (m) => (m.category || 'Retail Goods').trim().toLowerCase() === lastCat.trim().toLowerCase()
+      );
+      if (catMatch) featured = catMatch;
+    }
+    if (featured) featuredItemByShopId.set(sId, featured);
+  });
+
+  allShops.forEach((s) => {
+    const sId = String(s.id || s._id);
+    if (visitedIdSet.has(sId)) return;
+
+    const sItems = allShopItems.filter((m) => String(m.restaurantId) === sId);
+    let bestScore = 0;
+    let matchedItem = sItems[0] || null;
+
+    for (const item of sItems) {
+      const iName = (item.name || '').trim().toLowerCase();
+      const iCat = (item.category || 'Retail Goods').trim().toLowerCase();
+      let score = 0;
+
+      if (iName && primaryProductNames.has(iName)) {
+        score = 4;
+      } else if (
+        iName &&
+        Array.from(primaryProductNames).some((p) => p.length > 2 && (iName.includes(p) || p.includes(iName)))
+      ) {
+        score = 3;
+      } else if (iCat && primaryCategories.has(iCat)) {
+        score = 2;
+      } else if ((iName && secondaryProductNames.has(iName)) || (iCat && secondaryCategories.has(iCat))) {
+        score = 1;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        matchedItem = item;
+      }
+    }
+
+    if (matchedItem) {
+      featuredItemByShopId.set(sId, matchedItem);
+    }
+
+    if (bestScore > 0) {
+      sameProductEntries.push({ shop: s, score: bestScore });
+    } else {
+      remainingShops.push(s);
+    }
+  });
+
+  sameProductEntries.sort((a, b) => b.score - a.score);
+  const sameProductShops = sameProductEntries.map((e) => e.shop);
+
+  let pillShops = [...visitedShops, ...sameProductShops];
+  if (pillShops.length < 5) {
+    for (const s of remainingShops) {
+      if (pillShops.length >= 5) break;
+      pillShops.push(s);
+    }
+  }
+
+  return {
+    visitedShops,
+    sameProductShops,
+    remainingShops,
+    orderedAll: sortRestaurantsByDistance(allShops),
+    pillShops: sortRestaurantsByDistance(pillShops),
+    visitedIdSet,
+    sameProductIdSet: new Set(sameProductShops.map((s) => String(s.id || s._id))),
+    featuredItemByShopId,
+    meta,
+  };
+}
+
 let activeFilterModalTab = 'all_restaurants';
 
 function openFilterSelectionModal(tab) {
@@ -533,7 +723,11 @@ function handleFilterModalCardClick(card, event) {
       toggleRestaurantModalCategories(event, filterVal);
     }
   } else if (filterType === 'shop') {
-    selectShopFilter(filterVal);
+    if (filterVal === 'all') {
+      selectShopFilter('all');
+    } else {
+      toggleShopModalCategories(event, filterVal);
+    }
   } else if (filterType === 'category') {
     selectCategoryFilter(filterVal);
   } else if (filterType === 'menu' || filterType === 'product') {
@@ -580,6 +774,36 @@ function toggleRestaurantModalCategories(event, restId) {
   }
 }
 window.toggleRestaurantModalCategories = toggleRestaurantModalCategories;
+
+function toggleShopModalCategories(event, shopId) {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+  const panel = document.getElementById(`shop-cat-panel-${shopId}`);
+  const btn = document.getElementById(`shop-cat-btn-${shopId}`);
+  if (!panel) return;
+
+  const wasOpen = panel.classList.contains('open');
+
+  // Close any previously opened category panel in modal or inline search dropdown
+  document.querySelectorAll('.rest-category-panel.open').forEach((p) => {
+    p.classList.remove('open');
+  });
+  document.querySelectorAll('.rest-category-expand-btn.expanded').forEach((b) => {
+    b.classList.remove('expanded');
+    b.innerHTML = '▾ Categories';
+  });
+
+  if (!wasOpen) {
+    panel.classList.add('open');
+    if (btn) {
+      btn.classList.add('expanded');
+      btn.innerHTML = '▴ Categories';
+    }
+  }
+}
+window.toggleShopModalCategories = toggleShopModalCategories;
 
 function renderFilterModalItems(tab, query = '') {
   const container = document.getElementById('filter-modal-items-container');
@@ -908,10 +1132,28 @@ function renderRestaurantPills() {
     const totalProductsCount = allShopItems.length;
     const distinctCategories = getDistinctShopCategories();
 
+    const existingSearchVal = typeof inlineShopSearchQuery !== 'undefined' ? inlineShopSearchQuery : '';
     let headersHtml = `
-      <button class="filter-pill ${mainCustomerTab === 'all_shops' ? 'active' : ''}" onclick="selectMainCustomerTab('all_shops')">
-        🏪 Shops (${allShops.length})
-      </button>
+      <div id="inline-shop-search-wrapper" style="position:relative; display:inline-flex; align-items:center; min-width:255px;">
+        <span style="position:absolute; left:0.75rem; font-size:0.88rem; pointer-events:none; z-index:1;">🏪</span>
+        <input
+          id="inline-shop-search-input"
+          type="text"
+          value="${escapeHtml(existingSearchVal)}"
+          placeholder="Search Shops (${allShops.length})..."
+          autocomplete="off"
+          style="width:100%; padding:0.46rem 2rem 0.46rem 2.15rem; font-size:0.84rem; font-weight:600; border:1.5px solid ${mainCustomerTab === 'all_shops' ? 'var(--ink)' : 'var(--line)'}; border-radius:999px; background:${mainCustomerTab === 'all_shops' ? '#fff' : 'var(--panel)'}; color:var(--ink); outline:none; box-shadow:${mainCustomerTab === 'all_shops' ? '0 2px 8px rgba(15,23,42,0.08)' : 'none'}; transition:all 0.15s ease;"
+          onfocus="handleInlineShopSearchFocus(this)"
+          onclick="handleInlineShopSearchFocus(this)"
+          oninput="handleInlineShopSearchInput(this)"
+        />
+        <span style="position:absolute; right:0.75rem; font-size:0.82rem; color:var(--muted); pointer-events:none;">🔍</span>
+        <div
+          id="inline-shop-search-dropdown"
+          style="display:none; position:absolute; top:calc(100% + 6px); left:0; width:min(440px, 90vw); max-height:380px; overflow-y:auto; background:#ffffff; border:1px solid var(--line); border-radius:12px; box-shadow:0 14px 32px rgba(15,23,42,0.18); padding:0.6rem; z-index:1200; flex-direction:column; gap:0.45rem;"
+          onclick="handleFilterModalItemClick(event)"
+        ></div>
+      </div>
       <button class="filter-pill ${mainCustomerTab === 'all_products' ? 'active' : ''}" onclick="selectMainCustomerTab('all_products')">
         🛍️ Products (${totalProductsCount})
       </button>
@@ -972,33 +1214,46 @@ function renderSubFilterPills() {
   if (customerBrowseMode === 'shop') {
     // ==================== SHOP MODE SUB-PILLS ====================
     if (mainCustomerTab === 'all_shops') {
-      const isAllActive = currentSelectedShopId === 'all';
-      const recentShops = getStablePillItems('shops', allShops, (s) => s.id || s._id);
+      const isAllActive = currentSelectedShopId === 'all' && selectedCategory === 'all';
+      const { pillShops, visitedIdSet, sameProductIdSet } = getOrderedShopsByVisitAndProduct();
 
       subHtml += `
-        <div class="split-filter-pill ${isAllActive ? 'active' : ''}">
-          <button type="button" class="split-filter-pill-action" onclick="selectShopFilter('all')">
-            All (${allShopItems.length})
-          </button>
-          <button type="button" class="split-filter-pill-caret" onclick="openFilterSelectionModal('all_shops')" title="Open all shops popup" aria-label="Open all shops popup">
-            ▼
-          </button>
-        </div>
+        <button type="button" class="filter-pill ${isAllActive ? 'active' : ''}" style="font-size:0.8rem; padding:0.35rem 0.8rem;" onclick="selectShopFilter('all')">
+          Latest History
+        </button>
       `;
 
-      recentShops.forEach((shop) => {
+      pillShops.forEach((shop) => {
         const shopId = String(shop.id || shop._id);
         const count = allShopItems.filter((m) => String(m.restaurantId) === shopId).length;
         const shopDisplay = formatCleanName(shop.name || shop.displayName || 'Shop');
         const isClosed = shop.isOpen === false || shop.isOnline === false;
         const statusBadge = isClosed ? ' <span style="font-size:0.7em; color:#ef4444; font-weight:700;">[CLOSED]</span>' : '';
-        const isActive = currentSelectedShopId === shopId;
+        const isActive = String(currentSelectedShopId) === shopId;
+        const isVisitedFav = visitedIdSet.has(shopId);
+        const isSameProd = sameProductIdSet.has(shopId);
+        const pillTitle = isVisitedFav
+          ? 'Recently visited favorite shop (sorted by last visit)'
+          : isSameProd
+            ? 'Sells the same product / category'
+            : 'Click to view shop products';
+
         subHtml += `
-          <button class="filter-pill ${isActive ? 'active' : ''}" style="font-size:0.8rem; padding:0.35rem 0.8rem; ${isClosed ? 'opacity:0.85; border-color:#fca5a5;' : ''}" onclick="selectShopFilter('${shopId}')">
+          <button class="filter-pill ${isActive ? 'active' : ''}" style="font-size:0.8rem; padding:0.35rem 0.8rem; ${isClosed ? 'opacity:0.85; border-color:#fca5a5;' : ''}" onclick="selectShopFilter('${shopId}')" title="${escapeHtml(pillTitle)}">
             ${escapeHtml(shopDisplay)}${statusBadge} (${count})
           </button>
         `;
       });
+
+      if (selectedCategory !== 'all') {
+        const activeShop = allShops.find((s) => String(s.id || s._id) === String(currentSelectedShopId));
+        const activeShopName = activeShop ? formatCleanName(activeShop.name || activeShop.displayName || 'Shop') : '';
+        subHtml += `
+          <button type="button" class="filter-pill active" style="font-size:0.8rem; padding:0.35rem 0.8rem;" onclick="selectShopFilter('${escapeHtml(String(currentSelectedShopId))}')" title="Click to show all categories from this shop">
+            🛍️ ${activeShopName ? `${escapeHtml(activeShopName)}: ` : ''}${escapeHtml(selectedCategory)} ✕
+          </button>
+        `;
+      }
     } else if (mainCustomerTab === 'category') {
       const distinctCategories = getDistinctShopCategories();
       const isAllActive = selectedCategory === 'all';
@@ -1249,15 +1504,51 @@ function selectShopFilter(id) {
       return;
     }
   }
+  mainCustomerTab = 'all_shops';
   currentSelectedShopId = id;
+  selectedCategory = 'all';
   if (id !== 'all') {
-    recordVisitedItem('shops', id);
+    recordVisitedShop(id, null);
   }
   closeFilterModal();
+  closeInlineShopSearchDropdown();
   renderRestaurantPills();
   renderMenuItems();
 }
 window.selectShopFilter = selectShopFilter;
+
+function selectShopCategoryFilter(event, shopId, categoryName) {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+  if (shopId && shopId !== 'all') {
+    const targetShop = Array.isArray(allShops) ? allShops.find((s) => String(s.id || s._id) === String(shopId)) : null;
+    if (targetShop && isStoreBeyondCustomerRange(targetShop)) {
+      if (typeof showRestaurantTooFarPopup === 'function') {
+        showRestaurantTooFarPopup(targetShop.name || 'Shop', targetShop.distanceKm);
+      } else {
+        alert('Shop is too far from you');
+      }
+      return;
+    }
+  }
+  mainCustomerTab = 'all_shops';
+  currentSelectedShopId = shopId || 'all';
+  selectedCategory = categoryName || 'all';
+  selectedMenuItemId = 'all';
+  if (shopId && shopId !== 'all') {
+    recordVisitedShop(shopId, categoryName);
+  }
+  if (categoryName && categoryName !== 'all') {
+    recordVisitedItem('shop_categories', categoryName);
+  }
+  closeFilterModal();
+  closeInlineShopSearchDropdown();
+  renderRestaurantPills();
+  renderMenuItems();
+}
+window.selectShopCategoryFilter = selectShopCategoryFilter;
 
 function selectCategoryFilter(cat) {
   selectedCategory = cat;
@@ -1524,6 +1815,151 @@ function renderRestaurantHistoryTileHtml(rest, featuredItemOverride = null, subt
   `;
 }
 
+function renderShopHistoryTileHtml(shop, featuredItemOverride = null, subtitleBadgeText = '🏪 Shop') {
+  ensureRestaurantTileSliderTimer();
+
+  const shopId = String(shop.id || shop._id);
+  const shopName = formatCleanName(shop.name || shop.displayName || 'Shop');
+  const isShopClosed = shop.isOpen === false || shop.isOnline === false;
+  const shopItems = allShopItems.filter((m) => String(m.restaurantId) === shopId);
+
+  const ratedShopItems = shopItems.filter((m) => m.rating != null && Number(m.rating) > 0);
+  const computedAvg =
+    ratedShopItems.length > 0
+      ? ratedShopItems.reduce((sum, m) => sum + Number(m.rating), 0) / ratedShopItems.length
+      : shop.rating != null && Number(shop.rating) > 0
+        ? Number(shop.rating)
+        : null;
+  const shopRatingScore = computedAvg != null ? Number(computedAvg).toFixed(1) : 'New';
+  const itemsReviewSum = shopItems.reduce((sum, m) => sum + (Number(m.reviewCount) || 0), 0);
+  const directShopReviews = Number(shop.directReviewCount || 0);
+  const shopReviewCount = Math.max(Number(shop.reviewCount || 0), itemsReviewSum + directShopReviews);
+
+  const slideItems = [];
+  if (featuredItemOverride) {
+    slideItems.push(featuredItemOverride);
+  }
+  shopItems.forEach((item) => {
+    const itemId = String(item._id || item.id);
+    if (!slideItems.some((s) => String(s._id || s.id) === itemId)) {
+      slideItems.push(item);
+    }
+  });
+
+  const slideCount = Math.max(slideItems.length, 1);
+  const bgSlidesHtml =
+    slideItems.length > 0
+      ? slideItems
+          .map((item) => {
+            const imgSrc =
+              item && item.image && item.image.trim()
+                ? item.image
+                : shop.image && shop.image.trim()
+                  ? shop.image
+                  : '';
+            return `<div class="rest-tile-bg-slide" style="position:relative; overflow:hidden; flex:0 0 ${100 / slideCount}%; width:${100 / slideCount}%; height:100%; background-color:#1e293b;">${renderFullTileBackdropHtml(imgSrc)}</div>`;
+          })
+          .join('')
+      : `<div class="rest-tile-bg-slide" style="position:relative; overflow:hidden; flex:0 0 100%; width:100%; height:100%; background-color:#1e293b;">${renderFullTileBackdropHtml(shop.image || '')}</div>`;
+
+  const categorySlidesHtml =
+    slideItems.length > 0
+      ? slideItems
+          .map(
+            (item, idx) =>
+              `<span data-rest-cat-slide="${idx}" style="display:${idx === 0 ? 'inline-flex' : 'none'}; align-items:center; font-size:0.8rem; font-weight:800; color:#1e3a8a; background:rgba(255,255,255,0.68); backdrop-filter:blur(2px); padding:0.08rem 0.45rem; border-radius:4px;">${escapeHtml(item.category || 'Product')}</span>`
+          )
+          .join('')
+      : '';
+
+  const sliderControlsHtml =
+    slideItems.length > 1
+      ? `
+        <div style="display:flex; align-items:center; justify-content:space-between; z-index:1; margin:0.35rem 0 0.15rem 0;">
+          <button type="button" onclick="stepRestaurantTileSlider(event, this, -1, false)" title="Previous product image" style="width:26px; height:26px; border-radius:50%; border:1px solid rgba(255,255,255,0.35); background:rgba(15,23,42,0.68); color:#ffffff; font-size:0.95rem; font-weight:800; line-height:1; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; backdrop-filter:blur(4px);">‹</button>
+          <div style="display:flex; align-items:center; gap:0.3rem; background:rgba(15,23,42,0.55); padding:0.2rem 0.5rem; border-radius:999px; backdrop-filter:blur(4px);">
+            ${slideItems
+              .map(
+                (_, idx) =>
+                  `<span data-rest-dot-slide="${idx}" onclick="stepRestaurantTileSlider(event, this, ${idx}, true)" title="View product ${idx + 1}" style="display:inline-block; height:6px; width:${idx === 0 ? '16px' : '6px'}; border-radius:999px; background:${idx === 0 ? '#fde047' : 'rgba(255,255,255,0.55)'}; opacity:${idx === 0 ? '1' : '0.75'}; transition:all 0.25s ease; cursor:pointer;"></span>`
+              )
+              .join('')}
+          </div>
+          <button type="button" onclick="stepRestaurantTileSlider(event, this, 1, false)" title="Next product image" style="width:26px; height:26px; border-radius:50%; border:1px solid rgba(255,255,255,0.35); background:rgba(15,23,42,0.68); color:#ffffff; font-size:0.95rem; font-weight:800; line-height:1; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; backdrop-filter:blur(4px);">›</button>
+        </div>
+      `
+      : '';
+
+  const itemSlidesHtml =
+    slideItems.length > 0
+      ? slideItems
+          .map(
+            (item, idx) => `
+              <div data-rest-item-slide="${idx}" style="display:${idx === 0 ? 'block' : 'none'};">
+                <p class="food-desc" style="margin:0 0 0.35rem 0; font-size:0.82rem; color:#f1f5f9; line-height:1.35; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-shadow:0 1px 3px rgba(0,0,0,0.9);" title="${escapeHtml(item.description || '')}">${escapeHtml(item.description || 'Quality retail goods from local shop.')}</p>
+                <div style="display:flex; background:rgba(15,23,42,0.32); backdrop-filter:blur(2px); border:1px solid rgba(255,255,255,0.28); border-radius:10px; padding:0.65rem 0.8rem; justify-content:space-between; align-items:center; gap:0.6rem;">
+                  <div style="min-width:0; flex:1;">
+                    ${slideItems.length > 1 ? `<div style="font-size:0.68rem; color:#cbd5e1; text-transform:uppercase; letter-spacing:0.04em; font-weight:600; margin-bottom:0.15rem;">Item ${idx + 1}/${slideItems.length}</div>` : ''}
+                    <div style="font-size:0.95rem; font-weight:700; color:#ffffff; text-shadow:0 1px 3px rgba(0,0,0,0.85); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</div>
+                  </div>
+                  <div style="display:flex; align-items:center; gap:0.5rem; flex-shrink:0;">
+                    <span style="font-size:1.05rem; font-weight:800; color:#4ade80; background:rgba(15,23,42,0.35); padding:0.2rem 0.5rem; border-radius:6px; border:1px solid rgba(74,222,128,0.45); text-shadow:0 1px 2px rgba(0,0,0,0.8);">₹${Number(item.price).toFixed(2)}</span>
+                    ${!isShopClosed ? `<button type="button" class="btn btn-primary btn-sm" style="padding:0.32rem 0.65rem; font-size:0.75rem; background:rgba(217,75,53,0.78); border:1px solid rgba(255,255,255,0.35);" onclick="event.stopPropagation(); addToCart('${item._id || item.id}', '${escapeHtml(item.name)}', ${Number(item.price)}, '${item.restaurantId}', 'shop')">+ Add</button>` : ''}
+                  </div>
+                </div>
+              </div>
+            `
+          )
+          .join('')
+      : `
+        <div style="background:rgba(15,23,42,0.32); backdrop-filter:blur(2px); border:1px solid rgba(255,255,255,0.28); border-radius:10px; padding:0.65rem 0.8rem; display:flex; justify-content:space-between; align-items:center;">
+          <span style="font-size:0.85rem; color:#fca5a5; font-style:italic; font-weight:600;">Not selling any item</span>
+          <span style="font-size:0.75rem; color:#cbd5e1;">0 products</span>
+        </div>
+      `;
+
+  return `
+    <div class="food-card restaurant-history-tile shop-history-tile" data-slide-count="${slideItems.length}" data-slide-index="0" onclick="selectShopFilter('${escapeHtml(shopId)}')" style="position:relative; overflow:hidden; min-height:225px; border-radius:14px; cursor:pointer; display:flex; flex-direction:column; justify-content:space-between; padding:1.1rem; color:#ffffff; border:1px solid ${isShopClosed ? '#fca5a5' : 'rgba(255,255,255,0.18)'}; background-color:#1e293b; box-shadow:0 8px 20px rgba(15,23,42,0.18); transition:transform 0.2s ease, box-shadow 0.2s ease;">
+      <div class="rest-tile-bg-slider-track" style="position:absolute; top:0; left:0; height:100%; width:${slideCount * 100}%; display:flex; z-index:0; pointer-events:none; transition:transform 0.55s cubic-bezier(0.25, 0.8, 0.25, 1);">
+        ${bgSlidesHtml}
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:0.5rem; z-index:1; position:relative;">
+        <div style="min-width:0;">
+          <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap; margin-bottom:0.3rem;">
+            <span style="display:inline-block; font-size:0.68rem; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#fde047; background:rgba(0,0,0,0.45); padding:0.15rem 0.45rem; border-radius:4px;">${escapeHtml(subtitleBadgeText)}</span>
+            ${shop.distanceText ? `<span style="display:inline-block; font-size:0.68rem; font-weight:700; color:#38bdf8; background:rgba(15,23,42,0.65); padding:0.15rem 0.45rem; border-radius:4px; border:1px solid rgba(56,189,248,0.4);">📍 ${escapeHtml(shop.distanceText)}</span>` : ''}
+          </div>
+          <div style="display:flex; flex-direction:column; align-items:flex-start; gap:0.2rem;">
+            <h3 style="margin:0; font-size:1.18rem; font-weight:800; color:#ffffff; text-shadow:0 2px 6px rgba(0,0,0,0.65); line-height:1.25;">${escapeHtml(shopName)}</h3>
+            ${categorySlidesHtml}
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.3rem; flex-shrink:0;">
+          <div style="display:flex; gap:0.35rem; align-items:center;">
+            ${isShopClosed ? '<span style="background:#ef4444; color:#fff; font-size:0.65rem; font-weight:800; padding:0.15rem 0.45rem; border-radius:4px;">CLOSED</span>' : '<span style="background:rgba(22,163,74,0.9); color:#fff; font-size:0.65rem; font-weight:800; padding:0.15rem 0.45rem; border-radius:4px;">OPEN</span>'}
+            <span style="display:inline-flex; align-items:center; gap:0.3rem; padding:0.2rem 0.5rem; border-radius:4px; font-size:0.7rem; font-weight:800; background:rgba(240,253,244,0.95); color:#15803d; border:1.5px solid #22c55e; box-shadow:0 2px 6px rgba(0,0,0,0.25);">
+              🏪 SHOP
+            </span>
+          </div>
+          <button type="button" class="review-rating-pill" data-rest-id="${escapeHtml(shopId)}" data-rest-name="${escapeHtml(shopName)}" onclick="event.stopPropagation(); handleRestaurantReviewButtonClick(this)" title="View & write shop ratings & reviews" style="margin:0;">
+            ⭐ ${shopRatingScore} <span style="color:#78350f; font-weight:normal;">(${shopReviewCount})</span>
+          </button>
+          <button type="button" class="review-action-link" data-rest-id="${escapeHtml(shopId)}" data-rest-name="${escapeHtml(shopName)}" onclick="event.stopPropagation(); handleRestaurantReviewButtonClick(this)" title="View & write shop ratings & reviews" style="color:#fde047; text-shadow:0 1px 2px rgba(0,0,0,0.8);">
+            Reviews
+          </button>
+        </div>
+      </div>
+
+      ${sliderControlsHtml}
+
+      <div style="z-index:1; position:relative; margin-top:auto; padding-top:0.45rem;">
+        ${itemSlidesHtml}
+      </div>
+    </div>
+  `;
+}
+
 function renderMenuItems() {
   const grid = document.getElementById('menu-items-grid');
   if (!grid) return;
@@ -1532,11 +1968,55 @@ function renderMenuItems() {
 
   if (customerBrowseMode === 'shop') {
     // ==================== SHOP PRODUCTS RENDERING ====================
+    if (mainCustomerTab === 'all_shops' && currentSelectedShopId === 'all' && selectedCategory === 'all') {
+      const { orderedAll, visitedIdSet, sameProductIdSet, featuredItemByShopId } = getOrderedShopsByVisitAndProduct();
+
+      const effectiveShopSearch = (searchVal || (typeof inlineShopSearchQuery === 'string' ? inlineShopSearchQuery.toLowerCase().trim() : ''));
+      let filteredShops = orderedAll;
+      if (effectiveShopSearch) {
+        filteredShops = orderedAll.filter((s) => {
+          const sId = String(s.id || s._id);
+          const sName = (s.name || s.displayName || '').toLowerCase();
+          const shopItems = allShopItems.filter((m) => String(m.restaurantId) === sId);
+          const matchesItem = shopItems.some(
+            (m) =>
+              (m.name || '').toLowerCase().includes(effectiveShopSearch) ||
+              (m.category || '').toLowerCase().includes(effectiveShopSearch)
+          );
+          return sName.includes(effectiveShopSearch) || matchesItem;
+        });
+      }
+
+      if (!filteredShops.length) {
+        grid.innerHTML = `<p style="color:var(--muted); padding:2rem; grid-column:1/-1; text-align:center;">No shops match your selection.</p>`;
+        return;
+      }
+
+      grid.innerHTML = filteredShops
+        .map((shop) => {
+          const shopId = String(shop.id || shop._id);
+          const featuredItem = featuredItemByShopId.get(shopId) || null;
+          const badgeLabel = visitedIdSet.has(shopId)
+            ? '★ Visited Shop'
+            : sameProductIdSet.has(shopId)
+              ? '✨ Sells Same Product'
+              : '🏪 Shop';
+          return renderShopHistoryTileHtml(shop, featuredItem, badgeLabel);
+        })
+        .join('');
+      return;
+    }
+
     let filtered = allShopItems;
 
     if (mainCustomerTab === 'all_shops') {
       if (currentSelectedShopId !== 'all') {
         filtered = filtered.filter((m) => String(m.restaurantId) === String(currentSelectedShopId));
+      }
+      if (selectedCategory !== 'all') {
+        filtered = filtered.filter(
+          (m) => (m.category || 'Retail Goods').trim().toLowerCase() === selectedCategory.trim().toLowerCase()
+        );
       }
     } else if (mainCustomerTab === 'all_products') {
       if (selectedMenuItemId !== 'all') {
@@ -4608,8 +5088,169 @@ document.addEventListener("click", (e) => {
   if (wrapper && !wrapper.contains(e.target)) {
     closeInlineRestaurantSearchDropdown();
   }
+  const shopWrapper = document.getElementById("inline-shop-search-wrapper");
+  if (shopWrapper && !shopWrapper.contains(e.target)) {
+    closeInlineShopSearchDropdown();
+  }
 });
 
 window.handleInlineRestaurantSearchFocus = handleInlineRestaurantSearchFocus;
 window.handleInlineRestaurantSearchInput = handleInlineRestaurantSearchInput;
 window.closeInlineRestaurantSearchDropdown = closeInlineRestaurantSearchDropdown;
+
+// =========================================================================
+// CUSTOMER ORDER ONLINE: INLINE SHOP SEARCH BOX & DROPDOWN
+// =========================================================================
+let inlineShopSearchQuery = "";
+
+function buildShopFilterCardsHtml(query = "") {
+  const q = (query || "").toLowerCase().trim();
+  let html = "";
+  const isAllActive = currentSelectedShopId === "all" && selectedCategory === "all";
+  if (!q || "all shops".includes(q)) {
+    html += `
+      <div class="filter-modal-card ${isAllActive ? "active" : ""}" data-filter-type="shop" data-filter-value="all" onclick="handleFilterModalCardClick(this, event)">
+        <div>
+          <div style="font-weight:700; font-size:0.92rem;">All Shops (Latest History &amp; Favorites)</div>
+          <div style="font-size:0.76rem; color:var(--muted);">View products and retail items across all shops</div>
+        </div>
+        <span class="filter-modal-card-badge">${allShopItems.length} products</span>
+      </div>
+    `;
+  }
+
+  const filteredShops = allShops.filter((shop) => {
+    if (!q) return true;
+    const shopId = String(shop.id || shop._id);
+    const name = (shop.name || shop.displayName || "").toLowerCase();
+    const cat = (shop.category || "").toLowerCase();
+    const addr = (shop.restaurantAddress || shop.address || "").toLowerCase();
+    const itemMatch = allShopItems.some(
+      (m) =>
+        String(m.restaurantId) === shopId &&
+        ((m.name || "").toLowerCase().includes(q) || (m.category || "").toLowerCase().includes(q))
+    );
+    return name.includes(q) || cat.includes(q) || addr.includes(q) || itemMatch;
+  });
+
+  if (!filteredShops.length && q) {
+    html += `<p style="color:var(--muted); text-align:center; padding:1.2rem 0; margin:0; font-size:0.85rem;">No shops match "${escapeHtml(query)}"</p>`;
+  } else {
+    filteredShops.forEach((shop) => {
+      const shopId = String(shop.id || shop._id);
+      const shopItems = allShopItems.filter((m) => String(m.restaurantId) === shopId);
+      const count = shopItems.length;
+      const shopDisplay = formatCleanName(shop.name || shop.displayName || "Shop");
+      const isClosed = shop.isOpen === false || shop.isOnline === false;
+      const isActive = currentSelectedShopId === shopId;
+      const catText = shop.category ? ` • ${escapeHtml(shop.category)}` : "";
+      const addrText = (shop.restaurantAddress || shop.address) ? ` • ${escapeHtml(shop.restaurantAddress || shop.address)}` : "";
+
+      const catMap = new Map();
+      shopItems.forEach((m) => {
+        const raw = (m.category || "Retail Goods").trim() || "Retail Goods";
+        const key = raw.toLowerCase();
+        const formatted = raw.charAt(0).toUpperCase() + raw.slice(1);
+        if (!catMap.has(key)) {
+          catMap.set(key, { name: formatted, count: 0 });
+        }
+        catMap.get(key).count += 1;
+      });
+      const shopCategories = Array.from(catMap.values());
+
+      const categoriesContentHtml =
+        shopCategories.length > 0
+          ? `<div style="font-size:0.74rem; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:0.03em; margin-bottom:0.2rem;">Product Categories (Click to Open):</div>
+             <ul class="rest-category-bullet-list">
+              ${shopCategories
+                .map((c) => {
+                  const isCatActive =
+                    isActive &&
+                    selectedCategory !== "all" &&
+                    selectedCategory.toLowerCase() === c.name.toLowerCase();
+                  return `<li>
+                    <button type="button" class="rest-category-bullet-btn ${isCatActive ? "active" : ""}" onclick="selectShopCategoryFilter(event, '${escapeHtml(shopId)}', '${escapeHtml(c.name)}')" title="Open ${escapeHtml(c.name)} from ${escapeHtml(shopDisplay)}">
+                      <span>🛍️ ${escapeHtml(c.name)}</span>
+                      <span style="font-size:0.75rem; opacity:0.8; font-weight:500;">${c.count} ${c.count === 1 ? "item" : "items"} →</span>
+                    </button>
+                  </li>`;
+                })
+                .join("")}
+            </ul>`
+          : `<ul class="rest-category-bullet-list"><li style="color:#dc2626; font-weight:600; font-size:0.8rem;">Not selling any item</li></ul>`;
+
+      html += `
+        <div>
+          <div class="filter-modal-card ${isActive ? "active" : ""}" data-filter-type="shop" data-filter-value="${escapeHtml(shopId)}" onclick="toggleShopModalCategories(event, '${escapeHtml(shopId)}')" title="Click to expand product categories sold by ${escapeHtml(shopDisplay)}">
+            <div style="flex:1; min-width:0;">
+              <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
+                <span style="font-weight:600; font-size:0.9rem; color:var(--ink);">${escapeHtml(shopDisplay)}</span>
+                ${isClosed ? '<span style="font-size:0.7em; color:#ef4444; font-weight:700; background:#fee2e2; padding:0.1rem 0.35rem; border-radius:4px;">[CLOSED]</span>' : ""}
+              </div>
+              <div style="font-size:0.75rem; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:0.15rem;">
+                ${count} products${catText}${addrText}
+              </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:0.4rem; flex-shrink:0;">
+              <span class="filter-modal-card-badge">${count} items</span>
+              <button
+                type="button"
+                id="shop-cat-btn-${escapeHtml(shopId)}"
+                class="rest-category-expand-btn"
+                onclick="toggleShopModalCategories(event, '${escapeHtml(shopId)}')"
+                title="Expand to see product categories sold by this shop"
+              >
+                ▾ Categories
+              </button>
+            </div>
+          </div>
+          <div id="shop-cat-panel-${escapeHtml(shopId)}" class="rest-category-panel">
+            ${categoriesContentHtml}
+          </div>
+        </div>
+      `;
+    });
+  }
+  return html;
+}
+
+function handleInlineShopSearchFocus(inputEl) {
+  if (mainCustomerTab !== "all_shops") {
+    mainCustomerTab = "all_shops";
+    selectedCategory = "all";
+    currentSelectedShopId = "all";
+    selectedMenuItemId = "all";
+    renderSubFilterPills();
+    renderMenuItems();
+  }
+  const dropdown = document.getElementById("inline-shop-search-dropdown");
+  if (dropdown) {
+    dropdown.innerHTML = buildShopFilterCardsHtml(inputEl?.value || "");
+    dropdown.style.display = "flex";
+  }
+}
+
+function handleInlineShopSearchInput(inputEl) {
+  inlineShopSearchQuery = inputEl?.value || "";
+  if (mainCustomerTab !== "all_shops") {
+    mainCustomerTab = "all_shops";
+    renderSubFilterPills();
+  }
+  const dropdown = document.getElementById("inline-shop-search-dropdown");
+  if (dropdown) {
+    dropdown.innerHTML = buildShopFilterCardsHtml(inlineShopSearchQuery);
+    dropdown.style.display = "flex";
+  }
+  renderMenuItems();
+}
+
+function closeInlineShopSearchDropdown() {
+  const dropdown = document.getElementById("inline-shop-search-dropdown");
+  if (dropdown) {
+    dropdown.style.display = "none";
+  }
+}
+
+window.handleInlineShopSearchFocus = handleInlineShopSearchFocus;
+window.handleInlineShopSearchInput = handleInlineShopSearchInput;
+window.closeInlineShopSearchDropdown = closeInlineShopSearchDropdown;

@@ -69,7 +69,6 @@ export function securityHeadersMiddleware(options: SecurityHeadersOptions = {}) 
           'https:',
           'https://api.razorpay.com',
           'https://lumberjack.razorpay.com',
-          'https://business.arattai.in',
         ],
         frameSrc: ["'self'", 'https://api.razorpay.com', 'https://checkout.razorpay.com'],
         objectSrc: ["'none'"],

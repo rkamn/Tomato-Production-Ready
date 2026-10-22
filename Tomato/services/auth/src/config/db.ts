@@ -7,6 +7,7 @@ import Rider from "../model/Rider.js";
 import Counter from "../model/Counter.js";
 import Shop from "../model/Shop.js";
 import ShopOrder from "../model/ShopOrder.js";
+import Address from "../model/Address.js";
 import WalletCreditTrack from "../model/WalletCreditTrack.js";
 import Wallet from "../model/Wallet.js";
 import Role, { ensureDefaultRoles } from "../model/Role.js";
@@ -578,6 +579,62 @@ export const connectDB = async (attempts = 3) => {
                     isOnline: true,
                 });
                 console.log("[DB Setup] Default Shop partner (shop@tomato.com) created in 'shop' collection.");
+            }
+
+            // Ensure Pune (411057) and active zones are always present in serviceable pincodes
+            try {
+                await Counter.findByIdAndUpdate(
+                    'serviceable_pincodes',
+                    {
+                        $addToSet: { pincodes: { $each: ['560001', '411057', '845401'] } },
+                        $setOnInsert: { name: 'serviceable_pincodes', count: 0 },
+                    },
+                    { upsert: true }
+                );
+
+                // Auto-align Pune shops (including "puneri general store") to correct Pune coordinates
+                await Shop.updateMany(
+                    {
+                        $or: [
+                            { name: { $regex: 'puneri', $options: 'i' } },
+                            { pincode: '411057' },
+                            { shopAddress: { $regex: '411057|pune', $options: 'i' } },
+                        ],
+                    },
+                    {
+                        $set: {
+                            pincode: '411057',
+                            shopLocation: { lat: 18.5707, lng: 73.6908 },
+                            digipin: 'DGP-1857-7369',
+                            isApproved: true,
+                            isBlocked: false,
+                            isOpen: true,
+                            isOnline: true,
+                        },
+                    }
+                );
+
+                // Auto-align customer addresses in Pune to Pune coordinates
+                await Address.updateMany(
+                    {
+                        $or: [
+                            { postalCode: '411057' },
+                            { city: { $regex: 'pune', $options: 'i' } },
+                            { line1: { $regex: '411057|pune', $options: 'i' } },
+                        ],
+                        'location.coordinates': [77.5946, 12.9716],
+                    },
+                    {
+                        $set: {
+                            postalCode: '411057',
+                            city: 'Pune',
+                            'location.coordinates': [73.6908, 18.5707],
+                            digipin: 'DGP-1857-7369',
+                        },
+                    }
+                );
+            } catch (pincodeErr: any) {
+                console.warn('[DB Setup] Notice on serviceable pincode alignment:', pincodeErr?.message);
             }
 
             await sanitizeAllUserWalletBalancesAndCreditPoints();

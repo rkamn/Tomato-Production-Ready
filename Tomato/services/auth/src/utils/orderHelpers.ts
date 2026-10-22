@@ -264,11 +264,27 @@ export const buildOrderLiveTrackingData = async (orderId: string) => {
     );
   }
 
+  let restaurantToCustomerDistanceKm: number = 0;
+  if (restaurantData && custCoords) {
+    const dLat = (custCoords.lat - restaurantData.location.lat) * (Math.PI / 180);
+    const dLng = (custCoords.lng - restaurantData.location.lng) * (Math.PI / 180);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(restaurantData.location.lat * (Math.PI / 180)) *
+        Math.cos(custCoords.lat * (Math.PI / 180)) *
+        Math.sin(dLng / 2) ** 2;
+    restaurantToCustomerDistanceKm = Number(
+      (6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(2),
+    );
+  }
+
+  const expectedDeliveryTimingMinutes = Math.max(1, Math.round(5 + 2 * restaurantToCustomerDistanceKm));
+  const isPickedUp = Boolean(order.isPickedUp);
+  const pickupStatus = order.pickupStatus || (isPickedUp ? 'picked_up' : (order.riderId ? 'way_to_pickup' : ''));
+
   const etaMinutes = isTrackingClosed
     ? 0
-    : distanceToDeliveryKm
-      ? Math.max(5, Math.round(distanceToDeliveryKm * 3.5))
-      : 15;
+    : expectedDeliveryTimingMinutes;
   const lastPingSecondsAgo = riderData?.lastLocationUpdated
     ? Math.max(0, Math.round((Date.now() - new Date(riderData.lastLocationUpdated).getTime()) / 1000))
     : null;
@@ -299,6 +315,11 @@ export const buildOrderLiveTrackingData = async (orderId: string) => {
     deliveryAddress: order.deliveryAddress,
     distanceToPickupKm: isTrackingClosed ? 0 : distanceToPickupKm,
     distanceToDeliveryKm: isTrackingClosed ? 0 : distanceToDeliveryKm,
+    restaurantToCustomerDistanceKm,
+    expectedDeliveryTimingMinutes,
+    isPickedUp,
+    pickupStatus,
+    pickedUpAt: order.pickedUpAt || null,
     estimatedMinutes: etaMinutes,
   };
 };

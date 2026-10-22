@@ -39,8 +39,13 @@ import {
   extractPincodeFromText,
   getServiceablePincodes,
   resolvePartnerPincode,
+  resolveCoordinatesFromPincode,
 } from '../../../utils/bankHelpers.js';
 import mailService from '../../../services/mailService.js';
+import {
+  fetchReverseProxyConfig,
+  updateReverseProxyConfig,
+} from '../../../security/index.js';
 
 const getPublicBaseUrl = () => process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 5050}`;
 
@@ -451,6 +456,18 @@ const router = Router();
           extractPincodeFromText(req.body?.pincode) ||
           extractPincodeFromText(rAddr) ||
           '';
+        if (
+          (rawLat === undefined || rawLng === undefined || (Number(rawLat) === 12.9716 && Number(rawLng) === 77.5946)) &&
+          rPincode
+        ) {
+          const pinCoords = resolveCoordinatesFromPincode(rPincode);
+          if (pinCoords) {
+            restaurantLocation = pinCoords;
+            if (!req.body?.digipin) {
+              digipin = `DGP-${Math.round(restaurantLocation.lat * 100)}-${Math.round(restaurantLocation.lng * 100)}`;
+            }
+          }
+        }
         const serviceablePincodes = await getServiceablePincodes();
         const isPincodeServiceable =
           Boolean(rPincode) && serviceablePincodes.includes(rPincode);
@@ -544,6 +561,18 @@ const router = Router();
           extractPincodeFromText(req.body?.pincode) ||
           extractPincodeFromText(sAddress) ||
           '';
+        if (
+          (rawLat === undefined || rawLng === undefined || (Number(rawLat) === 12.9716 && Number(rawLng) === 77.5946)) &&
+          sPincode
+        ) {
+          const pinCoords = resolveCoordinatesFromPincode(sPincode);
+          if (pinCoords) {
+            shopLocation = pinCoords;
+            if (!req.body?.digipin) {
+              digipin = `DGP-${Math.round(shopLocation.lat * 100)}-${Math.round(shopLocation.lng * 100)}`;
+            }
+          }
+        }
         const serviceablePincodes = await getServiceablePincodes();
         const isPincodeServiceable =
           Boolean(sPincode) && serviceablePincodes.includes(sPincode);
@@ -859,12 +888,22 @@ const router = Router();
       if (
         req.body?.lat !== undefined &&
         req.body?.lng !== undefined &&
-        !isNaN(Number(req.body.lat))
+        !isNaN(Number(req.body.lat)) &&
+        !isNaN(Number(req.body.lng)) &&
+        (Number(req.body.lat) !== 12.9716 || Number(req.body.lng) !== 77.5946)
       ) {
         updates.restaurantLocation = {
           lat: Number(req.body.lat),
           lng: Number(req.body.lng),
         };
+      } else {
+        const pinToResolve = (updates.pincode as string) || (pincode ? String(pincode).trim() : '');
+        if (pinToResolve) {
+          const resolved = resolveCoordinatesFromPincode(pinToResolve);
+          if (resolved) {
+            updates.restaurantLocation = resolved;
+          }
+        }
       }
 
       let user: any = await Restaurant.findByIdAndUpdate(
@@ -887,6 +926,11 @@ const router = Router();
         }
         if (updates.restaurantLocation) {
           shopUpdates.shopLocation = updates.restaurantLocation;
+        } else if (shopUpdates.pincode) {
+          const resolved = resolveCoordinatesFromPincode(String(shopUpdates.pincode));
+          if (resolved) {
+            shopUpdates.shopLocation = resolved;
+          }
         }
         user = await Shop.findByIdAndUpdate(
           userId,
@@ -2407,6 +2451,12 @@ const router = Router();
         }));
 
         const supportContact = await getSupportContactConfig();
+        const reverseProxy = await fetchReverseProxyConfig();
+        const enrichedReverseProxy = {
+          ...reverseProxy,
+          gatewayUrl: `http://localhost:${reverseProxy.gatewayPort}`,
+          backendUrl: `http://127.0.0.1:${reverseProxy.backendPort}`,
+        };
 
         return res.json({
           success: true,
@@ -2424,6 +2474,7 @@ const router = Router();
           admins: admins.map((a: any) => userResponse(a)),
           roles: rolesWithCounts,
           supportContact,
+          reverseProxy: enrichedReverseProxy,
         });
       } catch (error) {
         console.error('Fetch control panel data failed:', error);
@@ -2490,8 +2541,68 @@ const router = Router();
   );
 
   // =========================================================================
-  // SUPER ADMIN ONLY: ASSIGN & EDIT ADMIN OPERATING LOCATIONS
+  // CONTROL PANEL: REVERSE PROXY DYNAMIC TOGGLE & STATUS
   // =========================================================================
+  router.get(
+    '/control-panel/reverse-proxy',
+    requireRole('superadmin', 'admin'),
+    async (_req: Request, res: Response) => {
+      try {
+        const config = await fetchReverseProxyConfig();
+        return res.json({
+          success: true,
+          reverseProxy: {
+            ...config,
+            gatewayUrl: `http://localhost:${config.gatewayPort}`,
+            backendUrl: `http://127.0.0.1:${config.backendPort}`,
+          },
+        });
+      } catch (error) {
+        console.error('Fetch reverse proxy config failed:', error);
+        return res.status(500).json({ message: 'Unable to fetch reverse proxy configuration' });
+      }
+    },
+  );
+
+  router.put(
+    '/control-panel/reverse-proxy',
+    requireRole('superadmin', 'admin'),
+    async (req: Request, res: Response) => {
+      try {
+        const caller = (req as AuthenticatedRequest).user;
+        const callerName = (caller as any)?.name || (caller as any)?.username || 'Administrator';
+        const enabled = Boolean(req.body?.enabled);
+        const gatewayPort = req.body?.gatewayPort ? Number(req.body.gatewayPort) : undefined;
+        const backendPort = req.body?.backendPort ? Number(req.body.backendPort) : undefined;
+
+        const updated = await updateReverseProxyConfig(enabled, callerName, gatewayPort, backendPort);
+        return res.json({
+          success: true,
+          message: `Reverse Proxy has been dynamically ${enabled ? 'ENABLED' : 'DISABLED'}.`,
+          reverseProxy: {
+            ...updated,
+            gatewayUrl: `http://localhost:${updated.gatewayPort}`,
+            backendUrl: `http://127.0.0.1:${updated.backendPort}`,
+          },
+        });
+      } catch (error) {
+        console.error('Update reverse proxy config failed:', error);
+        return res.status(500).json({ message: 'Unable to update reverse proxy configuration' });
+      }
+    },
+  );
+
+  // =========================================================================
+  // PUBLIC / PROXY GATEWAY STATUS CHECK (For Node Reverse Proxy Server)
+  // =========================================================================
+  router.get('/control-panel/reverse-proxy/status', async (_req: Request, res: Response) => {
+    try {
+      const config = await fetchReverseProxyConfig();
+      return res.json({ success: true, enabled: config.enabled, reverseProxy: config });
+    } catch {
+      return res.json({ success: true, enabled: true });
+    }
+  });
   const handleAdminLocationAssignment = async (req: Request, res: Response) => {
     try {
       const caller = (req as AuthenticatedRequest).user;

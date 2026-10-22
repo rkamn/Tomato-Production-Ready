@@ -486,6 +486,8 @@ const createShopRouter = () => {
 
       // If no shop orders exist yet for this shop (and no date filter was applied), seed initial realistic packaged/retail orders
       if (orders.length === 0 && !hasDateFilter) {
+        const existingGlobalShopOrders = await ShopOrder.countDocuments();
+        if (existingGlobalShopOrders === 0) {
         const shopUser = await Shop.findById(user.userId).lean();
         const cleanName = shopUser && typeof shopUser.name === 'string'
           ? (shopUser.name.split('/')[0] ?? '').trim()
@@ -497,8 +499,8 @@ const createShopRouter = () => {
 
         const initialShopOrders = [
           {
-            orderNumber: `SHOP-${dateStr}-1001`,
-            billNumber: `BILL-SHOP-${dateStr}-1001`,
+            orderNumber: `SEED-SHOP-${dateStr}-1001`,
+            billNumber: `BILL-SEED-SHOP-${dateStr}-1001`,
             shopId: shopObjId,
             shopCode: shopCode,
             shopName: shopName,
@@ -527,8 +529,8 @@ const createShopRouter = () => {
             ],
           },
           {
-            orderNumber: `SHOP-${dateStr}-1002`,
-            billNumber: `BILL-SHOP-${dateStr}-1002`,
+            orderNumber: `SEED-SHOP-${dateStr}-1002`,
+            billNumber: `BILL-SEED-SHOP-${dateStr}-1002`,
             shopId: shopObjId,
             shopCode: shopCode,
             shopName: shopName,
@@ -559,8 +561,8 @@ const createShopRouter = () => {
             ],
           },
           {
-            orderNumber: `SHOP-${dateStr}-1003`,
-            billNumber: `BILL-SHOP-${dateStr}-1003`,
+            orderNumber: `SEED-SHOP-${dateStr}-1003`,
+            billNumber: `BILL-SEED-SHOP-${dateStr}-1003`,
             shopId: shopObjId,
             shopCode: shopCode,
             shopName: shopName,
@@ -600,6 +602,7 @@ const createShopRouter = () => {
           }).sort({ createdAt: -1 });
         } catch (seedErr) {
           console.warn('Initial shop orders seeding notice:', seedErr);
+        }
         }
       }
 

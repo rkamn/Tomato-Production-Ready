@@ -49,6 +49,20 @@
         return;
       }
 
+      const authToken =
+        typeof token !== 'undefined' && token
+          ? token
+          : localStorage.getItem('tomatoToken') || '';
+      if (
+        authToken &&
+        typeof window !== 'undefined' &&
+        window.TomatoSecurity &&
+        typeof window.TomatoSecurity.isTokenExpired === 'function' &&
+        window.TomatoSecurity.isTokenExpired(authToken)
+      ) {
+        return;
+      }
+
       const wsUrl = this.getWebSocketUrl();
       try {
         this.socket = new WebSocket(wsUrl);

@@ -27,6 +27,7 @@ export interface IRider extends Document {
   pincode?: string;
   postalCode?: string;
   address?: string;
+  city?: string;
   assignedLocation?: {
     city?: string;
     postalCode?: string;
@@ -67,6 +68,7 @@ const schema: Schema<IRider> = new Schema(
     pincode: { type: String, default: '', trim: true },
     postalCode: { type: String, default: '', trim: true },
     address: { type: String, default: '', trim: true },
+    city: { type: String, default: '', trim: true },
     assignedLocation: {
       city: { type: String, default: '', trim: true },
       postalCode: { type: String, default: '', trim: true },

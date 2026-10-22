@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  # ============================================================================
+  # Public-Facing Edge Reverse Proxy (Nginx)
+  # - Only service with exposed external ports (80 / 443)
+  # - Terminates SSL/TLS
+  # - Implements DDoS rate limiting & buffer controls
+  # ============================================================================
+  reverse-proxy:
+    image: nginx:alpine
+    container_name: tomato_reverse_proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../frontend:/var/www/tomato/frontend:ro
+      - ./certs:/etc/nginx/certs:ro
+      - proxy_logs:/var/log/nginx
+    networks:
+      - tomato_internal_net
+    depends_on:
+      - auth-service
+
+  # ============================================================================
+  # Internal Backend Service (Node.js Express)
+  # - Port 5050 is NOT exposed to host public network
+  # - Only reachable via tomato_internal_net by the reverse proxy
+  # ============================================================================
+  auth-service:
+    build:
+      context: ../services/auth
+      dockerfile: Dockerfile
+    container_name: tomato_auth_backend
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=5050
+      - TRUSTED_PROXIES=172.16.0.0/12,127.0.0.1
+    expose:
+      - "5050"
+    networks:
+      - tomato_internal_net
+
+networks:
+  tomato_internal_net:
+    driver: bridge
+
+volumes:
+  proxy_logs:
+

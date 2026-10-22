@@ -2,7 +2,6 @@ import express, { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import Complaint, { IComplaint, cleanupExpiredClosedComplaints } from '../../model/Complaint.js';
 import Notification from '../../model/Notification.js';
-import { arattaiNotificationService } from '../notification/index.js';
 import { getSupportContactConfig } from '../../utils/bankHelpers.js';
 import {
   authenticate,
@@ -152,18 +151,6 @@ export const createSupportRouter = () => {
         });
       } catch (notifErr) {
         console.warn('Failed to send admin notification for ticket:', notifErr);
-      }
-
-      // Real-time mobile notification to user via Arattai API
-      if (phone) {
-        arattaiNotificationService
-          .notifyTicketCreated({
-            phoneNumber: phone,
-            userName: name,
-            ticketId: ticketId,
-            category: category,
-          })
-          .catch((arErr) => console.warn('Arattai ticket creation alert error:', arErr));
       }
 
       return res.status(201).json({

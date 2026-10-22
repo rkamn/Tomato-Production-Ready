@@ -63,6 +63,8 @@ async function main() {
     cleanXssString,
     sanitizeData,
     sanitizeLogData,
+    sanitizePath,
+    shouldThrottleUnauthLog,
     enforceHttpsMiddleware,
     securityHeadersMiddleware,
   } = security;
@@ -332,6 +334,34 @@ async function main() {
     assert.strictEqual(sanitized.apiKey, '[REDACTED_SECRET]');
   });
 
+  runTest('Should redact sensitive tokens and credentials from logged URL paths', () => {
+    const rawPath1 = '/api/notifications/stream?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzZXNzaW9uSWQi...';
+    assert.strictEqual(sanitizePath(rawPath1), '/api/notifications/stream?token=[REDACTED]');
+
+    const rawPath2 = '/api/auth/reset?code=123456&email=admin@lightbits.in';
+    assert.strictEqual(sanitizePath(rawPath2), '/api/auth/reset?code=[REDACTED]&email=admin@lightbits.in');
+
+    const cleanPath = '/api/auth/profile';
+    assert.strictEqual(sanitizePath(cleanPath), '/api/auth/profile');
+  });
+
+  runTest('Should throttle repetitive burst 401 unauthorized warnings for same IP and route', () => {
+    const testIp = '192.168.10.99';
+    const testRoute = '/api/notifications/stream?token=xyz';
+
+    // First request should NOT be throttled
+    const firstCheck = shouldThrottleUnauthLog(testIp, 'GET', testRoute);
+    assert.strictEqual(firstCheck, false, 'First unauth request should be logged');
+
+    // Immediate second request to same endpoint should be throttled
+    const secondCheck = shouldThrottleUnauthLog(testIp, 'GET', testRoute);
+    assert.strictEqual(secondCheck, true, 'Immediate identical unauth request should be throttled');
+
+    // Different IP should not be throttled on its first attempt
+    const diffIpCheck = shouldThrottleUnauthLog('192.168.10.100', 'GET', testRoute);
+    assert.strictEqual(diffIpCheck, false, 'Different IP first attempt should not be throttled');
+  });
+
   // =========================================================================
   // 6. HTTPS ENFORCEMENT & SECURITY HEADERS TESTS
   // =========================================================================
@@ -409,6 +439,227 @@ async function main() {
     assert.strictEqual(headers['referrer-policy'], 'strict-origin-when-cross-origin');
     assert.ok(headers['strict-transport-security']?.includes('max-age=31536000'), 'HSTS header must be present');
     assert.ok(headers['content-security-policy']?.includes("default-src 'self'"), 'CSP must restrict default-src');
+  });
+
+  // =========================================================================
+  // 7. COOKIE SECURITY & EFFICIENCY VALIDATION
+  // =========================================================================
+  console.log('\n--- 7. Testing Cookie Validation & Application Efficiency ---');
+
+  const {
+    parseAndValidateCookies,
+    isValidAuthTokenFormat,
+    isValidSessionIdFormat,
+    getDefaultCookieOptions,
+    setAuthCookies,
+    clearAuthCookies,
+    cookieValidationMiddleware,
+  } = security;
+
+  runTest('Should cleanly parse RFC 6265 compliant cookie pairs into dictionary', () => {
+    const raw = 'auth_token=valid.jwt.payload; sessionId=sess_1234567890abcdef; theme=dark';
+    const result = parseAndValidateCookies(raw);
+
+    assert.strictEqual(result.isValid, true);
+    assert.strictEqual(result.cookies.auth_token, 'valid.jwt.payload');
+    assert.strictEqual(result.cookies.sessionId, 'sess_1234567890abcdef');
+    assert.strictEqual(result.cookies.theme, 'dark');
+  });
+
+  runTest('Should strip header injection / CRLF characters from cookies', () => {
+    const raw = 'evil=value\r\nSet-Cookie:admin=true; good=normal';
+    const result = parseAndValidateCookies(raw);
+
+    assert.strictEqual(result.cookies.good, 'normal');
+    assert.strictEqual(result.cookies.evil, undefined, 'CRLF injection cookie must be stripped');
+  });
+
+  runTest('Should defend against Prototype Pollution in cookie parsing', () => {
+    const raw = '__proto__[polluted]=true; constructor[evil]=hack; legitimate=ok';
+    const result = parseAndValidateCookies(raw);
+
+    assert.strictEqual(result.cookies.legitimate, 'ok');
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(Object.prototype, 'polluted'), false);
+    assert.strictEqual(result.cookies.__proto__, undefined);
+  });
+
+  runTest('Should reject and drop oversized cookie headers (>8KB) to prevent Cookie Bomb DoS', () => {
+    const hugeCookie = 'bomb=' + 'A'.repeat(9000);
+    const result = parseAndValidateCookies(hugeCookie);
+
+    assert.strictEqual(result.isValid, false);
+    assert.ok(result.warning?.includes('exceeds maximum permissible size limit'));
+  });
+
+  runTest('Should validate JWT token format and reject malformed/injected tokens in cookies', () => {
+    assert.strictEqual(isValidAuthTokenFormat('eyJhbGci.eyJzdWIi.signature'), true);
+    assert.strictEqual(isValidAuthTokenFormat('invalid-not-a-jwt'), false);
+    assert.strictEqual(isValidAuthTokenFormat('<script>alert(1)</script>'), false);
+  });
+
+  runTest('Should enforce httpOnly, lax sameSite, and root path in default cookie security options', () => {
+    const opts = getDefaultCookieOptions();
+
+    assert.strictEqual(opts.httpOnly, true, 'Cookies must be HttpOnly to prevent XSS theft');
+    assert.strictEqual(opts.sameSite, 'lax', 'Cookies must use Lax SameSite for CSRF defense');
+    assert.strictEqual(opts.path, '/', 'Cookies must be available application-wide');
+    assert.strictEqual(opts.maxAge, 12 * 60 * 60 * 1000, 'Cookie lifetime must match 12-hour session');
+  });
+
+  runTest('Should set secure HttpOnly cookies via setAuthCookies', () => {
+    const cookiesSet = {};
+    const mockRes = {
+      cookie(name, val, options) {
+        cookiesSet[name] = { val, options };
+      },
+    };
+
+    setAuthCookies(mockRes, {
+      token: 'header.payload.signature',
+      sessionId: 'sess_1234567890abcdef',
+    });
+
+    assert.ok(cookiesSet.auth_token, 'auth_token cookie must be set');
+    assert.strictEqual(cookiesSet.auth_token.options.httpOnly, true);
+    assert.strictEqual(cookiesSet.auth_token.options.sameSite, 'lax');
+    assert.ok(cookiesSet.sessionId, 'sessionId cookie must be set');
+    assert.strictEqual(cookiesSet.sessionId.options.httpOnly, true);
+  });
+
+  runTest('Should cleanly clear authentication cookies via clearAuthCookies', () => {
+    const cookiesCleared = [];
+    const mockRes = {
+      clearCookie(name, options) {
+        cookiesCleared.push({ name, options });
+      },
+    };
+
+    clearAuthCookies(mockRes);
+
+    const clearedNames = cookiesCleared.map((c) => c.name);
+    assert.ok(clearedNames.includes('auth_token'));
+    assert.ok(clearedNames.includes('token'));
+    assert.ok(clearedNames.includes('sessionId'));
+  });
+
+  // =========================================================================
+  // 8. REVERSE PROXY SECURITY & IP SPOOFING DEFENSE
+  // =========================================================================
+  console.log('\n--- 8. Testing Reverse Proxy Security & IP Spoofing Defenses ---');
+
+  const {
+    isTrustedProxy,
+    isPrivateSubnet,
+    getSecureClientIp,
+    reverseProxySecurityMiddleware,
+  } = security;
+
+  runTest('Should identify localhost and private subnets as trusted proxies', () => {
+    assert.strictEqual(isTrustedProxy('127.0.0.1'), true);
+    assert.strictEqual(isTrustedProxy('::1'), true);
+    assert.strictEqual(isTrustedProxy('172.18.0.5'), true, 'Docker subnet must be recognized');
+    assert.strictEqual(isTrustedProxy('10.0.0.1'), true, 'Internal VPC IP must be recognized');
+    assert.strictEqual(isTrustedProxy('192.168.1.10'), true, 'LAN subnet must be recognized');
+  });
+
+  runTest('Should reject arbitrary public internet IPs as untrusted proxies', () => {
+    assert.strictEqual(isTrustedProxy('203.0.113.195'), false);
+    assert.strictEqual(isTrustedProxy('8.8.8.8'), false);
+    assert.strictEqual(isTrustedProxy('198.51.100.1'), false);
+  });
+
+  runTest('Should defend against X-Forwarded-For IP spoofing from untrusted direct connections', () => {
+    // Untrusted direct client attempting to spoof IP as 1.1.1.1
+    const mockReq = {
+      socket: { remoteAddress: '203.0.113.50' },
+      headers: {
+        'x-forwarded-for': '1.1.1.1',
+        'x-real-ip': '8.8.8.8',
+      },
+    };
+
+    const resolvedIp = getSecureClientIp(mockReq);
+    assert.strictEqual(resolvedIp, '203.0.113.50', 'Must use actual socket IP and ignore spoofed headers');
+  });
+
+  runTest('Should extract real client IP from trusted reverse proxy connection', () => {
+    // Connection from trusted reverse proxy (127.0.0.1 or Nginx)
+    const mockReq = {
+      socket: { remoteAddress: '127.0.0.1' },
+      headers: {
+        'x-forwarded-for': '203.0.113.99, 10.0.0.1',
+        'x-real-ip': '203.0.113.99',
+      },
+    };
+
+    const resolvedIp = getSecureClientIp(mockReq);
+    assert.strictEqual(resolvedIp, '203.0.113.99', 'Must resolve verified client IP from trusted proxy');
+  });
+
+  runTest('Should strip untrusted proxy headers in reverseProxySecurityMiddleware', () => {
+    const mockReq = {
+      socket: { remoteAddress: '198.51.100.22' },
+      headers: {
+        'x-forwarded-for': '9.9.9.9',
+        'x-real-ip': '9.9.9.9',
+      },
+    };
+    const mockRes = {
+      status() { return this; },
+      json() {},
+    };
+
+    let nextCalled = false;
+    reverseProxySecurityMiddleware(mockReq, mockRes, () => { nextCalled = true; });
+
+    assert.strictEqual(nextCalled, true);
+    assert.strictEqual(mockReq.headers['x-forwarded-for'], undefined, 'Untrusted X-Forwarded-For must be stripped');
+    assert.strictEqual(mockReq.headers['x-real-ip'], undefined, 'Untrusted X-Real-IP must be stripped');
+  });
+
+  runTest('Should block Host Header Poisoning attempts with CRLF in reverse proxy middleware', () => {
+    let statusCode = 0;
+    let jsonBody = null;
+    const mockReq = {
+      socket: { remoteAddress: '127.0.0.1' },
+      headers: {
+        host: 'legitimate.com\r\nX-Injected:evil',
+      },
+      method: 'GET',
+      path: '/api/test',
+    };
+    const mockRes = {
+      status(code) { statusCode = code; return this; },
+      json(body) { jsonBody = body; return this; },
+    };
+
+    reverseProxySecurityMiddleware(mockReq, mockRes, () => {});
+
+    assert.strictEqual(statusCode, 400);
+    assert.strictEqual(jsonBody?.error, 'Bad Request');
+  });
+
+  await runAsyncTest('Should dynamically toggle reverse proxy OFF and bypass proxy enforcement', async () => {
+    const { isReverseProxyEnabled, updateReverseProxyConfig } = security;
+
+    await updateReverseProxyConfig(false, 'Test Super Admin');
+    assert.strictEqual(isReverseProxyEnabled(), false, 'Reverse proxy must report disabled');
+
+    // When toggled OFF, reverseProxySecurityMiddleware should pass immediately without stripping headers
+    const mockReq = {
+      socket: { remoteAddress: '203.0.113.10' },
+      headers: { 'x-forwarded-for': '198.51.100.99' },
+    };
+    const mockRes = {};
+    let nextCalled = false;
+
+    reverseProxySecurityMiddleware(mockReq, mockRes, () => { nextCalled = true; });
+    assert.strictEqual(nextCalled, true);
+    assert.strictEqual(mockReq.headers['x-forwarded-for'], '198.51.100.99', 'Headers should not be stripped when proxy toggle is off');
+
+    // Restore back to enabled
+    await updateReverseProxyConfig(true, 'Test Super Admin');
+    assert.strictEqual(isReverseProxyEnabled(), true, 'Reverse proxy must report re-enabled');
   });
 
   // =========================================================================

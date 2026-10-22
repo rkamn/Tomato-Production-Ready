@@ -209,6 +209,7 @@ const createRiderRouter = () => {
   router.get('/orders/available', async (req: Request, res: Response) => {
     try {
       const user = (req as AuthenticatedRequest).user;
+      const currentUserId = String(user?.userId || '');
       const riderObjId =
         user?.userId && mongoose.isValidObjectId(user.userId)
           ? new mongoose.Types.ObjectId(user.userId)
@@ -227,6 +228,9 @@ const createRiderRouter = () => {
       }
 
       const riderPincode = resolveRiderPincode(riderDoc);
+      const riderCity = String(
+        riderDoc?.city || riderDoc?.assignedLocation?.city || ''
+      ).trim().toLowerCase();
 
       const filter: Record<string, unknown> = {
         status: { $in: ['accepted', 'preparing', 'ready_for_pickup', 'placed'] },
@@ -243,15 +247,57 @@ const createRiderRouter = () => {
 
       const orders = await Order.find(filter).sort({ createdAt: -1 });
 
-      const filteredOrders = riderPincode
-        ? orders.filter((o) => {
-            const orderPin =
-              (o as any).serviceablePincode ||
-              resolveAddressPincode(o.deliveryAddress) ||
-              resolvePartnerPincode(o);
-            return !orderPin || orderPin === riderPincode;
-          })
-        : orders;
+      const filteredOrders = orders.filter((o) => {
+        // If order is already claimed by another rider, do not display
+        if (o.riderId && String(o.riderId) !== currentUserId) {
+          return false;
+        }
+
+        const orderPin = String(
+          (o as any).serviceablePincode ||
+          resolveAddressPincode(o.deliveryAddress) ||
+          resolvePartnerPincode(o) ||
+          ''
+        ).trim();
+
+        const orderCity = String(
+          (o.deliveryAddress as any)?.city ||
+          (o as any).city ||
+          ''
+        ).trim().toLowerCase();
+
+        const restAddress = String(
+          (o as any).restaurantAddress || (o as any).shopAddress || ''
+        ).toLowerCase();
+
+        // 1. Strict serviceable pincode matching:
+        // Placed order must strictly match rider's operating serviceable pincode.
+        if (riderPincode) {
+          if (!orderPin || orderPin !== riderPincode) {
+            return false;
+          }
+        }
+
+        // 2. City matching:
+        if (riderCity) {
+          if (orderCity && !orderCity.includes(riderCity) && !riderCity.includes(orderCity)) {
+            return false;
+          }
+          if (
+            (riderCity.includes('pune') && (restAddress.includes('bengaluru') || restAddress.includes('bangalore'))) ||
+            ((riderCity.includes('bengaluru') || riderCity.includes('bangalore')) && restAddress.includes('pune'))
+          ) {
+            return false;
+          }
+        }
+
+        // If rider has neither pincode nor city configured, do not leak cross-city orders
+        if (!riderPincode && !riderCity) {
+          return Boolean(o.riderId && String(o.riderId) === currentUserId);
+        }
+
+        return true;
+      });
 
       return res.json({ orders: filteredOrders, isOnline: true });
     } catch (error) {
@@ -362,6 +408,15 @@ const createRiderRouter = () => {
           });
         }
 
+        const riderCity = String(riderUser?.city || riderUser?.assignedLocation?.city || '').trim().toLowerCase();
+        const orderCity = String((order.deliveryAddress as any)?.city || '').trim().toLowerCase();
+        if (riderCity && orderCity && !orderCity.includes(riderCity) && !riderCity.includes(orderCity)) {
+          return res.status(400).json({
+            message: 'your area is not in servicable range for now, update your address and pincode for orders.',
+            code: 'AREA_NOT_SERVICEABLE',
+          });
+        }
+
         const riderCode = riderUser?.riderId || '';
         const riderDisplayName = riderUser ? riderUser.name : 'Tomato Rider';
 
@@ -369,16 +424,38 @@ const createRiderRouter = () => {
         order.riderCode = riderCode;
         order.riderName = riderDisplayName;
         order.riderPhone = riderUser?.phone || '';
+        order.riderAssignedAt = new Date();
+        order.isPickedUp = false;
+        order.pickupStatus = 'way_to_pickup';
         order.status = 'out_for_delivery';
         order.statusHistory.push({
           status: 'out_for_delivery',
           at: new Date(),
           by: String(user.userId),
-          note: `Delivery partner ${riderDisplayName} accepted delivery and is on route`,
+          note: `Delivery partner ${riderDisplayName} accepted delivery - way to pickup order`,
         });
 
         await order.save();
         await syncOrderToTomatoPayment(order);
+
+        try {
+          const ShopOrderModel = (await import('../../model/ShopOrder.js')).default;
+          await ShopOrderModel.findOneAndUpdate(
+            { orderNumber: order.orderNumber },
+            {
+              $set: {
+                riderId: order.riderId,
+                riderCode: order.riderCode,
+                riderName: order.riderName,
+                riderPhone: order.riderPhone,
+                riderAssignedAt: order.riderAssignedAt,
+                isPickedUp: false,
+                pickupStatus: 'way_to_pickup',
+                status: 'out_for_delivery',
+              },
+            },
+          );
+        } catch (_) {}
 
         await notificationService.notifyOnRiderAccepted(
           order,
@@ -394,6 +471,67 @@ const createRiderRouter = () => {
       } catch (error) {
         console.error('Rider accept order failed:', error);
         return res.status(500).json({ message: 'Unable to accept order' });
+      }
+    },
+  );
+
+  // 2B. Rider marks order picked up from restaurant/shop
+  router.post(
+    '/orders/:orderId/pickup',
+    async (req: Request, res: Response) => {
+      try {
+        const user = (req as AuthenticatedRequest).user;
+        if (!user?.userId)
+          return res.status(401).json({ message: 'Authentication required' });
+        const orderId = String(req.params.orderId || '');
+        if (!orderId || !mongoose.isValidObjectId(orderId)) {
+          return res.status(400).json({ message: 'Valid order ID is required' });
+        }
+
+        const order = await Order.findOne({
+          _id: new mongoose.Types.ObjectId(orderId),
+          riderId: new mongoose.Types.ObjectId(user.userId),
+        });
+        if (!order) {
+          return res.status(404).json({ message: 'Order not found or not assigned to you' });
+        }
+
+        order.isPickedUp = true;
+        order.pickupStatus = 'picked_up';
+        order.pickedUpAt = new Date();
+        order.status = 'out_for_delivery';
+        order.statusHistory.push({
+          status: 'out_for_delivery',
+          at: new Date(),
+          by: String(user.userId),
+          note: `Delivery partner ${order.riderName || 'Rider'} picked up order from store`,
+        });
+
+        await order.save();
+
+        try {
+          const ShopOrderModel = (await import('../../model/ShopOrder.js')).default;
+          await ShopOrderModel.findOneAndUpdate(
+            { orderNumber: order.orderNumber },
+            {
+              $set: {
+                isPickedUp: true,
+                pickupStatus: 'picked_up',
+                pickedUpAt: order.pickedUpAt,
+                status: 'out_for_delivery',
+              },
+            },
+          );
+        } catch (_) {}
+
+        broadcastOrderLiveTrackingUpdate(String(order._id)).catch((wsErr) =>
+          console.warn('WebSocket order pickup broadcast warning:', wsErr),
+        );
+
+        return res.json({ message: 'Order marked as picked up successfully', order });
+      } catch (error) {
+        console.error('Rider pickup order failed:', error);
+        return res.status(500).json({ message: 'Unable to mark order picked up' });
       }
     },
   );

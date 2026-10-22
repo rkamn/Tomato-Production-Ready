@@ -94,7 +94,7 @@ async function loadAdminControlPanel(force = false) {
  * Toggle Control Panel Tab
  */
 function setControlPanelTab(tab) {
-  controlPanelActiveTab = tab === 'roles' ? 'roles' : tab === 'support' ? 'support' : tab === 'employees' ? 'employees' : 'addresses';
+  controlPanelActiveTab = ['roles', 'support', 'employees', 'security'].includes(tab) ? tab : 'addresses';
   renderAdminControlPanelView();
 }
 
@@ -229,6 +229,18 @@ function renderAdminControlPanelView() {
           <span>🛟 Help &amp; Support Channels</span>
           <span class="badge" style="background:${controlPanelActiveTab === 'support' ? 'rgba(255,255,255,0.25)' : '#e0f2fe'}; color:${controlPanelActiveTab === 'support' ? '#fff' : '#0369a1'}; font-size:0.7rem; border-radius:999px;">Live Config</span>
         </button>
+
+        <button
+          type="button"
+          class="btn btn-sm ${controlPanelActiveTab === 'security' ? 'btn-primary' : 'btn-outline'}"
+          style="display:inline-flex; align-items:center; gap:0.4rem; font-weight:700; ${controlPanelActiveTab === 'security' ? 'background:#0284c7; border-color:#0284c7; color:#fff;' : ''}"
+          onclick="setControlPanelTab('security')"
+        >
+          <span>🛡️ Reverse Proxy &amp; Gateway</span>
+          <span class="badge" style="background:${controlPanelActiveTab === 'security' ? 'rgba(255,255,255,0.25)' : (currentControlPanelData.reverseProxy?.enabled !== false ? '#dcfce7' : '#fee2e2')}; color:${controlPanelActiveTab === 'security' ? '#fff' : (currentControlPanelData.reverseProxy?.enabled !== false ? '#15803d' : '#b91c1c')}; font-size:0.7rem; border-radius:999px;">
+            ${currentControlPanelData.reverseProxy?.enabled !== false ? 'ON' : 'OFF'}
+          </span>
+        </button>
       </div>
 
       <div style="display:flex; align-items:center; gap:0.5rem;">
@@ -253,6 +265,8 @@ function renderAdminControlPanelView() {
       ? renderRolesTabHtml(isSuper, totalRoles, customRolesCount)
       : controlPanelActiveTab === 'employees'
       ? renderEmployeeApprovalsTabHtml(isSuper)
+      : controlPanelActiveTab === 'security'
+      ? renderSecurityTabHtml(isSuper)
       : renderSupportTabHtml(isSuper)
     }
   `;
@@ -2253,6 +2267,230 @@ async function deleteStaffFromControlPanel(staffId, name = 'Staff Member', role 
 
 // Window exports
 window.loadAdminControlPanel = loadAdminControlPanel;
+/**
+ * Render Security & Reverse Proxy Tab
+ */
+function renderSecurityTabHtml(isSuper) {
+  const rp = currentControlPanelData.reverseProxy || {
+    enabled: true,
+    gatewayPort: 8080,
+    backendPort: 5050,
+    updatedBy: 'System Init',
+    updatedAt: new Date(),
+  };
+
+  const isEnabled = rp.enabled !== false;
+  const gatewayPort = Number(rp.gatewayPort || 8080);
+  const backendPort = Number(rp.backendPort || 5050);
+  const gatewayUrl = rp.gatewayUrl || `http://localhost:${gatewayPort}`;
+  const backendUrl = rp.backendUrl || `http://127.0.0.1:${backendPort}`;
+  const updatedBy = rp.updatedBy || 'Super Admin';
+  const updatedAtStr = rp.updatedAt ? new Date(rp.updatedAt).toLocaleString() : 'System Default Configuration';
+
+  return `
+    <div style="background:#fff; border:1px solid var(--line); border-radius:14px; padding:1.75rem; box-shadow:0 2px 6px rgba(0,0,0,0.04); margin-bottom:1.5rem;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem; margin-bottom:1.5rem; border-bottom:1px solid var(--line); padding-bottom:1.25rem;">
+        <div>
+          <div style="display:inline-flex; align-items:center; gap:0.4rem; background:${isEnabled ? '#eff6ff' : '#fef2f2'}; border:1px solid ${isEnabled ? '#bfdbfe' : '#fecaca'}; padding:0.25rem 0.65rem; border-radius:999px; font-size:0.75rem; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:${isEnabled ? '#1d4ed8' : '#b91c1c'}; margin-bottom:0.5rem;">
+            <span>${isEnabled ? '🛡️ Dynamic Edge Protection: Active' : '⚠️ Reverse Proxy Disabled: Direct Mode'}</span>
+          </div>
+          <h3 style="margin:0 0 0.35rem; font-size:1.35rem; font-weight:800; color:var(--ink); display:flex; align-items:center; gap:0.6rem;">
+            <span>Reverse Proxy &amp; Gateway Governance</span>
+            <span class="badge" style="background:${isEnabled ? '#22c55e' : '#ef4444'}; color:#fff; font-size:0.75rem; padding:0.25rem 0.7rem; border-radius:999px;">
+              ${isEnabled ? '● Active (Protected)' : '○ Disabled (Direct Access)'}
+            </span>
+          </h3>
+          <p style="margin:0; font-size:0.88rem; color:var(--muted); max-width:680px; line-height:1.45;">
+            Dynamically toggle the reverse proxy edge shield. When <strong>ON</strong>, external traffic must flow through the reverse proxy gateway with origin cloaking, IP spoofing neutralization, and rate limiting. When <strong>OFF</strong>, reverse proxy enforcement is disabled and direct backend connections are accepted.
+          </p>
+        </div>
+
+        <!-- Dynamic Toggle Control -->
+        <div style="background:${isEnabled ? '#f0fdf4' : '#fff1f2'}; border:2px solid ${isEnabled ? '#86efac' : '#fecdd3'}; border-radius:12px; padding:1rem 1.35rem; text-align:center; min-width:240px;">
+          <span style="display:block; font-size:0.75rem; text-transform:uppercase; font-weight:800; letter-spacing:0.05em; color:${isEnabled ? '#15803d' : '#be123c'}; margin-bottom:0.6rem;">
+            Reverse Proxy Switch
+          </span>
+          <div style="display:inline-flex; align-items:center; gap:0.75rem;">
+            <label style="position:relative; display:inline-block; width:58px; height:30px; margin:0; cursor:pointer;">
+              <input
+                type="checkbox"
+                id="cp-reverse-proxy-toggle"
+                style="opacity:0; width:0; height:0;"
+                ${isEnabled ? 'checked' : ''}
+                ${!isSuper ? 'disabled' : ''}
+                onchange="toggleControlPanelReverseProxy(this.checked)"
+              >
+              <span style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:${isEnabled ? '#22c55e' : '#94a3b8'}; transition:.3s; border-radius:34px;">
+                <span style="position:absolute; content:''; height:22px; width:22px; left:${isEnabled ? '32px' : '4px'}; bottom:4px; background:white; transition:.3s; border-radius:50%; box-shadow:0 2px 4px rgba(0,0,0,0.2);"></span>
+              </span>
+            </label>
+            <span style="font-size:1.05rem; font-weight:800; color:${isEnabled ? '#15803d' : '#be123c'};">
+              ${isEnabled ? 'ENABLED' : 'DISABLED'}
+            </span>
+          </div>
+          ${!isSuper ? `
+            <div style="font-size:0.72rem; color:#991b1b; margin-top:0.4rem;">
+              🔒 Super Admin only
+            </div>
+          ` : `
+            <div style="font-size:0.72rem; color:${isEnabled ? '#166534' : '#9f1239'}; margin-top:0.4rem;">
+              Click toggle to switch live state
+            </div>
+          `}
+        </div>
+      </div>
+
+      <!-- Network & Architecture Telemetry Cards -->
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:1rem; margin-bottom:1.5rem;">
+        <div style="background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:1rem;">
+          <span style="font-size:0.74rem; color:var(--muted); text-transform:uppercase; font-weight:700; display:block; margin-bottom:0.25rem;">🌐 Edge Gateway Endpoint</span>
+          <strong style="font-size:1.1rem; color:#0284c7;">${escapeHtml(gatewayUrl)}</strong>
+          <span style="display:block; font-size:0.75rem; color:var(--muted); margin-top:0.25rem;">Public port ${gatewayPort} (External Gateway)</span>
+        </div>
+
+        <div style="background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:1rem;">
+          <span style="font-size:0.74rem; color:var(--muted); text-transform:uppercase; font-weight:700; display:block; margin-bottom:0.25rem;">🔒 Internal Backend Port</span>
+          <strong style="font-size:1.1rem; color:#059669;">${escapeHtml(backendUrl)}</strong>
+          <span style="display:block; font-size:0.75rem; color:var(--muted); margin-top:0.25rem;">Internal port ${backendPort} (${isEnabled ? 'Cloaked from public direct access' : 'Direct connections accepted'})</span>
+        </div>
+
+        <div style="background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:1rem;">
+          <span style="font-size:0.74rem; color:var(--muted); text-transform:uppercase; font-weight:700; display:block; margin-bottom:0.25rem;">🛡️ Active Security Shields</span>
+          <strong style="font-size:1.1rem; color:#7c3aed;">${isEnabled ? '4 Active' : '0 (Bypassed)'}</strong>
+          <span style="display:block; font-size:0.75rem; color:var(--muted); margin-top:0.25rem;">IP Spoof, Buffer, RateLimit, Cloaking</span>
+        </div>
+
+        <div style="background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:1rem;">
+          <span style="font-size:0.74rem; color:var(--muted); text-transform:uppercase; font-weight:700; display:block; margin-bottom:0.25rem;">⏱️ Last Governed State</span>
+          <strong style="font-size:0.95rem; color:var(--ink);">${escapeHtml(updatedBy)}</strong>
+          <span style="display:block; font-size:0.75rem; color:var(--muted); margin-top:0.25rem;">${escapeHtml(updatedAtStr)}</span>
+        </div>
+      </div>
+
+      <!-- Verified Port Mapping Banner & Config Trigger -->
+      <div style="background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:0.85rem 1.15rem; margin-bottom:1.5rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem;">
+        <div style="display:flex; align-items:center; gap:0.6rem;">
+          <span style="color:#16a34a; font-size:1.1rem;">✓</span>
+          <span style="font-size:0.85rem; color:var(--ink);">
+            <strong>Port Configuration Validated:</strong> Public Gateway on port <strong>${gatewayPort}</strong> strictly routes to Private Backend on port <strong>${backendPort}</strong>. Zero port collisions.
+          </span>
+        </div>
+        ${isSuper ? `
+          <button
+            type="button"
+            class="btn btn-sm btn-outline"
+            style="font-size:0.78rem; font-weight:700; display:inline-flex; align-items:center; gap:0.35rem;"
+            onclick="openConfigureProxyPortsModal(${gatewayPort}, ${backendPort})"
+          >
+            <span>⚙️ Configure Ports</span>
+          </button>
+        ` : ''}
+      </div>
+
+      <!-- Architecture Visualization Diagram -->
+      <div style="background:#0f172a; border-radius:10px; padding:1.25rem 1.5rem; color:#f8fafc; font-family:monospace; font-size:0.82rem; overflow-x:auto;">
+        <div style="color:#94a3b8; font-weight:700; margin-bottom:0.5rem; text-transform:uppercase; font-size:0.72rem; letter-spacing:0.05em;">
+          📐 Active Traffic Flow Diagram (${isEnabled ? 'Reverse Proxy Active' : 'Direct Access Mode'})
+        </div>
+        ${isEnabled ? `
+Client Web Browser ──────► [Port ${gatewayPort}] Reverse Proxy Gateway (Edge Shield)
+                                │  ├─ DDoS & Rate Limit Protection (300 req/min)
+                                │  ├─ Strict Header Sanitization & Spoofing Defense
+                                │  └─ Microsecond Static Asset & Gzip Delivery
+                                ▼
+Internal Backend Network ──► [Port ${backendPort}] Node.js Express (Origin Cloaked)
+        ` : `
+Client Web Browser ──────► [Direct Access] ──► [Port ${backendPort}] Node.js Express (Reverse Proxy Bypassed)
+        `}
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Super Admin: Configure Reverse Proxy Ports Modal
+ */
+function openConfigureProxyPortsModal(currentGatewayPort, currentBackendPort) {
+  const newGateway = prompt('Enter Reverse Proxy Gateway Port (Public Access, e.g. 8080):', String(currentGatewayPort));
+  if (newGateway === null) return;
+  const newBackend = prompt('Enter Internal Backend Port (Private Access, e.g. 5050):', String(currentBackendPort));
+  if (newBackend === null) return;
+
+  const gPort = parseInt(newGateway, 10);
+  const bPort = parseInt(newBackend, 10);
+
+  if (isNaN(gPort) || gPort < 1 || gPort > 65535) {
+    alert('Please enter a valid Gateway Port between 1 and 65535.');
+    return;
+  }
+  if (isNaN(bPort) || bPort < 1 || bPort > 65535) {
+    alert('Please enter a valid Backend Port between 1 and 65535.');
+    return;
+  }
+  if (gPort === bPort) {
+    alert('Gateway Port and Backend Port cannot be identical. They must be separate ports.');
+    return;
+  }
+
+  saveControlPanelProxyPorts(gPort, bPort);
+}
+
+/**
+ * Save updated proxy ports to backend
+ */
+async function saveControlPanelProxyPorts(gatewayPort, backendPort) {
+  try {
+    const isEnabled = currentControlPanelData.reverseProxy?.enabled !== false;
+    const res = await apiFetch('/api/admin/control-panel/reverse-proxy', {
+      method: 'PUT',
+      body: JSON.stringify({ enabled: isEnabled, gatewayPort, backendPort }),
+    });
+
+    if (res && res.success) {
+      currentControlPanelData.reverseProxy = res.reverseProxy;
+      showStatusBanner(`✓ Port numbers configured: Gateway Port ${gatewayPort}, Backend Port ${backendPort}.`, 'success');
+      renderAdminControlPanelView();
+    } else {
+      alert(res?.message || 'Unable to update ports.');
+    }
+  } catch (err) {
+    console.error('Failed to update proxy ports:', err);
+    alert('Failed to update proxy ports: ' + (err.message || 'Unknown error'));
+  }
+}
+
+/**
+ * Super Admin: Toggle Reverse Proxy State
+ */
+async function toggleControlPanelReverseProxy(enabled) {
+  try {
+    const res = await apiFetch('/api/admin/control-panel/reverse-proxy', {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    });
+
+    if (res && res.success) {
+      currentControlPanelData.reverseProxy = res.reverseProxy;
+      showStatusBanner(
+        `✓ Reverse Proxy has been dynamically ${enabled ? 'ENABLED (Edge Gateway Active)' : 'DISABLED (Direct Backend Mode)'}.`,
+        enabled ? 'success' : 'warning'
+      );
+      renderAdminControlPanelView();
+    } else {
+      alert(res?.message || 'Unable to update reverse proxy toggle.');
+      renderAdminControlPanelView();
+    }
+  } catch (err) {
+    console.error('Failed to toggle reverse proxy:', err);
+    alert('Failed to update reverse proxy: ' + (err.message || 'Unknown error'));
+    renderAdminControlPanelView();
+  }
+}
+
+window.renderSecurityTabHtml = renderSecurityTabHtml;
+window.openConfigureProxyPortsModal = openConfigureProxyPortsModal;
+window.saveControlPanelProxyPorts = saveControlPanelProxyPorts;
+window.toggleControlPanelReverseProxy = toggleControlPanelReverseProxy;
 window.renderAdminControlPanelView = renderAdminControlPanelView;
 window.setControlPanelTab = setControlPanelTab;
 window.setControlPanelRoleFilter = setControlPanelRoleFilter;

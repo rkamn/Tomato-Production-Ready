@@ -288,6 +288,35 @@
     } catch (_) {}
   }
 
+  /**
+   * Decode and inspect JWT expiration claim (exp) against current time.
+   * Returns true if the token is missing, malformed, or already expired.
+   *
+   * @param {string} tokenStr - Raw JWT string
+   * @param {number} [bufferMs=5000] - Clock skew / safety buffer in milliseconds
+   * @returns {boolean} - true if expired or invalid
+   */
+  function isTokenExpired(tokenStr, bufferMs = 5000) {
+    if (!tokenStr || typeof tokenStr !== 'string') return true;
+    try {
+      const parts = tokenStr.split('.');
+      if (parts.length !== 3) return true;
+      const base64Url = parts[1];
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const jsonPayload = decodeURIComponent(
+        atob(base64)
+          .split('')
+          .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+          .join('')
+      );
+      const parsed = JSON.parse(jsonPayload);
+      if (typeof parsed.exp !== 'number') return false;
+      return (parsed.exp * 1000) <= (Date.now() + bufferMs);
+    } catch (_) {
+      return true;
+    }
+  }
+
   // Freeze security exports on window.TomatoSecurity
   const TomatoSecurity = Object.freeze({
     escapeHtml,
@@ -296,11 +325,15 @@
     safeSetHTML,
     clearClientSession,
     scrubSensitiveUrlParams,
+    isTokenExpired,
   });
 
   window.TomatoSecurity = TomatoSecurity;
 
   // Also expose escapeHtml and sanitizeUrl globally for direct calls
+  if (typeof window.isTokenExpired !== 'function') {
+    window.isTokenExpired = isTokenExpired;
+  }
   if (typeof window.escapeHtml !== 'function') {
     window.escapeHtml = escapeHtml;
   }

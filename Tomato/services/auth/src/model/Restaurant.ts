@@ -36,6 +36,7 @@ export interface IRestaurant extends Document {
   digipin: string;
   pincode?: string;
   restaurantAddress: string;
+  city?: string;
   restaurantLocation: {
     lat: number;
     lng: number;
@@ -81,6 +82,7 @@ const schema: Schema<IRestaurant> = new Schema(
     dob: { type: String, default: '', trim: true },
     gsnNumber: { type: String, default: 'NA', uppercase: true, trim: true },
     restaurantAddress: { type: String, default: '' },
+    city: { type: String, default: '', trim: true },
     restaurantLocation: {
       lat: { type: Number, default: 12.9716 },
       lng: { type: Number, default: 77.5946 },

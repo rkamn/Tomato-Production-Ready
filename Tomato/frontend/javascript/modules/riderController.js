@@ -119,21 +119,41 @@ async function fetchActiveRiderOrders() {
 
     container.innerHTML = orders.map((o) => {
       const custMapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${o.deliveryAddress?.line1 || ''}, ${o.deliveryAddress?.city || ''}`)}`;
+      const isPickedUp = Boolean(o.isPickedUp || o.pickupStatus === 'picked_up');
+      const dist = typeof o.distanceToStoreKm === 'number' ? o.distanceToStoreKm : 2.5;
+      const expectedMins = typeof o.expectedDeliveryTimingMinutes === 'number' ? o.expectedDeliveryTimingMinutes : Math.max(1, Math.round(5 + 2 * dist));
 
       return `
-        <div style="border:2px solid var(--green); border-radius:12px; padding:1.4rem; background:#fff; box-shadow:var(--shadow);">
+        <div style="border:2px solid ${isPickedUp ? 'var(--green)' : '#3b82f6'}; border-radius:12px; padding:1.4rem; background:#fff; box-shadow:var(--shadow);">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:0.6rem;">
             <div>
-              <span class="badge badge-transit" style="font-size:0.85rem;">🚴 OUT FOR DELIVERY IN PROGRESS</span>
+              <span class="badge" style="font-size:0.85rem; ${isPickedUp ? 'background:#dcfce7; color:#15803d;' : 'background:#eff6ff; color:#1d4ed8; font-weight:700;'}">
+                ${isPickedUp ? '🚀 OUT FOR DELIVERY IN PROGRESS' : '🚴 WAY TO PICKUP ORDER'}
+              </span>
               <h2 style="font-size:1.35rem; margin:0.4rem 0 0.2rem;">Order #${o.orderNumber}</h2>
+              ${isPickedUp ? `
+                <div style="font-size:0.82rem; color:#15803d; font-weight:700;">
+                  ⏱️ expected delivery timing(natural weither): ${expectedMins} mins (${dist.toFixed(1)} km)
+                </div>
+              ` : `
+                <div style="font-size:0.82rem; color:#1d4ed8; font-weight:700;">
+                  📍 On the way to store for pickup
+                </div>
+              `}
             </div>
             <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
               <button class="btn btn-outline" style="font-size:0.88rem; padding:0.6rem 1rem;" onclick="openOrderLiveTrackingModal('${o._id}', 'rider')">
                 📡 Live Route Radar
               </button>
-              <button class="btn btn-success" style="font-size:0.95rem; padding:0.7rem 1.3rem; font-weight:700;" onclick="initiateDeliverOrder('${o._id}')">
-                ✓ Deliver Product
-              </button>
+              ${!isPickedUp ? `
+                <button class="btn btn-primary" style="font-size:0.95rem; padding:0.7rem 1.3rem; font-weight:700;" onclick="confirmOrderPickup('${o._id}')">
+                  📦 Confirm Order Picked Up
+                </button>
+              ` : `
+                <button class="btn btn-success" style="font-size:0.95rem; padding:0.7rem 1.3rem; font-weight:700;" onclick="initiateDeliverOrder('${o._id}')">
+                  ✓ Deliver Product
+                </button>
+              `}
             </div>
           </div>
 
@@ -207,6 +227,17 @@ async function initiateDeliverOrder(orderId) {
 async function markOrderDelivered(orderId) {
   return initiateDeliverOrder(orderId);
 }
+
+async function confirmOrderPickup(orderId) {
+  try {
+    await apiFetch(`/api/rider/orders/${orderId}/pickup`, { method: 'POST' });
+    alert('Order marked as picked up from store! Proceed to customer delivery address.');
+    await fetchActiveRiderOrders();
+  } catch (e) {
+    alert(`Pickup confirmation failed: ${e.message}`);
+  }
+}
+window.confirmOrderPickup = confirmOrderPickup;
 
 function openRiderCodCollectModal(order) {
   currentCodDeliverOrder = order;

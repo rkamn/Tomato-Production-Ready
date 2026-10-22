@@ -3,7 +3,9 @@
   "private": true,
   "scripts": {
     "start": "npm run build && npm --prefix Tomato/services/auth start",
-    "build": "npm --prefix Tomato/services/auth run build",
-    "dev": "npm --prefix Tomato/services/auth run dev"
+    "build": "npm --prefix Tomato/services/auth run build && ./Tomato/services/auth/node_modules/.bin/tsc -p Tomato/services/proxy/tsconfig.json",
+    "dev": "npm --prefix Tomato/services/auth run dev",
+    "proxy": "node Tomato/services/proxy/dist/index.js",
+    "test:security": "node Tomato/services/auth/scripts/runSecurityTests.js"
   }
 }

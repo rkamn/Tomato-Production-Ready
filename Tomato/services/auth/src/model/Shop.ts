@@ -19,6 +19,7 @@ export interface IShop extends Document {
   digipin: string;
   pincode?: string;
   shopAddress: string;
+  city?: string;
   shopLocation: {
     lat: number;
     lng: number;
@@ -64,6 +65,7 @@ const shopSchema: Schema<IShop> = new Schema(
     dob: { type: String, default: '', trim: true },
     gsnNumber: { type: String, default: 'NA', uppercase: true, trim: true },
     shopAddress: { type: String, default: '' },
+    city: { type: String, default: '', trim: true },
     shopLocation: {
       lat: { type: Number, default: 12.9716 },
       lng: { type: Number, default: 77.5946 },

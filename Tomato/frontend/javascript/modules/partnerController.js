@@ -63,12 +63,16 @@ function updateRestaurantFilterButtons() {
   const allBtn = document.getElementById('rest-filter-all');
   const cookingBtn = document.getElementById('rest-filter-cooking');
   const incomingBtn = document.getElementById('rest-filter-incoming');
+  const outForDeliveryBtn = document.getElementById('rest-filter-out-for-delivery');
+  const deliveredTodayBtn = document.getElementById('rest-filter-delivered-today');
   const indicator = document.getElementById('rest-filter-indicator');
   const dateIndicator = document.getElementById('rest-date-filter-indicator');
 
   if (allBtn) allBtn.classList.toggle('active', currentRestaurantOrderFilter === 'all');
   if (cookingBtn) cookingBtn.classList.toggle('active', currentRestaurantOrderFilter === 'cooking');
   if (incomingBtn) incomingBtn.classList.toggle('active', currentRestaurantOrderFilter === 'incoming');
+  if (outForDeliveryBtn) outForDeliveryBtn.classList.toggle('active', currentRestaurantOrderFilter === 'out_for_delivery');
+  if (deliveredTodayBtn) deliveredTodayBtn.classList.toggle('active', currentRestaurantOrderFilter === 'delivered_today');
 
   if (dateIndicator) {
     if (restaurantOrdersStartDate || restaurantOrdersEndDate) {
@@ -90,10 +94,16 @@ function updateRestaurantFilterButtons() {
   if (indicator) {
     if (currentRestaurantOrderFilter === 'cooking') {
       indicator.style.display = 'inline-block';
-      indicator.innerHTML = 'Filtered by: <strong>Accepted, Preparing, Out for Delivery</strong> <button class="btn btn-xs btn-outline" style="margin-left:0.4rem; padding:0.15rem 0.5rem; font-size:0.75rem;" onclick="setRestaurantOrdersFilter(\'all\')">Clear</button>';
+      indicator.innerHTML = 'Filtered by: <strong>On Stove / Cooking (Accepted, Preparing, Ready)</strong> <button class="btn btn-xs btn-outline" style="margin-left:0.4rem; padding:0.15rem 0.5rem; font-size:0.75rem;" onclick="setRestaurantOrdersFilter(\'all\')">Clear</button>';
     } else if (currentRestaurantOrderFilter === 'incoming') {
       indicator.style.display = 'inline-block';
-      indicator.innerHTML = 'Filtered by: <strong>Placed</strong> <button class="btn btn-xs btn-outline" style="margin-left:0.4rem; padding:0.15rem 0.5rem; font-size:0.75rem;" onclick="setRestaurantOrdersFilter(\'all\')">Clear</button>';
+      indicator.innerHTML = 'Filtered by: <strong>Placed (New Incoming)</strong> <button class="btn btn-xs btn-outline" style="margin-left:0.4rem; padding:0.15rem 0.5rem; font-size:0.75rem;" onclick="setRestaurantOrdersFilter(\'all\')">Clear</button>';
+    } else if (currentRestaurantOrderFilter === 'out_for_delivery') {
+      indicator.style.display = 'inline-block';
+      indicator.innerHTML = 'Filtered by: <strong>Out for Delivery</strong> <button class="btn btn-xs btn-outline" style="margin-left:0.4rem; padding:0.15rem 0.5rem; font-size:0.75rem;" onclick="setRestaurantOrdersFilter(\'all\')">Clear</button>';
+    } else if (currentRestaurantOrderFilter === 'delivered_today') {
+      indicator.style.display = 'inline-block';
+      indicator.innerHTML = 'Filtered by: <strong>Delivered Today</strong> <button class="btn btn-xs btn-outline" style="margin-left:0.4rem; padding:0.15rem 0.5rem; font-size:0.75rem;" onclick="setRestaurantOrdersFilter(\'all\')">Clear</button>';
     } else {
       indicator.style.display = 'none';
     }
@@ -116,12 +126,26 @@ function renderRestaurantOrdersTable(orders) {
   if (currentRestaurantOrderFilter === 'cooking') {
     displayOrders = displayOrders.filter((o) => {
       const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
-      return st === 'accepted' || st === 'preparing' || st === 'out for delivery';
+      return st === 'accepted' || st === 'preparing' || st === 'ready for pickup';
     });
   } else if (currentRestaurantOrderFilter === 'incoming') {
     displayOrders = displayOrders.filter((o) => {
       const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
       return st === 'placed';
+    });
+  } else if (currentRestaurantOrderFilter === 'out_for_delivery') {
+    displayOrders = displayOrders.filter((o) => {
+      const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+      return st === 'out for delivery';
+    });
+  } else if (currentRestaurantOrderFilter === 'delivered_today') {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    displayOrders = displayOrders.filter((o) => {
+      const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+      if (st !== 'delivered') return false;
+      const d = new Date(o.updatedAt || o.deliveredAt || o.createdAt || o.date);
+      return !isNaN(d.getTime()) && d >= startOfToday;
     });
   }
 
@@ -148,9 +172,13 @@ function renderRestaurantOrdersTable(orders) {
       : currentRestaurantOrderFilter === 'incoming'
       ? 'No incoming orders with status "placed" found.'
       : currentRestaurantOrderFilter === 'cooking'
-      ? 'No orders with status "accepted, preparing or out for delivery" found.'
+      ? 'No orders with status "accepted, preparing or ready for pickup" found.'
+      : currentRestaurantOrderFilter === 'out_for_delivery'
+      ? 'No orders currently "out for delivery" found.'
+      : currentRestaurantOrderFilter === 'delivered_today'
+      ? 'No orders delivered today found.'
       : 'No orders found for the selected filter.';
-    const emptyIcon = hasDateFilter ? '📅' : currentRestaurantOrderFilter === 'incoming' ? '🔔' : '🍳';
+    const emptyIcon = hasDateFilter ? '📅' : currentRestaurantOrderFilter === 'incoming' ? '🔔' : currentRestaurantOrderFilter === 'out_for_delivery' ? '🛵' : currentRestaurantOrderFilter === 'delivered_today' ? '✅' : '🍳';
     container.innerHTML = `
       <div style="padding:2rem 1rem; text-align:center; color:var(--muted); background:#fcfcfc; border-radius:8px; border:1px dashed var(--line); margin-top:0.5rem;">
         <div style="font-size:2rem; margin-bottom:0.5rem;">${emptyIcon}</div>
@@ -234,6 +262,9 @@ async function fetchRestaurantOrders() {
     const data = await apiFetch('/api/restaurant/orders');
     cachedRestaurantOrders = data.orders || [];
     renderRestaurantOrdersTable(cachedRestaurantOrders);
+    if (typeof syncOverviewOrderStats === 'function') {
+      syncOverviewOrderStats('restaurant', cachedRestaurantOrders);
+    }
   } catch (e) {
     if (!hasExisting) {
       container.innerHTML = `<p style="color:var(--tomato-dark); padding:1rem 0;">${e.message}</p>`;
@@ -246,13 +277,35 @@ async function fetchRestaurantOrders() {
 }
 
 async function updateOrderStatus(orderId, nextStatus) {
+  const existingOrder = Array.isArray(cachedRestaurantOrders)
+    ? cachedRestaurantOrders.find((o) => String(o._id || o.id) === String(orderId))
+    : null;
+  const prevStatus = existingOrder ? existingOrder.status : null;
+  if (existingOrder) {
+    existingOrder.status = nextStatus;
+    renderRestaurantOrdersTable(cachedRestaurantOrders);
+    if (typeof syncOverviewOrderStats === 'function') {
+      syncOverviewOrderStats('restaurant', cachedRestaurantOrders);
+    }
+  }
+
   try {
     await apiFetch(`/api/restaurant/orders/${orderId}/status`, {
       method: 'PUT',
       body: JSON.stringify({ status: nextStatus }),
     });
-    fetchRestaurantOrders();
+    await fetchRestaurantOrders();
+    if (typeof loadRoleOverview === 'function') {
+      loadRoleOverview();
+    }
   } catch (e) {
+    if (existingOrder && prevStatus) {
+      existingOrder.status = prevStatus;
+      renderRestaurantOrdersTable(cachedRestaurantOrders);
+      if (typeof syncOverviewOrderStats === 'function') {
+        syncOverviewOrderStats('restaurant', cachedRestaurantOrders);
+      }
+    }
     if (typeof showServiceableAreaPopup === 'function' && e.message && e.message.toLowerCase().includes('servicable range')) {
       showServiceableAreaPopup();
     } else {
@@ -321,12 +374,16 @@ function updateShopFilterButtons() {
   const allBtn = document.getElementById('shop-filter-all');
   const cookingBtn = document.getElementById('shop-filter-cooking');
   const incomingBtn = document.getElementById('shop-filter-incoming');
+  const outForDeliveryBtn = document.getElementById('shop-filter-out-for-delivery');
+  const deliveredTodayBtn = document.getElementById('shop-filter-delivered-today');
   const indicator = document.getElementById('shop-filter-indicator');
   const dateIndicator = document.getElementById('shop-date-filter-indicator');
 
   if (allBtn) allBtn.classList.toggle('active', currentShopOrderFilter === 'all');
   if (cookingBtn) cookingBtn.classList.toggle('active', currentShopOrderFilter === 'cooking');
   if (incomingBtn) incomingBtn.classList.toggle('active', currentShopOrderFilter === 'incoming');
+  if (outForDeliveryBtn) outForDeliveryBtn.classList.toggle('active', currentShopOrderFilter === 'out_for_delivery');
+  if (deliveredTodayBtn) deliveredTodayBtn.classList.toggle('active', currentShopOrderFilter === 'delivered_today');
 
   if (dateIndicator) {
     if (shopOrdersStartDate || shopOrdersEndDate) {
@@ -348,10 +405,16 @@ function updateShopFilterButtons() {
   if (indicator) {
     if (currentShopOrderFilter === 'cooking') {
       indicator.style.display = 'inline-block';
-      indicator.innerHTML = 'Filtered by: <strong>Accepted, Preparing / Packing, Out for Delivery</strong> <button class="btn btn-xs btn-outline" style="margin-left:0.4rem; padding:0.15rem 0.5rem; font-size:0.75rem;" onclick="setShopOrdersFilter(\'all\')">Clear</button>';
+      indicator.innerHTML = 'Filtered by: <strong>In Packing / Processing (Accepted, Preparing, Ready)</strong> <button class="btn btn-xs btn-outline" style="margin-left:0.4rem; padding:0.15rem 0.5rem; font-size:0.75rem;" onclick="setShopOrdersFilter(\'all\')">Clear</button>';
     } else if (currentShopOrderFilter === 'incoming') {
       indicator.style.display = 'inline-block';
-      indicator.innerHTML = 'Filtered by: <strong>Placed</strong> <button class="btn btn-xs btn-outline" style="margin-left:0.4rem; padding:0.15rem 0.5rem; font-size:0.75rem;" onclick="setShopOrdersFilter(\'all\')">Clear</button>';
+      indicator.innerHTML = 'Filtered by: <strong>Placed (New Incoming)</strong> <button class="btn btn-xs btn-outline" style="margin-left:0.4rem; padding:0.15rem 0.5rem; font-size:0.75rem;" onclick="setShopOrdersFilter(\'all\')">Clear</button>';
+    } else if (currentShopOrderFilter === 'out_for_delivery') {
+      indicator.style.display = 'inline-block';
+      indicator.innerHTML = 'Filtered by: <strong>Out for Delivery</strong> <button class="btn btn-xs btn-outline" style="margin-left:0.4rem; padding:0.15rem 0.5rem; font-size:0.75rem;" onclick="setShopOrdersFilter(\'all\')">Clear</button>';
+    } else if (currentShopOrderFilter === 'delivered_today') {
+      indicator.style.display = 'inline-block';
+      indicator.innerHTML = 'Filtered by: <strong>Delivered Today</strong> <button class="btn btn-xs btn-outline" style="margin-left:0.4rem; padding:0.15rem 0.5rem; font-size:0.75rem;" onclick="setShopOrdersFilter(\'all\')">Clear</button>';
     } else {
       indicator.style.display = 'none';
     }
@@ -374,12 +437,26 @@ function renderShopOrdersTable(orders) {
   if (currentShopOrderFilter === 'cooking') {
     displayOrders = displayOrders.filter((o) => {
       const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
-      return st === 'accepted' || st === 'preparing' || st === 'out for delivery';
+      return st === 'accepted' || st === 'preparing' || st === 'ready for pickup';
     });
   } else if (currentShopOrderFilter === 'incoming') {
     displayOrders = displayOrders.filter((o) => {
       const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
       return st === 'placed';
+    });
+  } else if (currentShopOrderFilter === 'out_for_delivery') {
+    displayOrders = displayOrders.filter((o) => {
+      const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+      return st === 'out for delivery';
+    });
+  } else if (currentShopOrderFilter === 'delivered_today') {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    displayOrders = displayOrders.filter((o) => {
+      const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+      if (st !== 'delivered') return false;
+      const d = new Date(o.updatedAt || o.deliveredAt || o.createdAt || o.date);
+      return !isNaN(d.getTime()) && d >= startOfToday;
     });
   }
 
@@ -406,9 +483,13 @@ function renderShopOrdersTable(orders) {
       : currentShopOrderFilter === 'incoming'
       ? 'No incoming shop orders with status "placed" found.'
       : currentShopOrderFilter === 'cooking'
-      ? 'No shop orders with status "accepted, preparing or out for delivery" found.'
+      ? 'No shop orders with status "accepted, preparing or ready for pickup" found.'
+      : currentShopOrderFilter === 'out_for_delivery'
+      ? 'No shop orders currently "out for delivery" found.'
+      : currentShopOrderFilter === 'delivered_today'
+      ? 'No shop orders delivered today found.'
       : 'No shop orders found for the selected filter.';
-    const emptyIcon = hasDateFilter ? '📅' : currentShopOrderFilter === 'incoming' ? '🔔' : '📦';
+    const emptyIcon = hasDateFilter ? '📅' : currentShopOrderFilter === 'incoming' ? '🔔' : currentShopOrderFilter === 'out_for_delivery' ? '🛵' : currentShopOrderFilter === 'delivered_today' ? '✅' : '📦';
     container.innerHTML = `
       <div style="padding:2rem 1rem; text-align:center; color:var(--muted); background:#fcfcfc; border-radius:8px; border:1px dashed var(--line); margin-top:0.5rem;">
         <div style="font-size:2rem; margin-bottom:0.5rem;">${emptyIcon}</div>
@@ -493,6 +574,9 @@ async function fetchShopOrders() {
     const data = await apiFetch('/api/shop/orders');
     cachedShopOrders = data.orders || [];
     renderShopOrdersTable(cachedShopOrders);
+    if (typeof syncOverviewOrderStats === 'function') {
+      syncOverviewOrderStats('shop', cachedShopOrders);
+    }
   } catch (e) {
     if (!hasExisting) {
       container.innerHTML = `<p style="color:var(--tomato-dark); padding:1rem 0;">${e.message}</p>`;
@@ -506,13 +590,35 @@ async function fetchShopOrders() {
 window.fetchShopOrders = fetchShopOrders;
 
 async function updateShopOrderStatus(orderId, nextStatus) {
+  const existingOrder = Array.isArray(cachedShopOrders)
+    ? cachedShopOrders.find((o) => String(o._id || o.id) === String(orderId))
+    : null;
+  const prevStatus = existingOrder ? existingOrder.status : null;
+  if (existingOrder) {
+    existingOrder.status = nextStatus;
+    renderShopOrdersTable(cachedShopOrders);
+    if (typeof syncOverviewOrderStats === 'function') {
+      syncOverviewOrderStats('shop', cachedShopOrders);
+    }
+  }
+
   try {
     await apiFetch(`/api/shop/orders/${orderId}/status`, {
       method: 'PUT',
       body: JSON.stringify({ status: nextStatus }),
     });
-    fetchShopOrders();
+    await fetchShopOrders();
+    if (typeof loadRoleOverview === 'function') {
+      loadRoleOverview();
+    }
   } catch (e) {
+    if (existingOrder && prevStatus) {
+      existingOrder.status = prevStatus;
+      renderShopOrdersTable(cachedShopOrders);
+      if (typeof syncOverviewOrderStats === 'function') {
+        syncOverviewOrderStats('shop', cachedShopOrders);
+      }
+    }
     if (typeof showServiceableAreaPopup === 'function' && e.message && e.message.toLowerCase().includes('servicable range')) {
       showServiceableAreaPopup();
     } else {

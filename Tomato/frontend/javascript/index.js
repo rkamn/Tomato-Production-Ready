@@ -563,6 +563,7 @@
           const response = await fetch(`${API_ROOT}/api/auth/${mode}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
             body: JSON.stringify(payload),
           });
           const data = await response.json().catch(() => ({}));

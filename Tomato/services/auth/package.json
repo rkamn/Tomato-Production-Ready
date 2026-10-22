@@ -7,8 +7,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "concurrently \"tsc --watch\" \"node --watch dist/index.js\"",
-    "test": "npm run build && node scripts/runSecurityTests.js",
-    "arattai:token": "node scripts/getArattaiTokens.js"
+    "test": "npm run build && node scripts/runSecurityTests.js"
   },
   "keywords": [],
   "author": "",

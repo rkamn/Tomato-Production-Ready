@@ -92,6 +92,66 @@ export function sanitizeLogData(data: unknown): unknown {
 }
 
 /**
+ * Strip sensitive credentials (JWT tokens, passwords, secrets, verification codes)
+ * from logged URLs or query parameters to prevent leaking credentials in log monitors.
+ */
+export function sanitizePath(rawPath?: string): string | undefined {
+  if (!rawPath || typeof rawPath !== 'string') return rawPath;
+  return rawPath.replace(/([?&](?:token|auth|password|secret|key|code|otp)=)[^&]*/gi, '$1[REDACTED]');
+}
+
+interface UnauthTracker {
+  lastLogged: number;
+  suppressedCount: number;
+}
+
+const unauthDebounceMap = new Map<string, UnauthTracker>();
+const UNAUTH_DEBOUNCE_WINDOW_MS = 5000;
+const MAX_DEBOUNCE_ENTRIES = 2000;
+
+/**
+ * Throttle repetitive 401 UNAUTHORIZED warnings from the same client IP
+ * to prevent burst log floods when an expired tab triggers multiple concurrent requests or SSE reconnects.
+ */
+export function shouldThrottleUnauthLog(ip: string, method?: string, rawPath?: string): boolean {
+  const now = Date.now();
+
+  if (unauthDebounceMap.size > MAX_DEBOUNCE_ENTRIES) {
+    for (const [k, v] of unauthDebounceMap.entries()) {
+      if (now - v.lastLogged > UNAUTH_DEBOUNCE_WINDOW_MS * 2) {
+        unauthDebounceMap.delete(k);
+      }
+    }
+  }
+
+  const cleanPath = (rawPath || '').split('?')[0];
+  const routeKey = `${ip}:${method || 'GET'}:${cleanPath}`;
+  const ipBurstKey = `${ip}:BURST_BURST`;
+
+  // Check identical endpoint debounce (e.g. SSE stream reconnects every 3s)
+  const routeTracker = unauthDebounceMap.get(routeKey);
+  if (routeTracker && now - routeTracker.lastLogged < UNAUTH_DEBOUNCE_WINDOW_MS) {
+    routeTracker.suppressedCount++;
+    return true;
+  }
+
+  // Check overall burst per IP (e.g. dashboard loading 7 requests at the same millisecond)
+  const ipTracker = unauthDebounceMap.get(ipBurstKey);
+  if (ipTracker && now - ipTracker.lastLogged < 2000) {
+    if (ipTracker.suppressedCount >= 2) {
+      ipTracker.suppressedCount++;
+      return true; // Limit to 2 logs within 2 seconds per IP
+    }
+    ipTracker.suppressedCount++;
+  } else {
+    unauthDebounceMap.set(ipBurstKey, { lastLogged: now, suppressedCount: 1 });
+  }
+
+  unauthDebounceMap.set(routeKey, { lastLogged: now, suppressedCount: 0 });
+  return false;
+}
+
+/**
  * Primary logger function for all security-relevant occurrences.
  * Outputs safe, sanitized, structured log records without leaking credentials.
  */
@@ -104,7 +164,7 @@ export function logSecurityEvent(event: SecurityEvent): void {
     ip: event.ip || 'internal',
     userAgent: event.userAgent ? String(event.userAgent).slice(0, 200) : undefined,
     method: event.method,
-    path: event.path,
+    path: sanitizePath(event.path),
     message: event.message,
     details: event.details ? (sanitizeLogData(event.details) as Record<string, unknown>) : undefined,
     timestamp: event.timestamp || new Date().toISOString(),
@@ -242,7 +302,11 @@ export function securityEventAuditorMiddleware(
     const userAgentStr = typeof userAgentHeader === 'string' ? userAgentHeader : undefined;
 
     if (res.statusCode === 401) {
-      logAccessViolation('UNAUTHORIZED', req, 'Endpoint access denied: Invalid or missing authentication');
+      const clientIp = getClientIp(req);
+      const rawPath = req.originalUrl || req.path;
+      if (!shouldThrottleUnauthLog(clientIp, req.method, rawPath)) {
+        logAccessViolation('UNAUTHORIZED', req, 'Endpoint access denied: Invalid or missing authentication');
+      }
     } else if (res.statusCode === 403) {
       logAccessViolation('FORBIDDEN', req, 'Endpoint access forbidden: Insufficient privileges or CSRF rejection');
     } else if (res.statusCode === 429) {
@@ -271,5 +335,7 @@ export default {
   logPaymentSecurityEvent,
   securityEventAuditorMiddleware,
   sanitizeLogData,
+  sanitizePath,
+  shouldThrottleUnauthLog,
 };
 

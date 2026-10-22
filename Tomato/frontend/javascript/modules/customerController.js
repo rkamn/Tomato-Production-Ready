@@ -13,7 +13,16 @@ function sortRestaurantsByDistance(restaurants) {
 }
 
 function isStoreBeyondCustomerRange(store) {
-  return typeof store?.distanceKm === 'number' && store.distanceKm > 15.0;
+  if (!store) return false;
+  if (typeof store.distanceKm === 'number' && store.distanceKm > 15.0) return true;
+  const defaultAddr = (Array.isArray(customerAddresses) && customerAddresses.length)
+    ? (customerAddresses.find((a) => a.isDefault) || customerAddresses[0])
+    : null;
+  if (defaultAddr && typeof checkAddressDeliverableToStore === 'function') {
+    const status = checkAddressDeliverableToStore(defaultAddr, store);
+    if (!status.deliverable) return true;
+  }
+  return false;
 }
 
 async function loadCustomerMenuSection() {
@@ -43,6 +52,15 @@ async function loadCustomerMenuSection() {
     if ((custLat === null || custLng === null) && window.currentUserLat && window.currentUserLng) {
       custLat = window.currentUserLat;
       custLng = window.currentUserLng;
+    }
+
+    // If customer's default address is Pune (411057) or Motihari (845401) but coordinates were legacy Bengaluru:
+    if (customerPin && customerPin !== '560001') {
+      const pinCoords = resolveFrontendCoordinatesFromPincode(customerPin);
+      if (pinCoords && (custLat === null || custLng === null || (Math.abs(custLat - 12.9716) < 0.001 && Math.abs(custLng - 77.5946) < 0.001))) {
+        custLat = pinCoords.lat;
+        custLng = pinCoords.lng;
+      }
     }
 
     const qParams = new URLSearchParams();
@@ -2286,14 +2304,22 @@ function renderMenuItems() {
 function addToCart(itemId, name, price, restaurantId, storeType = 'restaurant') {
   let isClosed = false;
   let storeName = 'Store';
+  let targetStore = null;
 
   if (storeType === 'shop' || customerBrowseMode === 'shop') {
     storeType = 'shop';
-    const shop = allShops.find((s) => String(s.id || s._id) === String(restaurantId));
+    const shop = Array.isArray(allShops) ? allShops.find((s) => String(s.id || s._id) === String(restaurantId)) : null;
+    targetStore = shop;
     if (shop) {
       storeName = shop.name || 'Shop';
       if (isStoreBeyondCustomerRange(shop)) {
-        if (typeof showRestaurantTooFarPopup === 'function') {
+        if (typeof showDeliverableRangeAlert === 'function') {
+          const defaultAddr = (Array.isArray(customerAddresses) && customerAddresses.length)
+            ? (customerAddresses.find((a) => a.isDefault) || customerAddresses[0])
+            : null;
+          const custPin = defaultAddr ? resolveFrontendAddressPincode(defaultAddr) : (user?.pincode || '');
+          showDeliverableRangeAlert('your oder is out of deliverable range, please update your address', custPin, shop.distanceKm);
+        } else if (typeof showRestaurantTooFarPopup === 'function') {
           showRestaurantTooFarPopup(storeName, shop.distanceKm);
         } else {
           alert('Shop is too far from you');
@@ -2304,11 +2330,18 @@ function addToCart(itemId, name, price, restaurantId, storeType = 'restaurant') 
     }
   } else {
     storeType = 'restaurant';
-    const rest = allRestaurants.find((r) => String(r.id || r._id) === String(restaurantId));
+    const rest = Array.isArray(allRestaurants) ? allRestaurants.find((r) => String(r.id || r._id) === String(restaurantId)) : null;
+    targetStore = rest;
     if (rest) {
       storeName = rest.name || 'Restaurant';
       if (isStoreBeyondCustomerRange(rest)) {
-        if (typeof showRestaurantTooFarPopup === 'function') {
+        if (typeof showDeliverableRangeAlert === 'function') {
+          const defaultAddr = (Array.isArray(customerAddresses) && customerAddresses.length)
+            ? (customerAddresses.find((a) => a.isDefault) || customerAddresses[0])
+            : null;
+          const custPin = defaultAddr ? resolveFrontendAddressPincode(defaultAddr) : (user?.pincode || '');
+          showDeliverableRangeAlert('your oder is out of deliverable range, please update your address', custPin, rest.distanceKm);
+        } else if (typeof showRestaurantTooFarPopup === 'function') {
           showRestaurantTooFarPopup(storeName, rest.distanceKm);
         } else {
           alert('Restaurant is too far from you');
@@ -2342,12 +2375,32 @@ function addToCart(itemId, name, price, restaurantId, storeType = 'restaurant') 
   const sourceListForCat = storeType === 'shop' ? allShopItems : allMenuItems;
   const matchedItemForCat = sourceListForCat.find((m) => String(m.id || m._id) === String(itemId));
   const itemCategory = matchedItemForCat?.category || '';
+  const storePin = targetStore?.pincode || targetStore?.postalCode || resolveFrontendAddressPincode({ line1: targetStore?.restaurantAddress || targetStore?.shopAddress || targetStore?.address || '' });
+  const storeLoc = targetStore?.location || null;
+  const storeAddr = targetStore?.restaurantAddress || targetStore?.shopAddress || targetStore?.address || '';
+
   const existing = cart.find((i) => i.itemId === itemId);
   if (existing) {
     existing.quantity += 1;
     if (!existing.category && itemCategory) existing.category = itemCategory;
+    if (!existing.storeName && storeName) existing.storeName = storeName;
+    if (!existing.storePincode && storePin) existing.storePincode = storePin;
+    if (!existing.storeLocation && storeLoc) existing.storeLocation = storeLoc;
+    if (!existing.storeAddress && storeAddr) existing.storeAddress = storeAddr;
   } else {
-    cart.push({ itemId, name, price, quantity: 1, restaurantId, storeType, category: itemCategory });
+    cart.push({
+      itemId,
+      name,
+      price,
+      quantity: 1,
+      restaurantId,
+      storeType,
+      category: itemCategory,
+      storeName,
+      storePincode: storePin,
+      storeLocation: storeLoc,
+      storeAddress: storeAddr,
+    });
   }
   if (restaurantId) {
     recordVisitedItem(storeType === 'shop' ? 'shops' : 'restaurants', restaurantId);
@@ -3138,8 +3191,47 @@ function getStoreFrontendCoordinates(store) {
   return resolveFrontendCoordinatesFromPincode(pin);
 }
 
+function resolveCurrentCartStore() {
+  if (!cart.length || !cart[0].restaurantId) return null;
+  const storeId = String(cart[0].restaurantId);
+  const isShop = cart[0].storeType === 'shop' || customerBrowseMode === 'shop';
+
+  // 1. Search in local loaded collections matching storeType
+  let store = isShop
+    ? (Array.isArray(allShops) ? allShops.find((s) => String(s.id || s._id) === storeId) : null)
+    : (Array.isArray(allRestaurants) ? allRestaurants.find((r) => String(r.id || r._id) === storeId) : null);
+
+  // 2. Cross-check opposite collection if not found
+  if (!store) {
+    store = isShop
+      ? (Array.isArray(allRestaurants) ? allRestaurants.find((r) => String(r.id || r._id) === storeId) : null)
+      : (Array.isArray(allShops) ? allShops.find((s) => String(s.id || s._id) === storeId) : null);
+  }
+
+  // 3. Fallback to cart[0] metadata if attached
+  if (!store && cart[0]) {
+    store = {
+      _id: cart[0].restaurantId,
+      id: cart[0].restaurantId,
+      name: cart[0].storeName || (isShop ? 'Shop' : 'Restaurant'),
+      pincode: cart[0].storePincode || '',
+      postalCode: cart[0].storePincode || '',
+      location: cart[0].storeLocation || null,
+      address: cart[0].storeAddress || '',
+      restaurantAddress: cart[0].storeAddress || '',
+      shopAddress: cart[0].storeAddress || '',
+    };
+  }
+
+  return store;
+}
+window.resolveCurrentCartStore = resolveCurrentCartStore;
+
 function checkAddressDeliverableToStore(addr, store) {
   if (!addr) return { deliverable: false, reason: 'No address selected', distanceKm: null };
+  if (!store) {
+    store = resolveCurrentCartStore();
+  }
   const custPin = resolveFrontendAddressPincode(addr);
   const hasPinList = Array.isArray(cachedServiceablePincodes) && cachedServiceablePincodes.length > 0;
   if (hasPinList && (!custPin || !cachedServiceablePincodes.includes(custPin))) {
@@ -3198,6 +3290,7 @@ function updateCheckoutAddressPreview(options = {}) {
   const preview = document.getElementById('checkout-address-preview');
   const defaultPrompt = document.getElementById('checkout-default-prompt');
   const makeDefaultCb = document.getElementById('checkout-make-default');
+  const payBtn = document.getElementById('gateway-pay-btn');
   if (!select || !preview) return;
 
   const selectedId = select.value;
@@ -3208,18 +3301,12 @@ function updateCheckoutAddressPreview(options = {}) {
     return;
   }
 
-  const isShop = cart[0]?.storeType === 'shop' || customerBrowseMode === 'shop';
-  const store = cart.length > 0 && cart[0].restaurantId
-    ? (isShop
-        ? (Array.isArray(allShops) ? allShops.find((s) => String(s.id || s._id) === String(cart[0].restaurantId)) : null)
-        : (Array.isArray(allRestaurants) ? allRestaurants.find((r) => String(r.id || r._id) === String(cart[0].restaurantId)) : null))
-    : null;
-
+  const store = resolveCurrentCartStore();
   const status = checkAddressDeliverableToStore(addr, store);
   const isAreaDeliverable = status.deliverable;
   const custPin = status.custPin || resolveFrontendAddressPincode(addr);
 
-  // If user changed the address in checkout dropdown and it is out of current restaurant deliverable range, popup alert
+  // If user changed the address in checkout dropdown and it is out of current store deliverable range, popup alert
   if (!isAreaDeliverable && isUserChange) {
     if (typeof showDeliverableRangeAlert === 'function') {
       showDeliverableRangeAlert('your oder is out of deliverable range, please update your address', custPin, status.distanceKm);
@@ -3227,6 +3314,21 @@ function updateCheckoutAddressPreview(options = {}) {
       showServiceableAreaPopup(custPin, cachedServiceablePincodes, 'customer', 'your oder is out of deliverable range, please update your address');
     } else {
       alert("your oder is out of deliverable range, please update your address");
+    }
+  }
+
+  // Toggle pay button state
+  if (payBtn) {
+    if (!isAreaDeliverable) {
+      payBtn.disabled = true;
+      payBtn.setAttribute('title', 'Selected delivery address is out of deliverable range for this store.');
+      payBtn.style.opacity = '0.5';
+      payBtn.style.cursor = 'not-allowed';
+    } else {
+      payBtn.disabled = false;
+      payBtn.removeAttribute('title');
+      payBtn.style.opacity = '1';
+      payBtn.style.cursor = 'pointer';
     }
   }
 
@@ -3571,6 +3673,7 @@ async function placeOrderAfterPayment(txnId, method, chosenAddr) {
     couponCodes: Array.isArray(appliedCouponCodes) ? appliedCouponCodes.slice(0, 1) : [],
     paymentMethod: method,
     paymentTransactionId: txnId,
+    utrNumber: txnId,
     addressId: chosenAddr._id,
     deliveryAddress,
   };
@@ -3600,6 +3703,39 @@ async function placeOrderAfterPayment(txnId, method, chosenAddr) {
   switchView('customer-orders');
 }
 
+function handleOrderPlacementError(e, custPincode) {
+  const errMsg = (e && e.message) ? String(e.message) : '';
+  const errCode = (e && e.code) ? String(e.code) : '';
+  const distKm = (e && typeof e.distanceKm === 'number') ? e.distanceKm : null;
+
+  const isRangeError = (
+    errCode === 'STORE_TOO_FAR' ||
+    errCode === 'AREA_OUT_OF_SERVICEABLE_RANGE' ||
+    errCode === 'ADMIN_ZONE_MISMATCH' ||
+    errCode === 'STORE_OUT_OF_SERVICEABLE_RANGE' ||
+    errMsg.toLowerCase().includes('servicable range') ||
+    errMsg.toLowerCase().includes('serviceable range') ||
+    errMsg.toLowerCase().includes('deliverable range') ||
+    errMsg.toLowerCase().includes('too far from you')
+  );
+
+  if (isRangeError) {
+    if (typeof showDeliverableRangeAlert === 'function') {
+      showDeliverableRangeAlert('your oder is out of deliverable range, please update your address', custPincode, distKm);
+    } else if (typeof showRestaurantTooFarPopup === 'function' && (errCode === 'STORE_TOO_FAR' || errMsg.toLowerCase().includes('too far'))) {
+      const storeName = cart[0]?.storeName || cart[0]?.name || (cart[0]?.storeType === 'shop' ? 'Shop' : 'Restaurant');
+      showRestaurantTooFarPopup(storeName, distKm);
+    } else if (typeof showServiceableAreaPopup === 'function') {
+      showServiceableAreaPopup(custPincode || 'Not Set', cachedServiceablePincodes, 'customer', 'your oder is out of deliverable range, please update your address');
+    } else {
+      alert("your oder is out of deliverable range, please update your address");
+    }
+  } else {
+    alert(`Payment verification error: ${errMsg || 'Unable to place order'}`);
+  }
+}
+window.handleOrderPlacementError = handleOrderPlacementError;
+
 async function executePaymentAndOrder() {
   const payBtn = document.getElementById('gateway-pay-btn');
   const loadingEl = document.getElementById('gateway-loading');
@@ -3624,12 +3760,7 @@ async function executePaymentAndOrder() {
   const defaultPincode = defaultAddr ? resolveFrontendAddressPincode(defaultAddr) : (user?.pincode || '');
   const custPincode = resolveFrontendAddressPincode(chosenAddr) || defaultPincode;
 
-  const isShop = cart[0]?.storeType === 'shop' || customerBrowseMode === 'shop';
-  const store = cart.length > 0 && cart[0].restaurantId
-    ? (isShop
-        ? (Array.isArray(allShops) ? allShops.find((s) => String(s.id || s._id) === String(cart[0].restaurantId)) : null)
-        : (Array.isArray(allRestaurants) ? allRestaurants.find((r) => String(r.id || r._id) === String(cart[0].restaurantId)) : null))
-    : null;
+  const store = resolveCurrentCartStore();
 
   // Deliverable range check
   const deliverableStatus = checkAddressDeliverableToStore(chosenAddr, store);
@@ -3722,7 +3853,7 @@ async function executePaymentAndOrder() {
             if (loadingText) loadingText.innerText = 'Payment verified! Finalizing order into Tomato Treasury...';
             await placeOrderAfterPayment(response.razorpay_payment_id, 'razorpay', chosenAddr);
           } catch (err) {
-            alert('Payment verification error: ' + err.message);
+            handleOrderPlacementError(err, custPincode);
             payBtn.disabled = false;
             loadingEl.style.display = 'none';
           }
@@ -3854,23 +3985,7 @@ async function executePaymentAndOrder() {
 
     await placeOrderAfterPayment(txnId, selectedPaymentMethod, chosenAddr);
   } catch (e) {
-    if (e.message && (e.message.toLowerCase().includes('servicable range') || e.message.toLowerCase().includes('deliverable range') || e.code === 'AREA_OUT_OF_SERVICEABLE_RANGE' || e.code === 'ADMIN_ZONE_MISMATCH' || e.code === 'STORE_OUT_OF_SERVICEABLE_RANGE')) {
-      if (typeof showDeliverableRangeAlert === 'function') {
-        showDeliverableRangeAlert('your oder is out of deliverable range, please update your address', custPincode);
-      } else if (typeof showServiceableAreaPopup === 'function') {
-        showServiceableAreaPopup(custPincode || defaultPincode || 'Not Set', activePincodes, 'customer', 'your oder is out of deliverable range, please update your address');
-      } else {
-        alert("your oder is out of deliverable range, please update your address");
-      }
-    } else if (typeof showRestaurantTooFarPopup === 'function' && (e.code === 'STORE_TOO_FAR' || (e.message && e.message.toLowerCase().includes('too far from you')))) {
-      if (typeof showDeliverableRangeAlert === 'function') {
-        showDeliverableRangeAlert('your oder is out of deliverable range, please update your address', custPincode, e.distanceKm);
-      } else {
-        showRestaurantTooFarPopup(cart[0]?.name || (cart[0]?.storeType === 'shop' ? 'Shop' : 'Restaurant'), e.distanceKm);
-      }
-    } else {
-      alert(`Payment & Order Error: ${e.message}`);
-    }
+    handleOrderPlacementError(e, custPincode);
   } finally {
     payBtn.disabled = false;
     loadingEl.style.display = 'none';
@@ -3978,6 +4093,43 @@ function renderCustomerOrdersList(orders) {
             : ''
         }`;
 
+    const isRiderAssigned = Boolean(o.riderId || o.riderName);
+    const isPickedUp = Boolean(o.isPickedUp || o.pickupStatus === 'picked_up');
+    const isWayToPickup = Boolean(isRiderAssigned && !isPickedUp && o.status !== 'delivered' && o.status !== 'cancelled');
+
+    let storeCustDist = typeof o.distanceToStoreKm === 'number' ? o.distanceToStoreKm : null;
+    if (storeCustDist === null && typeof calculateDistanceKm === 'function') {
+      const storeCoords = o.restaurantLocation || null;
+      const custCoords = o.deliveryAddress?.coordinates && Array.isArray(o.deliveryAddress.coordinates) && o.deliveryAddress.coordinates.length >= 2
+        ? { lat: Number(o.deliveryAddress.coordinates[1]), lng: Number(o.deliveryAddress.coordinates[0]) }
+        : null;
+      if (storeCoords && custCoords) {
+        storeCustDist = Number(calculateDistanceKm(storeCoords.lat, storeCoords.lng, custCoords.lat, custCoords.lng).toFixed(1));
+      }
+    }
+    if (storeCustDist === null) storeCustDist = 2.0;
+
+    const expectedTimingMinutes = typeof o.expectedDeliveryTimingMinutes === 'number'
+      ? o.expectedDeliveryTimingMinutes
+      : Math.max(1, Math.round(5 + 2 * storeCustDist));
+
+    let deliveryStatusBannerHtml = '';
+    if (isWayToPickup) {
+      deliveryStatusBannerHtml = `
+        <div style="margin:0.6rem 0; padding:0.45rem 0.8rem; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; display:inline-flex; align-items:center; gap:0.45rem; font-size:0.85rem; font-weight:700; color:#1d4ed8;">
+          <span>🚴</span>
+          <span>way to pickup order</span>
+        </div>
+      `;
+    } else if (isPickedUp && o.status !== 'delivered' && o.status !== 'cancelled') {
+      deliveryStatusBannerHtml = `
+        <div style="margin:0.6rem 0; padding:0.45rem 0.8rem; background:#f0fdf4; border:1px solid #86efac; border-radius:8px; display:inline-flex; align-items:center; gap:0.45rem; font-size:0.85rem; font-weight:700; color:#15803d;">
+          <span>⏱️</span>
+          <span>expected delivery timing(natural weither): <strong>${expectedTimingMinutes} mins</strong> (${storeCustDist.toFixed(1)} km)</span>
+        </div>
+      `;
+    }
+
     return `
       <div style="border:1px solid var(--line); border-radius:10px; padding:1.2rem; margin-bottom:1.2rem; background:#fff;">
         <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:0.8rem;">
@@ -3998,6 +4150,8 @@ function renderCustomerOrdersList(orders) {
             <button class="btn btn-outline btn-sm" onclick="viewOrderBill('${o._id}')">🧾 View Bill</button>
           </div>
         </div>
+
+        ${deliveryStatusBannerHtml}
 
         <!-- Tracker -->
         ${o.status !== 'cancelled' ? `

@@ -6,7 +6,7 @@ import Address from '../../model/Address.js';
 import MenuItem, { FoodItem } from '../../model/MenuItem.js';
 import Notification from '../../model/Notification.js';
 import Order, { IOrder } from '../../model/Order.js';
-import Counter, { getNextCounterValue } from '../../model/Counter.js';
+import { getNextCounterValue } from '../../model/Counter.js';
 import Restaurant from '../../model/Restaurant.js';
 import Shop from '../../model/Shop.js';
 import ShopOrder from '../../model/ShopOrder.js';
@@ -16,7 +16,6 @@ import Rider from '../../model/Rider.js';
 import Review from '../../model/Review.js';
 import Coupon, {
   COUPON_TYPE_LABELS,
-  SPONSOR_TYPES,
   SponsorType,
   SPONSOR_TYPE_LABELS,
   ensureDefaultCouponsSeeded,
@@ -932,7 +931,6 @@ const createCustomerRouter = () => {
 
       const {
         customerPincode,
-        customerDigipin,
         lat: custLat,
         lng: custLng,
       } = await resolveCustomerLocationContext(

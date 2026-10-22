@@ -1,12 +1,12 @@
 import { Router, Request, Response } from 'express';
 import mongoose from 'mongoose';
 import Address from '../../../model/Address.js';
-import MenuItem, { FoodItem } from '../../../model/MenuItem.js';
+import { FoodItem } from '../../../model/MenuItem.js';
 import Customer, { ICustomer } from '../../../model/Customer.js';
-import Restaurant, { IRestaurant } from '../../../model/Restaurant.js';
-import Shop, { IShop } from '../../../model/Shop.js';
+import Restaurant from '../../../model/Restaurant.js';
+import Shop from '../../../model/Shop.js';
 import Rider, { IRider } from '../../../model/Rider.js';
-import Employee, { IEmployee, USER_ROLES, UserRole } from '../../../model/Employee.js';
+import Employee, { USER_ROLES, UserRole } from '../../../model/Employee.js';
 import Notification from '../../../model/Notification.js';
 import Order from '../../../model/Order.js';
 import Wallet from '../../../model/Wallet.js';
@@ -2340,7 +2340,6 @@ const router = Router();
 
   const handleRejectEmployee = async (req: Request, res: Response) => {
     try {
-      const caller = (req as AuthenticatedRequest).user;
       const targetId = String(req.params.id || '').trim();
       const reason =
         typeof req.body?.reason === 'string' && req.body.reason.trim()
@@ -2942,7 +2941,6 @@ const router = Router();
     requireRole('superadmin'),
     async (req: Request, res: Response) => {
       try {
-        const caller = (req as AuthenticatedRequest).user;
         const targetId = String(req.params.id || '').trim();
         const { displayName, baseRole, description, permissions } = req.body;
 
@@ -3015,7 +3013,6 @@ const router = Router();
     requireRole('superadmin'),
     async (req: Request, res: Response) => {
       try {
-        const caller = (req as AuthenticatedRequest).user;
         const targetId = String(req.params.id || '').trim();
 
         if (!targetId) {

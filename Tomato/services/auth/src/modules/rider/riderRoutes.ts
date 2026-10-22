@@ -1,22 +1,16 @@
 import express, { Request, Response } from 'express';
 import mongoose from 'mongoose';
-import Address from '../../model/Address.js';
 import Notification from '../../model/Notification.js';
-import Order, { IOrder, OrderStatus } from '../../model/Order.js';
-import Restaurant, { IRestaurant } from '../../model/Restaurant.js';
-import Customer, { ICustomer } from '../../model/Customer.js';
-import Rider, { IRider } from '../../model/Rider.js';
+import Order from '../../model/Order.js';
+import Rider from '../../model/Rider.js';
 import {
   authenticate,
   AuthenticatedRequest,
   requireRole,
-  requirePermission,
 } from '../../middleware/authenticate.js';
 import notificationService from '../notification/notificationService.js';
 import {
-  formatBill,
   buildOrderLiveTrackingData,
-  createNotificationForRole,
 } from '../../utils/orderHelpers.js';
 import {
   validateBankAndPanDetails,

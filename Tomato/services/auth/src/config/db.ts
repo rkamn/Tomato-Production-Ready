@@ -10,7 +10,7 @@ import ShopOrder from "../model/ShopOrder.js";
 import Address from "../model/Address.js";
 import WalletCreditTrack from "../model/WalletCreditTrack.js";
 import Wallet from "../model/Wallet.js";
-import Role, { ensureDefaultRoles } from "../model/Role.js";
+import { ensureDefaultRoles } from "../model/Role.js";
 import { hashPassword } from "../modules/auth/authController.js";
 
 try {

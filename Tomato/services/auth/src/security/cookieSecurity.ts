@@ -192,7 +192,7 @@ export function clearAuthCookies(res: Response): void {
  * Parses, validates, and sanitizes incoming cookies on every request.
  * Discards malformed or oversized cookies to protect the application.
  */
-export function cookieValidationMiddleware(req: Request, res: Response, next: NextFunction): void {
+export function cookieValidationMiddleware(req: Request, _res: Response, next: NextFunction): void {
   const cookieHeader = req.headers.cookie;
 
   const { cookies, isValid, warning } = parseAndValidateCookies(cookieHeader);

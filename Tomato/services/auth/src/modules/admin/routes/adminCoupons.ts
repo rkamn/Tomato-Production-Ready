@@ -4,15 +4,12 @@ import Coupon, {
   COUPON_TYPES,
   COUPON_TYPE_LABELS,
   CouponType,
-  SPONSOR_TYPES,
   SPONSOR_TYPE_LABELS,
   SponsorType,
   ensureDefaultCouponsSeeded,
 } from '../../../model/Coupon.js';
 import { FoodItem } from '../../../model/MenuItem.js';
 import Customer from '../../../model/Customer.js';
-import Restaurant from '../../../model/Restaurant.js';
-import Shop from '../../../model/Shop.js';
 import { AuthenticatedRequest } from '../../../middleware/authenticate.js';
 
 const router = Router();

@@ -1,9 +1,9 @@
 import express, { Request, Response } from 'express';
 import mongoose from 'mongoose';
-import MenuItem, { FoodItem } from '../../model/MenuItem.js';
+import { FoodItem } from '../../model/MenuItem.js';
 import Notification from '../../model/Notification.js';
-import Shop, { IShop } from '../../model/Shop.js';
-import ShopOrder, { IShopOrder } from '../../model/ShopOrder.js';
+import Shop from '../../model/Shop.js';
+import ShopOrder from '../../model/ShopOrder.js';
 import Customer from '../../model/Customer.js';
 import Rider from '../../model/Rider.js';
 import {
@@ -22,12 +22,8 @@ import {
 } from '../../utils/bankHelpers.js';
 import Payment from '../../model/Payment.js';
 import Coupon, {
-  COUPON_TYPES,
   COUPON_TYPE_LABELS,
-  SPONSOR_TYPES,
   SPONSOR_TYPE_LABELS,
-  CouponType,
-  SponsorType,
 } from '../../model/Coupon.js';
 import partnerFinanceRoutes from '../partner/partnerFinanceRoutes.js';
 
@@ -210,7 +206,7 @@ const createShopRouter = () => {
   // 4b. Categories Management
   router.get(
     ['/items/categories', '/menu/categories'],
-    async (req: Request, res: Response) => {
+    async (_req: Request, res: Response) => {
       try {
         const distinctCategories: string[] =
           await FoodItem.distinct('category').exec();

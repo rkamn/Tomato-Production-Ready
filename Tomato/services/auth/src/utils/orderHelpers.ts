@@ -1,6 +1,5 @@
 import Order, { IOrder } from '../model/Order.js';
 import Restaurant from '../model/Restaurant.js';
-import Customer from '../model/Customer.js';
 import Rider from '../model/Rider.js';
 import Employee from '../model/Employee.js';
 import notificationService from '../modules/notification/notificationService.js';

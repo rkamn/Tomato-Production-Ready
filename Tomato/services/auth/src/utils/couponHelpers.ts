@@ -2,7 +2,6 @@ import mongoose from 'mongoose';
 import Coupon, {
   ICoupon,
   COUPON_TYPE_LABELS,
-  SPONSOR_TYPES,
   SponsorType,
   SPONSOR_TYPE_LABELS,
   ensureDefaultCouponsSeeded,

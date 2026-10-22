@@ -619,7 +619,7 @@ export const transferCreditPoints = async (
   }
 
   // Ensure sender's central Wallet document is initialized
-  const adminWallet = await getOrCreateUserWallet(adminId, currentSender.role || 'admin', currentSender.name);
+  await getOrCreateUserWallet(adminId, currentSender.role || 'admin', currentSender.name);
   const currentSnapshot = (currentSender.role === 'admin' || currentSender.role === 'subadmin')
     ? await getAdminWalletSnapshot(adminId, currentSender)
     : null;

@@ -10,7 +10,7 @@ import Payment from '../../../model/Payment.js';
 import Notification from '../../../model/Notification.js';
 import WalletCreditTrack from '../../../model/WalletCreditTrack.js';
 import Wallet from '../../../model/Wallet.js';
-import { AuthenticatedRequest, requireRole } from '../../../middleware/authenticate.js';
+import { AuthenticatedRequest } from '../../../middleware/authenticate.js';
 import { userResponse } from '../../auth/authController.js';
 import {
   validateBankAndPanDetails,

@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import mongoose from 'mongoose';
 import WalletCreditTrack, {
-  IWalletCreditTrack,
   TransferType,
 } from '../../../model/WalletCreditTrack.js';
 import Wallet from '../../../model/Wallet.js';

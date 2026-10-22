@@ -1,11 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import multer, { type FileFilterCallback } from 'multer';
-import type { Request } from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import fs from 'node:fs';
 import connectDB from './config/index.js';
 import {
   authRoute,

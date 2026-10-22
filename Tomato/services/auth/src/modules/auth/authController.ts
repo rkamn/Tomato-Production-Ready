@@ -3,14 +3,14 @@ import mongoose from 'mongoose';
 import { promisify } from 'node:util';
 import { createHash, randomBytes, randomInt, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import jwt from 'jsonwebtoken';
-import Employee, { IEmployee, USER_ROLES, UserRole } from '../../model/Employee.js';
+import Employee, { USER_ROLES, UserRole } from '../../model/Employee.js';
 import Restaurant, { IRestaurant } from '../../model/Restaurant.js';
 import Customer, { ICustomer } from '../../model/Customer.js';
 import Rider, { IRider } from '../../model/Rider.js';
 import Shop, { IShop } from '../../model/Shop.js';
 import Notification from '../../model/Notification.js';
 import Address from '../../model/Address.js';
-import Counter, { getNextCounterValue, generateIdFromCounter } from '../../model/Counter.js';
+import { generateIdFromCounter } from '../../model/Counter.js';
 import { AuthenticatedRequest } from '../../middleware/authenticate.js';
 import {
 	extractPincodeFromText,

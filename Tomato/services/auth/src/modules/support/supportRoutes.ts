@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import mongoose from 'mongoose';
-import Complaint, { IComplaint, cleanupExpiredClosedComplaints } from '../../model/Complaint.js';
+import Complaint, { cleanupExpiredClosedComplaints } from '../../model/Complaint.js';
 import Notification from '../../model/Notification.js';
 import { getSupportContactConfig } from '../../utils/bankHelpers.js';
 import {

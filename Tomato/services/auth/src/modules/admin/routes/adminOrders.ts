@@ -1,12 +1,11 @@
 import { Router, Request, Response } from 'express';
 import mongoose from 'mongoose';
-import Order, { IOrder, OrderStatus } from '../../../model/Order.js';
+import Order from '../../../model/Order.js';
 import ShopOrder from '../../../model/ShopOrder.js';
 import Customer from '../../../model/Customer.js';
 import Restaurant from '../../../model/Restaurant.js';
 import Shop from '../../../model/Shop.js';
-import Rider from '../../../model/Rider.js';
-import { AuthenticatedRequest, requireRole, requirePermission } from '../../../middleware/authenticate.js';
+import { AuthenticatedRequest, requirePermission } from '../../../middleware/authenticate.js';
 import {
   formatBill,
   resolveAdminGsnNumber,

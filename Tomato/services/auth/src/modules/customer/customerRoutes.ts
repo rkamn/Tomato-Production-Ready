@@ -33,10 +33,7 @@ import {
   validateCardExpiration,
 } from '../../services/paymentService.js';
 import { mailService } from '../../services/mailService.js';
-import {
-  notificationService,
-  arattaiNotificationService,
-} from '../notification/index.js';
+import { notificationService } from '../notification/index.js';
 import { calculateDistanceKm } from '../notification/notificationService.js';
 import {
   formatBill,
@@ -315,6 +312,9 @@ const createCustomerRouter = () => {
     store: any,
   ): { lat: number; lng: number } | null {
     if (!store) return null;
+    const pin = resolvePartnerPincode(store);
+    const pinCoords = resolveCoordinatesFromPincode(pin);
+
     const loc =
       store.restaurantLocation || store.shopLocation || store.location;
     if (
@@ -323,12 +323,30 @@ const createCustomerRouter = () => {
       typeof loc.lng === 'number' &&
       (loc.lat !== 0 || loc.lng !== 0)
     ) {
+      // If store is mapped to a known non-Bengaluru pincode (e.g. Pune 411057 or Motihari 845401)
+      // but loc coordinates were defaulted to Bengaluru (12.9716, 77.5946), resolve to pincode coordinates
+      if (
+        pinCoords &&
+        pin !== '560001' &&
+        Math.abs(loc.lat - 12.9716) < 0.001 &&
+        Math.abs(loc.lng - 77.5946) < 0.001
+      ) {
+        return pinCoords;
+      }
       return { lat: loc.lat, lng: loc.lng };
     }
     if (loc && Array.isArray(loc.coordinates) && loc.coordinates.length >= 2) {
       const cLng = Number(loc.coordinates[0]);
       const cLat = Number(loc.coordinates[1]);
       if (!isNaN(cLat) && !isNaN(cLng) && (cLat !== 0 || cLng !== 0)) {
+        if (
+          pinCoords &&
+          pin !== '560001' &&
+          Math.abs(cLat - 12.9716) < 0.001 &&
+          Math.abs(cLng - 77.5946) < 0.001
+        ) {
+          return pinCoords;
+        }
         return { lat: cLat, lng: cLng };
       }
     }
@@ -336,8 +354,7 @@ const createCustomerRouter = () => {
       const dgpCoords = resolveCoordinatesFromDigipin(store.digipin);
       if (dgpCoords) return dgpCoords;
     }
-    const pin = resolvePartnerPincode(store);
-    return resolveCoordinatesFromPincode(pin);
+    return pinCoords;
   }
 
   interface CustomerLocationContext {
@@ -458,6 +475,21 @@ const createCustomerRouter = () => {
           lat = pinCoords.lat;
           lng = pinCoords.lng;
         }
+      }
+    }
+
+    // If customer has a known non-Bengaluru pincode (e.g. Pune 411057 or Motihari 845401)
+    // but lat/lng were defaulted or legacy Bengaluru, override with the pincode coordinates
+    if (customerPincode && customerPincode !== '560001') {
+      const pinCoords = resolveCoordinatesFromPincode(customerPincode);
+      if (
+        pinCoords &&
+        (lat === null ||
+          lng === null ||
+          (Math.abs(lat - 12.9716) < 0.001 && Math.abs(lng - 77.5946) < 0.001))
+      ) {
+        lat = pinCoords.lat;
+        lng = pinCoords.lng;
       }
     }
 
@@ -1007,6 +1039,7 @@ const createCustomerRouter = () => {
           .select('_id name pincode shopAddress digipin shopLocation')
           .lean();
         const allowedShops = shops.filter((s) => {
+          const storePin = resolvePartnerPincode(s);
           if (custLat !== null && custLng !== null) {
             const coords = getStoreCoordinates(s);
             if (!coords) return false;
@@ -1016,16 +1049,13 @@ const createCustomerRouter = () => {
             )
               return false;
           }
-          if (customerPincode) {
-            const storePin = resolvePartnerPincode(s);
-            if (storePin) {
-              const match = matchAdminForPincodes(
-                customerPincode,
-                storePin,
-                adminList,
-              );
-              return match.matched;
-            }
+          if (customerPincode && storePin) {
+            const match = matchAdminForPincodes(
+              customerPincode,
+              storePin,
+              adminList,
+            );
+            return match.matched;
           }
           return true;
         });
@@ -1037,6 +1067,7 @@ const createCustomerRouter = () => {
           )
           .lean();
         const allowedRests = restaurants.filter((r) => {
+          const storePin = resolvePartnerPincode(r);
           if (custLat !== null && custLng !== null) {
             const coords = getStoreCoordinates(r);
             if (!coords) return false;
@@ -1046,16 +1077,13 @@ const createCustomerRouter = () => {
             )
               return false;
           }
-          if (customerPincode) {
-            const storePin = resolvePartnerPincode(r);
-            if (storePin) {
-              const match = matchAdminForPincodes(
-                customerPincode,
-                storePin,
-                adminList,
-              );
-              return match.matched;
-            }
+          if (customerPincode && storePin) {
+            const match = matchAdminForPincodes(
+              customerPincode,
+              storePin,
+              adminList,
+            );
+            return match.matched;
           }
           return true;
         });
@@ -2793,46 +2821,17 @@ const createCustomerRouter = () => {
         ? shopUser?.shopLocation || { lat: 12.9784, lng: 77.6408 }
         : restaurantUser?.restaurantLocation || { lat: 12.9716, lng: 77.5946 };
 
-      // Find eligible riders whose operating pincode matches the Admin Serviceable Delivery Pincodes for this delivery location
+      // Find eligible riders whose operating pincode matches the serviceable delivery pincode
       const allRiders = await Rider.find({
         isBlocked: { $ne: true },
         isApproved: { $ne: false },
       }).lean();
 
+      // Only match riders strictly stationed in this order's serviceable delivery pincode.
+      // Never fall back to riders outside this serviceable area.
       const matchedLocationRiders = allRiders.filter(
         (r) => resolveRiderPincode(r) === deliveryPincode,
       );
-
-      let assignedRider: any = null;
-      const riderPoolToUse =
-        matchedLocationRiders.length > 0 ? matchedLocationRiders : allRiders;
-      if (riderPoolToUse.length > 0) {
-        const onlineMatched = riderPoolToUse.filter(
-          (r) => r.isOnline !== false,
-        );
-        const pool = onlineMatched.length > 0 ? onlineMatched : riderPoolToUse;
-
-        const restLat = storeLocation?.lat ?? 12.9716;
-        const restLng = storeLocation?.lng ?? 77.5946;
-
-        pool.sort((a, b) => {
-          const distA = calculateDistanceKm(
-            restLat,
-            restLng,
-            a.currentLocation?.lat ?? restLat,
-            a.currentLocation?.lng ?? restLng,
-          );
-          const distB = calculateDistanceKm(
-            restLat,
-            restLng,
-            b.currentLocation?.lat ?? restLat,
-            b.currentLocation?.lng ?? restLng,
-          );
-          return distA - distB;
-        });
-
-        assignedRider = pool[0];
-      }
 
       // Evaluate 1 coupon during billing
       const rawCouponCodes: string[] = Array.isArray(req.body?.couponCodes)
@@ -2891,20 +2890,47 @@ const createCustomerRouter = () => {
         : 'card';
       const paymentTransactionId =
         req.body?.paymentTransactionId ||
+        req.body?.utrNumber ||
+        req.body?.utrReference ||
         (paymentMethod === 'cod'
           ? 'COD-PAY-ON-DELIVERY'
           : `TXN_${Date.now()}_${Math.random().toString(36).substring(2, 7).toUpperCase()}`);
+      const utrNumber =
+        req.body?.utrNumber ||
+        req.body?.utrReference ||
+        (paymentMethod === 'razorpay' ? paymentTransactionId : '');
+      const utrReference = req.body?.utrReference || req.body?.utrNumber || '';
       const paymentStatus = paymentMethod === 'cod' ? 'pending' : 'paid';
 
       const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      const orderNumberSuffix = await getNextCounterValue(
+      const prefix = isShopOrder ? 'SHOP' : 'TOM';
+      let orderNumberSuffix = await getNextCounterValue(
         `orderId_${dateStr}`,
         1000,
       );
       await getNextCounterValue('orderId', 1000);
-      const prefix = isShopOrder ? 'SHOP' : 'TOM';
-      const orderNumber = `${prefix}-${dateStr}-${orderNumberSuffix}`;
-      const billNumber = `BILL-${prefix}-${dateStr}-${orderNumberSuffix}`;
+      let orderNumber = `${prefix}-${dateStr}-${orderNumberSuffix}`;
+      let billNumber = `BILL-${prefix}-${dateStr}-${orderNumberSuffix}`;
+
+      // Ensure candidate order number is strictly unique in both Order and ShopOrder collections
+      let collisionChecks = 0;
+      while (collisionChecks < 50) {
+        const [existingInOrders, existingInShopOrders] = await Promise.all([
+          Order.exists({ orderNumber }),
+          ShopOrder.exists({ orderNumber }),
+        ]);
+        if (!existingInOrders && !existingInShopOrders) {
+          break;
+        }
+        orderNumberSuffix = await getNextCounterValue(
+          `orderId_${dateStr}`,
+          1000,
+        );
+        await getNextCounterValue('orderId', 1000);
+        orderNumber = `${prefix}-${dateStr}-${orderNumberSuffix}`;
+        billNumber = `BILL-${prefix}-${dateStr}-${orderNumberSuffix}`;
+        collisionChecks++;
+      }
 
       const orderData: Record<string, unknown> = {
         orderNumber,
@@ -2932,24 +2958,22 @@ const createCustomerRouter = () => {
         totalAmount: finalTotalAmount,
         deliveryAddress,
         serviceablePincode: deliveryPincode,
-        ...(assignedRider
-          ? {
-              riderId: assignedRider._id,
-              riderCode: assignedRider.riderId || '',
-              riderName: assignedRider.name,
-              riderPhone: assignedRider.phone || '',
-            }
-          : {}),
+        riderId: null,
+        riderCode: '',
+        riderName: '',
+        riderPhone: '',
         paymentStatus,
         paymentMethod,
         paymentTransactionId,
+        utrNumber,
+        utrReference,
         status: 'placed',
         statusHistory: [
           {
             status: 'placed',
             at: new Date(),
             by: String(user.userId),
-            note: `Order placed to ${isShopOrder ? 'shop' : 'restaurant'} and paid via ${paymentMethod.toUpperCase()}${couponCodes.length ? ` (Coupons: ${couponCodes.join(', ')}, Saved ₹${discountAmount})` : ''}${assignedRider ? ` (Assigned Rider: ${assignedRider.name} [${deliveryPincode}])` : ''}`,
+            note: `Order placed to ${isShopOrder ? 'shop' : 'restaurant'} and paid via ${paymentMethod.toUpperCase()}${couponCodes.length ? ` (Coupons: ${couponCodes.join(', ')}, Saved ₹${discountAmount})` : ''}`,
           },
         ],
       };
@@ -2963,13 +2987,19 @@ const createCustomerRouter = () => {
 
       const order = (await Order.create(orderData)) as unknown as IOrder;
 
-      // Notify the matched assigned rider for this location
-      if (assignedRider) {
+      // Notify online riders working in this specific serviceable area about the new placed pickup
+      const onlineLocationRiders = matchedLocationRiders.filter(
+        (r) => r.isOnline !== false,
+      );
+      const targetRidersToNotify =
+        onlineLocationRiders.length > 0 ? onlineLocationRiders : matchedLocationRiders;
+
+      for (const r of targetRidersToNotify) {
         await notificationService.createNotification({
-          userId: String(assignedRider._id),
+          userId: String(r._id),
           role: 'deliveryPartner',
-          title: `🚴 New Delivery Order Assigned (#${orderNumber})!`,
-          message: `Order #${orderNumber} from ${storeName} for ₹${finalTotalAmount} has been assigned to you for delivery at ${deliveryPincode}.`,
+          title: `🚴 New Delivery Order Placed (#${orderNumber})!`,
+          message: `Order #${orderNumber} from ${storeName} for ₹${finalTotalAmount} is available for pickup in your area (${deliveryPincode}).`,
           type: 'order',
           entityId: String(order._id),
           metadata: {
@@ -2997,75 +3027,66 @@ const createCustomerRouter = () => {
 
       // If this is a shop order, also create in ShopOrder collection & notify shop
       if (isShopOrder && shopUser) {
-        await ShopOrder.create({
-          orderNumber,
-          billNumber,
-          customerId: new mongoose.Types.ObjectId(user.userId),
-          customerName: customer?.name || 'Customer',
-          customerPhone: customer?.phone || '',
-          shopId: shopUser._id,
-          shopCode: storeCode,
-          digipin,
-          shopName: storeName,
-          shopAddress: storeAddress,
-          shopLocation: storeLocation,
-          items: sanitizedItems,
-          subtotal,
-          tax,
-          deliveryFee,
-          discountAmount,
-          couponCodes,
-          appliedCoupons,
-          totalAmount: finalTotalAmount,
-          deliveryAddress,
-          paymentStatus,
-          paymentMethod,
-          paymentTransactionId,
-          status: 'placed',
-          statusHistory: [
+        try {
+          await ShopOrder.findOneAndUpdate(
+            { orderNumber },
             {
-              status: 'placed',
-              at: new Date(),
-              by: String(user.userId),
-              note: `Order placed to shop and paid via ${paymentMethod.toUpperCase()}${couponCodes.length ? ` (Coupons: ${couponCodes.join(', ')}, Saved ₹${discountAmount})` : ''}`,
+              $set: {
+                orderNumber,
+                billNumber,
+                customerId: new mongoose.Types.ObjectId(user.userId),
+                customerName: customer?.name || 'Customer',
+                customerPhone: customer?.phone || '',
+                shopId: shopUser._id,
+                shopCode: storeCode,
+                digipin,
+                shopName: storeName,
+                shopAddress: storeAddress,
+                shopLocation: storeLocation,
+                items: sanitizedItems,
+                subtotal,
+                tax,
+                deliveryFee,
+                discountAmount,
+                couponCodes,
+                appliedCoupons,
+                totalAmount: finalTotalAmount,
+                deliveryAddress,
+                paymentStatus,
+                paymentMethod,
+                paymentTransactionId,
+                status: 'placed',
+                statusHistory: [
+                  {
+                    status: 'placed',
+                    at: new Date(),
+                    by: String(user.userId),
+                    note: `Order placed to shop and paid via ${paymentMethod.toUpperCase()}${couponCodes.length ? ` (Coupons: ${couponCodes.join(', ')}, Saved ₹${discountAmount})` : ''}`,
+                  },
+                ],
+                ...(paymentStatus === 'paid' ? { paidAt: new Date() } : {}),
+              },
             },
-          ],
-          ...(paymentStatus === 'paid' ? { paidAt: new Date() } : {}),
-        });
+            { upsert: true, returnDocument: 'after' },
+          );
+        } catch (shopOrderErr) {
+          console.error('[ShopOrder Sync Error]:', shopOrderErr);
+        }
 
-        await Notification.create({
-          userId: shopUser._id,
-          role: 'shop',
-          title: 'New Customer Order Received',
-          message: `New Order #${orderNumber} received for ₹${totalAmount} from ${customer?.name || 'Customer'}.`,
-          type: 'order',
-          entityId: String(order._id),
-        });
+        try {
+          await Notification.create({
+            userId: shopUser._id,
+            role: 'shop',
+            title: 'New Customer Order Received',
+            message: `New Order #${orderNumber} received for ₹${totalAmount} from ${customer?.name || 'Customer'}.`,
+            type: 'order',
+            entityId: String(order._id),
+          });
+        } catch (notifErr) {
+          console.warn('[Shop Notification Error]:', notifErr);
+        }
       } else {
         await notificationService.notifyRestaurantOnOrderPlaced(order);
-      }
-
-      // Dispatch real-time mobile notification to customer via Arattai
-      const customerPhone =
-        (req.body?.deliveryAddress &&
-        typeof req.body.deliveryAddress.phone === 'string'
-          ? req.body.deliveryAddress.phone
-          : '') ||
-        (typeof req.body?.phone === 'string' ? req.body.phone : '') ||
-        customer?.phone;
-
-      if (customerPhone) {
-        arattaiNotificationService
-          .notifyOrderUpdate({
-            phoneNumber: customerPhone,
-            customerName: customer?.name || 'Customer',
-            orderNumber,
-            status: 'placed',
-            amount: totalAmount,
-          })
-          .catch((err) =>
-            console.error('[Arattai Order Notification Error]:', err),
-          );
       }
 
       // Dispatch order confirmation email dynamically to the customer mail ID
@@ -3128,8 +3149,47 @@ const createCustomerRouter = () => {
 
       const orders = await Order.find({
         customerId: new mongoose.Types.ObjectId(user.userId),
-      }).sort({ createdAt: -1 });
-      return res.json({ orders });
+      }).sort({ createdAt: -1 }).lean();
+
+      const augmentedOrders = orders.map((o: any) => {
+        const storeLoc = o.restaurantLocation || { lat: 12.9716, lng: 77.5946 };
+        const custCoords =
+          o.deliveryAddress?.coordinates &&
+          Array.isArray(o.deliveryAddress.coordinates) &&
+          o.deliveryAddress.coordinates.length >= 2
+            ? {
+                lng: Number(o.deliveryAddress.coordinates[0]),
+                lat: Number(o.deliveryAddress.coordinates[1]),
+              }
+            : { lat: 12.9716, lng: 77.5946 };
+
+        let distanceKm = 0;
+        if (storeLoc && custCoords) {
+          distanceKm = Number(
+            calculateDistanceKm(
+              storeLoc.lat,
+              storeLoc.lng,
+              custCoords.lat,
+              custCoords.lng,
+            ).toFixed(1),
+          );
+        }
+
+        const expectedDeliveryTimingMinutes = Math.max(1, Math.round(5 + 2 * distanceKm));
+        const isPickedUp = Boolean(o.isPickedUp);
+        const pickupStatus =
+          o.pickupStatus || (isPickedUp ? 'picked_up' : (o.riderId ? 'way_to_pickup' : ''));
+
+        return {
+          ...o,
+          distanceToStoreKm: distanceKm,
+          expectedDeliveryTimingMinutes,
+          isPickedUp,
+          pickupStatus,
+        };
+      });
+
+      return res.json({ orders: augmentedOrders });
     } catch (error) {
       console.error('Customer orders fetch failed:', error);
       return res.status(500).json({ message: 'Unable to fetch orders' });

@@ -31,6 +31,8 @@ import {
 	logAuthEvent,
 	logSecurityEvent,
 	getClientIp,
+	setAuthCookies,
+	clearAuthCookies,
 } from '../../security/index.js';
 
 const getPublicBaseUrl = () => process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 5050}`;
@@ -241,6 +243,7 @@ export const userResponse = (user: {
 		salary: Math.max(0, Number((user as any).salary || 0)),
 		digipin: user.digipin || '',
 		pincode: resolvePartnerPincode(user),
+		city: (user as any).city || (user as any).assignedLocation?.city || '',
 		restaurantAddress: user.restaurantAddress || user.shopAddress || '',
 		shopAddress: user.shopAddress || user.restaurantAddress || '',
 		restaurantLocation: user.restaurantLocation || user.shopLocation || { lat: 12.9716, lng: 77.5946 },
@@ -741,6 +744,10 @@ export const loginUser = async (req: Request, res: Response) => {
 		}
 
 		const { token, session } = await createSession(user, req);
+
+		// Set validated HttpOnly cookies for browser performance & XSS immunity
+		setAuthCookies(res, { token, sessionId: session.sessionId });
+
 		return res.status(200).json({
 			token,
 			user: userResponse(user),
@@ -1251,8 +1258,11 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 	const nextDigipin = typeof req.body?.digipin === 'string'
 		? req.body.digipin.trim().toUpperCase()
 		: undefined;
+	const nextCity = typeof req.body?.city === 'string'
+		? req.body.city.trim()
+		: undefined;
 
-	if (!nextName && !nextEmail && !nextPhone && !nextImage && !nextAddress && nextPincode === undefined && !nextCuisine && !nextVehicle && nextDob === undefined && nextGsn === undefined && nextDigipin === undefined) {
+	if (!nextName && !nextEmail && !nextPhone && !nextImage && !nextAddress && nextPincode === undefined && !nextCuisine && !nextVehicle && nextDob === undefined && nextGsn === undefined && nextDigipin === undefined && nextCity === undefined) {
 		return res.status(400).json({
 			message: 'No profile changes provided',
 		});
@@ -1271,6 +1281,7 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 		if (nextDob !== undefined) updates.dob = nextDob;
 		if (nextGsn !== undefined) updates.gsnNumber = nextGsn;
 		if (nextDigipin !== undefined) updates.digipin = nextDigipin;
+		if (nextCity !== undefined) updates.city = nextCity;
 		if (nextAddress !== undefined) {
 			updates.restaurantAddress = nextAddress;
 			updates.shopAddress = nextAddress;
@@ -1344,13 +1355,14 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 				{ returnDocument: 'after', runValidators: true },
 			).lean();
 		} else if (userRole === 'deliveryPartner' || (userRole as string) === 'rider') {
-			if (updates.pincode || updates.address) {
+			if (updates.pincode || updates.address || updates.city) {
 				const pin = String(updates.pincode || '');
 				const addr = String(updates.address || '');
+				const city = String(updates.city || 'Bengaluru');
 				updates.assignedLocation = {
 					postalCode: pin,
 					locality: addr,
-					city: 'Bengaluru',
+					city: city,
 				};
 			}
 			user = await Rider.findByIdAndUpdate(
@@ -1396,6 +1408,7 @@ export const logoutUser = async (req: AuthenticatedRequest, res: Response) => {
 		if (sessionId) {
 			await revokeSession(sessionId, 'user_logout');
 		}
+		clearAuthCookies(res);
 		return res.status(200).json({ message: 'Signed out successfully' });
 	} catch (error) {
 		console.error('Logout failed:', error);
@@ -1410,6 +1423,7 @@ export const logoutAllSessions = async (req: AuthenticatedRequest, res: Response
 			return res.status(401).json({ message: 'Authentication required' });
 		}
 		const count = await revokeAllUserSessions(userId, 'user_logout_all');
+		clearAuthCookies(res);
 		return res.status(200).json({ message: `Successfully signed out of ${count} active session(s)` });
 	} catch (error) {
 		console.error('Logout all sessions failed:', error);

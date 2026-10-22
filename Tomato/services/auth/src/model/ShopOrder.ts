@@ -44,6 +44,11 @@ export interface IShopOrder extends Document {
   status: OrderStatus;
   statusHistory: IOrderStatusHistory[];
   rejectedByRiders?: mongoose.Types.ObjectId[];
+  isPickedUp?: boolean;
+  pickupStatus?: 'way_to_pickup' | 'picked_up' | string;
+  pickedUpAt?: Date;
+  riderAssignedAt?: Date;
+  expectedDeliveryTimingMinutes?: number;
   isArchived?: boolean;
   archivedAt?: Date | null;
   archivedBy?: string;
@@ -252,6 +257,24 @@ const shopOrderSchema: Schema<IShopOrder> = new Schema(
       type: [Schema.Types.ObjectId],
       ref: 'Rider',
       default: [],
+    },
+    isPickedUp: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    pickupStatus: {
+      type: String,
+      default: '',
+    },
+    pickedUpAt: {
+      type: Date,
+    },
+    riderAssignedAt: {
+      type: Date,
+    },
+    expectedDeliveryTimingMinutes: {
+      type: Number,
     },
     isArchived: {
       type: Boolean,

@@ -57,6 +57,8 @@ const router = Router();
             { customerPhone: { $regex: escaped, $options: 'i' } },
             { restaurantName: { $regex: escaped, $options: 'i' } },
             { riderName: { $regex: escaped, $options: 'i' } },
+            { paymentTransactionId: { $regex: escaped, $options: 'i' } },
+            { utrNumber: { $regex: escaped, $options: 'i' } },
           ];
         }
 

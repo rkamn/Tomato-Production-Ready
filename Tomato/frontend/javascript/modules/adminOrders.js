@@ -180,6 +180,14 @@ async function fetchAdminOrders(page, date, force = false) {
               const orderDateStr = o.createdAt ? new Date(o.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
               const isArchived = Boolean(o.isArchived);
 
+              const isPaid = String(o.paymentStatus || '').toLowerCase() === 'paid';
+              const paymentStatusLabel = isPaid
+                ? 'Paid'
+                : (o.paymentStatus ? String(o.paymentStatus).charAt(0).toUpperCase() + String(o.paymentStatus).slice(1).toLowerCase() : 'Pending');
+              const paymentMethodLabel = String(o.paymentMethod || 'cod').toUpperCase();
+              const rawUtr = o.utrNumber || o.utrReference || o.utr || (o.paymentTransactionId && o.paymentTransactionId !== 'COD-PAY-ON-DELIVERY' ? o.paymentTransactionId : '') || o.transactionId || o.razorpayPaymentId || o.razorpay_payment_id || '';
+              const utrNum = rawUtr && String(rawUtr).trim();
+
               return `
                 <tr id="admin-order-row-${o._id}" style="${isArchived ? 'background:#faf9f6; opacity:0.88;' : ''}">
                   <td style="text-align:center;">
@@ -197,7 +205,17 @@ async function fetchAdminOrders(page, date, force = false) {
                   <td>${escapeHtml(formatCleanName(o.restaurantName || 'Restaurant'))}</td>
                   <td>${escapeHtml(formatCleanName(o.riderName || 'Unassigned'))}</td>
                   <td><strong>₹${Number(o.totalAmount || 0).toFixed(2)}</strong></td>
-                  <td><span class="badge ${o.paymentStatus === 'paid' ? 'badge-delivered' : 'badge-placed'}">${(o.paymentMethod || 'cod').toUpperCase()} (${o.paymentStatus || 'pending'})</span></td>
+                  <td>
+                    <span class="badge ${isPaid ? 'badge-delivered' : 'badge-placed'}">${paymentMethodLabel} (${paymentStatusLabel})</span>
+                    ${utrNum ? `
+                      <br><small style="color:var(--muted); font-size:0.75rem; font-family:monospace; display:inline-flex; align-items:center; gap:0.25rem; margin-top:0.25rem;" title="Bank UTR / Transaction Reference: ${escapeHtml(utrNum)}">
+                        <span>UTR:</span>
+                        <strong style="color:var(--charcoal); word-break:break-all;">${escapeHtml(utrNum)}</strong>
+                      </small>
+                    ` : (paymentMethodLabel === 'RAZORPAY' && isPaid ? `
+                      <br><small style="color:var(--muted); font-size:0.75rem; font-family:monospace; display:inline-block; margin-top:0.25rem;">UTR: <span style="color:#94a3b8;">N/A</span></small>
+                    ` : '')}
+                  </td>
                   <td><span class="badge badge-${o.status || 'placed'}">${String(o.status || 'placed').replace(/_/g, ' ')}</span></td>
                   <td style="text-align:right; white-space:nowrap;">
                     ${!['delivered', 'cancelled'].includes(String(o.status || '').toLowerCase()) ? `

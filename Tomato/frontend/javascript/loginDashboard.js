@@ -2,10 +2,40 @@ const API_ROOT = window.location.hostname
   ? `${window.location.protocol}//${window.location.hostname}:5050`
   : 'http://localhost:5050';
 
+function isTokenExpired(tokenStr) {
+  if (window.TomatoSecurity && typeof window.TomatoSecurity.isTokenExpired === 'function') {
+    return window.TomatoSecurity.isTokenExpired(tokenStr);
+  }
+  if (!tokenStr || typeof tokenStr !== 'string') return true;
+  try {
+    const parts = tokenStr.split('.');
+    if (parts.length !== 3) return true;
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    const parsed = JSON.parse(jsonPayload);
+    if (typeof parsed.exp !== 'number') return false;
+    return (parsed.exp * 1000) <= (Date.now() + 5000);
+  } catch (_) {
+    return true;
+  }
+}
+
 const token = localStorage.getItem('tomatoToken');
 const storedUser = JSON.parse(localStorage.getItem('tomatoUser') || 'null');
-if (!token || !storedUser || !storedUser.role) {
-  window.location.href = '../index.html';
+if (!token || !storedUser || !storedUser.role || isTokenExpired(token)) {
+  if (window.TomatoSecurity && typeof window.TomatoSecurity.clearClientSession === 'function') {
+    window.TomatoSecurity.clearClientSession();
+  } else {
+    localStorage.removeItem('tomatoToken');
+    localStorage.removeItem('tomatoUser');
+  }
+  window.location.replace('../index.html?auth=expired');
+  throw new Error('Authentication expired or missing. Redirecting to login.');
 }
 
 function formatCleanName(str) {
@@ -321,7 +351,11 @@ async function apiFetch(endpoint, options = {}) {
     Authorization: `Bearer ${token}`,
     ...(options.headers || {}),
   };
-  const res = await fetch(`${API_ROOT}${endpoint}`, { ...options, headers });
+  const res = await fetch(`${API_ROOT}${endpoint}`, {
+    ...options,
+    headers,
+    credentials: 'include',
+  });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) {
     if (window.TomatoSecurity && typeof window.TomatoSecurity.clearClientSession === 'function') {
@@ -334,7 +368,11 @@ async function apiFetch(endpoint, options = {}) {
     throw new Error('Your session has expired. Please sign in again.');
   }
   if (!res.ok) {
-    throw new Error(data.message || 'API request failed');
+    const err = new Error(data.message || 'API request failed');
+    if (typeof data === 'object' && data !== null) {
+      Object.assign(err, data);
+    }
+    throw err;
   }
   return data;
 }
@@ -792,10 +830,11 @@ function updateLiveStatus(status, text) {
 }
 
 function initNotificationStream() {
-  if (!token) return;
+  if (!token || isTokenExpired(token)) return;
 
   if (notificationEventSource) {
     try { notificationEventSource.close(); } catch (_) {}
+    notificationEventSource = null;
   }
 
   updateLiveStatus('connecting', 'Connecting...');
@@ -812,6 +851,14 @@ function initNotificationStream() {
   };
 
   notificationEventSource.onerror = () => {
+    if (isTokenExpired(token)) {
+      if (notificationEventSource) {
+        try { notificationEventSource.close(); } catch (_) {}
+        notificationEventSource = null;
+      }
+      updateLiveStatus('disconnected', 'Session expired');
+      return;
+    }
     updateLiveStatus('connecting', 'Reconnecting live link...');
   };
 
@@ -930,6 +977,22 @@ function initNotificationStream() {
     if (role !== 'deliveryPartner') return;
     try {
       const data = JSON.parse(event.data);
+
+      // Verify serviceable area matching before showing alert or refreshing pickups for this rider
+      const myPincode = String(
+        user?.pincode || user?.postalCode || (user?.assignedLocation && user.assignedLocation.postalCode) || ''
+      ).trim();
+      const myCity = String(
+        user?.city || (user?.assignedLocation && user.assignedLocation.city) || ''
+      ).trim().toLowerCase();
+
+      if (data.serviceablePincode && myPincode && data.serviceablePincode !== myPincode) {
+        return; // Placed order is out of this rider's serviceable pincode
+      }
+      if (data.city && myCity && !data.city.toLowerCase().includes(myCity) && !myCity.includes(data.city.toLowerCase())) {
+        return; // Placed order is out of this rider's serviceable city
+      }
+
       showToastNotification({
         title: `🛵 Pickup Ready: #${data.orderNumber}`,
         message: `${data.restaurantName || 'Restaurant'} has accepted order (₹${data.totalAmount}). Tap to claim!`,
@@ -1196,6 +1259,78 @@ async function fetchUserLocation(cachedAddress = null) {
   const badge = document.getElementById('user-location-badge');
   if (!badge) return;
 
+  // 1. Restaurant and Shop partner profile (Always mirror Profile Settings)
+  if (role === 'restaurant' || role === 'shop') {
+    const settingsCityInput = document.getElementById('set-restaurant-city');
+    const settingsPinInput = document.getElementById('set-restaurant-pincode');
+
+    let city = (user && user.city ? user.city.trim() : '') ||
+               (user && user.assignedLocation && user.assignedLocation.city ? user.assignedLocation.city.trim() : '') ||
+               (settingsCityInput && settingsCityInput.value ? settingsCityInput.value.trim() : '');
+
+    let pincode = (user && user.pincode ? user.pincode.trim() : '') ||
+                  (typeof resolveFrontendPartnerPincode === 'function' ? resolveFrontendPartnerPincode(user) : '') ||
+                  (settingsPinInput && settingsPinInput.value ? settingsPinInput.value.trim() : '');
+
+    const addrStr = (user && (user.shopAddress || user.restaurantAddress)) || '';
+    if ((!city || !pincode) && addrStr) {
+      const parsed = parseAddressStringToCityAndPincode(addrStr);
+      if (!city) city = parsed.city;
+      if (!pincode) pincode = parsed.postalCode;
+    }
+
+    if (!city || city === 'NA') city = 'Bengaluru';
+    if (!pincode || pincode === '000') pincode = '560001';
+
+    badge.textContent = `${city}, ${pincode}`;
+    badge.title = `${role === 'shop' ? 'Shop' : 'Restaurant'}: ${city}, ${pincode} • Click to open ${role === 'shop' ? 'Shop Profile' : 'Restaurant Profile'}`;
+    badge.style.cursor = 'pointer';
+    if (!badge.dataset.boundClick) {
+      badge.dataset.boundClick = 'true';
+      badge.addEventListener('click', () => {
+        if (typeof switchView === 'function') switchView('settings');
+      });
+    }
+    return;
+  }
+
+  // 2. Rider / Delivery Partner profile (Always mirror Profile Settings)
+  if (role === 'deliveryPartner' || role === 'rider') {
+    const settingsCityInput = document.getElementById('set-rider-city');
+    const settingsPinInput = document.getElementById('set-rider-pincode');
+
+    let city = (user && user.city ? user.city.trim() : '') ||
+               (user && user.assignedLocation && user.assignedLocation.city ? user.assignedLocation.city.trim() : '') ||
+               (settingsCityInput && settingsCityInput.value ? settingsCityInput.value.trim() : '');
+
+    let pincode = (user && user.pincode ? user.pincode.trim() : '') ||
+                  (user && user.postalCode ? user.postalCode.trim() : '') ||
+                  (user && user.assignedLocation && user.assignedLocation.postalCode ? user.assignedLocation.postalCode.trim() : '') ||
+                  (settingsPinInput && settingsPinInput.value ? settingsPinInput.value.trim() : '');
+
+    const addrStr = (user && user.address) || '';
+    if ((!city || !pincode) && addrStr) {
+      const parsed = parseAddressStringToCityAndPincode(addrStr);
+      if (!city) city = parsed.city;
+      if (!pincode) pincode = parsed.postalCode;
+    }
+
+    if (!city || city === 'NA') city = 'Bengaluru';
+    if (!pincode || pincode === '000') pincode = '560001';
+
+    badge.textContent = `${city}, ${pincode}`;
+    badge.title = `Rider: ${city}, ${pincode} • Click to open Rider Profile`;
+    badge.style.cursor = 'pointer';
+    if (!badge.dataset.boundClick) {
+      badge.dataset.boundClick = 'true';
+      badge.addEventListener('click', () => {
+        if (typeof switchView === 'function') switchView('settings');
+      });
+    }
+    return;
+  }
+
+  // 3. Customer and Admin location fallback
   let addr = cachedAddress;
   if (!addr) {
     try {
@@ -1206,59 +1341,22 @@ async function fetchUserLocation(cachedAddress = null) {
     }
   }
 
-  // Fallback to user session data if addr is still missing
   if (!addr && user) {
-    if ((role === 'restaurant' || role === 'shop') && (user.shopAddress || user.restaurantAddress)) {
-      const addrStr = user.shopAddress || user.restaurantAddress;
-      const parsed = parseAddressStringToCityAndPincode(addrStr);
-      addr = {
-        city: parsed.city,
-        postalCode: parsed.postalCode,
-        locality: addrStr,
-        state: 'KA',
-      };
-    } else {
-      addr = {
-        city: 'Bengaluru',
-        postalCode: '560001',
-        state: 'Karnataka',
-        locality: 'Central',
-      };
-    }
+    const adminLoc = user.assignedLocation || {};
+    addr = {
+      city: adminLoc.city || user.city || 'Bengaluru',
+      postalCode: adminLoc.postalCode || user.pincode || '560001',
+      locality: adminLoc.locality || 'Central',
+      state: adminLoc.state || 'Karnataka',
+    };
   }
 
   let city = (addr?.city || '').trim();
   let pincode = (addr?.postalCode || addr?.pincode || '').trim();
   const locality = (addr?.locality || addr?.line1 || addr?.line2 || '').trim();
 
-  // If city is NA or missing, resolve from shopAddress/restaurantAddress or platform default
-  if (!city || city === 'NA') {
-    if ((role === 'restaurant' || role === 'shop') && (user?.shopAddress || user?.restaurantAddress)) {
-      const parsed = parseAddressStringToCityAndPincode(user.shopAddress || user.restaurantAddress);
-      city = parsed.city;
-      if (!pincode || pincode === '000') pincode = parsed.postalCode;
-    } else {
-      city = 'Bengaluru';
-    }
-  }
-
-  if (!pincode || pincode === '000') {
-    pincode = '560001';
-  }
-
-  // CRITICAL: For Restaurant and Shop roles, the pincode on the right corner of the dashboard
-  // MUST always be identical to the pincode configured in Account & Profile Settings!
-  if (role === 'restaurant' || role === 'shop') {
-    const settingsInput = document.getElementById('set-restaurant-pincode');
-    const settingsVal = settingsInput && settingsInput.value ? settingsInput.value.trim() : '';
-    const partnerPin = settingsVal || (typeof resolveFrontendPartnerPincode === 'function' ? resolveFrontendPartnerPincode(user) : '') || (user && user.pincode) || pincode;
-    if (partnerPin) {
-      pincode = partnerPin;
-      if (settingsInput && !settingsInput.value) {
-        settingsInput.value = partnerPin;
-      }
-    }
-  }
+  if (!city || city === 'NA') city = 'Bengaluru';
+  if (!pincode || pincode === '000') pincode = '560001';
 
   badge.textContent = `${city}, ${pincode}`;
   badge.title = `${locality ? locality + ', ' : ''}${city}, ${addr?.state || 'KA'} ${pincode}`.trim();
@@ -1274,32 +1372,27 @@ async function fetchUserLocation(cachedAddress = null) {
         }
       });
     }
-  } else if (role === 'restaurant' || role === 'shop') {
-    badge.style.cursor = 'pointer';
-    badge.title = `${locality ? locality + ', ' : ''}${city}, ${addr?.state || 'KA'} ${pincode} • Click to open ${role === 'shop' ? 'Shop Profile' : 'Restaurant Profile'}`.trim();
-    if (!badge.dataset.boundClick) {
-      badge.dataset.boundClick = 'true';
-      badge.addEventListener('click', () => {
-        if (typeof switchView === 'function') {
-          switchView('settings');
-        }
-      });
-    }
   }
 }
+
+function syncTopbarLocation(city, pincode) {
+  const badge = document.getElementById('user-location-badge');
+  if (!badge) return;
+  const current = badge.textContent || '';
+  const currentCity = current.includes(',') ? current.split(',')[0].trim() : 'Bengaluru';
+  const currentPin = current.includes(',') ? current.split(',')[1].trim() : '560001';
+  const c = String(city || '').trim() || currentCity;
+  const p = String(pincode || '').trim() || currentPin;
+  badge.textContent = `${c}, ${p}`;
+}
+window.syncTopbarLocation = syncTopbarLocation;
 
 function syncTopbarPincode(pincode) {
   const badge = document.getElementById('user-location-badge');
   if (!badge || !pincode) return;
   const pin = String(pincode).trim();
-  const current = badge.textContent || '';
-  const commaIdx = current.indexOf(',');
-  if (commaIdx !== -1) {
-    const city = current.substring(0, commaIdx).trim();
-    badge.textContent = `${city}, ${pin}`;
-  } else {
-    badge.textContent = `Bengaluru, ${pin}`;
-  }
+  const currentCity = (user?.city || (user?.assignedLocation && user.assignedLocation.city) || (badge.textContent ? badge.textContent.split(',')[0].trim() : 'Bengaluru'));
+  badge.textContent = `${currentCity}, ${pin}`;
 }
 window.syncTopbarPincode = syncTopbarPincode;
 
@@ -1537,6 +1630,9 @@ window.verifyUserOperatingServiceableArea = verifyUserOperatingServiceableArea;
 
 // Initialize Dashboard
 function initDashboard() {
+  if (!token || isTokenExpired(token)) {
+    return;
+  }
   const partnerDisplay = formatCleanName(user.displayName || user.name || 'Tomato User');
   document.getElementById('mini-name').textContent = partnerDisplay;
   const displayRole = role === 'superadmin' ? '👑 Super Admin' : role === 'deliveryPartner' ? 'Delivery Partner' : role === 'subadmin' ? (user.adminRoleTitle || 'Sub-Admin') : role === 'employee' ? (user.designation || 'Normal Employee') : role.charAt(0).toUpperCase() + role.slice(1);
@@ -1686,7 +1782,7 @@ window.handleSidebarTransferClick = handleSidebarTransferClick;
         const miniNameEl = document.getElementById('mini-name');
         if (miniNameEl) miniNameEl.textContent = formatCleanName(user.displayName || user.name || 'Tomato User');
         populateSettingsUserIdBadge();
-        if (role === 'restaurant' || role === 'shop') {
+        if (role === 'restaurant' || role === 'shop' || role === 'deliveryPartner') {
           fetchUserLocation();
         }
       }
@@ -2497,28 +2593,197 @@ function handleSavedAddressesCardClick() {
   fetchCustomerAddresses();
 }
 
-function handleRestaurantNewIncomingCardClick() {
-  switchView('restaurant-orders', 'incoming');
+function showTileValuePopup(metricType, value, roleContext = 'restaurant') {
+  const isShop = roleContext === 'shop';
+  const roleName = isShop ? 'Shop' : 'Restaurant';
+
+  if (metricType === 'needs_acceptance') {
+    const count = Number(value != null ? value : (document.getElementById(isShop ? 'stat-shop-incoming' : 'stat-restaurant-incoming')?.textContent || 0));
+    showAutoDismissNotice({
+      title: 'Needs Acceptance',
+      message: count > 0
+        ? `Needs Acceptance: ${count} new incoming order${count > 1 ? 's' : ''} awaiting ${roleName.toLowerCase()} acceptance.`
+        : `Needs Acceptance: 0 incoming orders currently waiting for acceptance.`,
+      icon: '🔔',
+      duration: 3000,
+    });
+  } else if (metricType === 'kitchen_active') {
+    const count = Number(value != null ? value : (document.getElementById(isShop ? 'stat-shop-packing' : 'stat-restaurant-cooking')?.textContent || 0));
+    const actionDesc = isShop ? 'in packing / processing' : 'actively cooking on stove / preparing';
+    showAutoDismissNotice({
+      title: 'Kitchen Active',
+      message: count > 0
+        ? `Kitchen Active: ${count} order${count > 1 ? 's' : ''} ${actionDesc}.`
+        : `Kitchen Active: 0 orders currently active in the ${isShop ? 'shop processing queue' : 'kitchen'}.`,
+      icon: isShop ? '📦' : '🍳',
+      duration: 3000,
+    });
+  } else if (metricType === 'dishes_available') {
+    const count = Number(value != null ? value : (document.getElementById(isShop ? 'stat-shop-items' : 'stat-restaurant-menu-items')?.textContent || 0));
+    const itemLabel = isShop ? 'shop item' : 'menu dish';
+    showAutoDismissNotice({
+      title: 'Dishes Available',
+      message: count > 0
+        ? `Dishes Available: ${count} ${itemLabel}${count > 1 ? 's' : ''} active and available for customer ordering.`
+        : `Dishes Available: 0 ${itemLabel}s currently available in catalog.`,
+      icon: '🍽️',
+      duration: 3000,
+    });
+  } else if (metricType === 'total_generated') {
+    let amount = value;
+    if (amount == null) {
+      const rawText = document.getElementById(isShop ? 'stat-shop-revenue-all' : 'stat-restaurant-revenue-all')?.textContent || '';
+      const match = rawText.replace(/,/g, '').match(/\d+(\.\d+)?/);
+      amount = match ? Number(match[0]) : 0;
+    }
+    const todayAmount = Number(
+      (document.getElementById(isShop ? 'stat-shop-revenue-today' : 'stat-restaurant-revenue-today')?.textContent || '0').replace(/[^0-9.]/g, '')
+    ) || 0;
+    showAutoDismissNotice({
+      title: 'Total Generated',
+      message: `Total Generated: ₹${Number(amount || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })} lifetime sales volume (Today's Sales: ₹${todayAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}).`,
+      icon: '💰',
+      duration: 3500,
+    });
+  } else if (metricType === 'out_for_delivery') {
+    const count = Number(value != null ? value : (document.getElementById(isShop ? 'stat-shop-out-for-delivery' : 'stat-restaurant-out-for-delivery')?.textContent || 0));
+    showAutoDismissNotice({
+      title: 'Out for Delivery',
+      message: count > 0
+        ? `Out for Delivery: ${count} order${count > 1 ? 's' : ''} on the way to customer doorsteps.`
+        : `Out for Delivery: 0 orders currently out for delivery.`,
+      icon: '🛵',
+      duration: 3000,
+    });
+  } else if (metricType === 'delivered_today') {
+    const count = Number(value != null ? value : (document.getElementById(isShop ? 'stat-shop-delivered-today' : 'stat-restaurant-delivered-today')?.textContent || 0));
+    showAutoDismissNotice({
+      title: 'Delivered Today',
+      message: count > 0
+        ? `Delivered Today: ${count} order${count > 1 ? 's' : ''} successfully delivered today.`
+        : `Delivered Today: 0 orders delivered today yet.`,
+      icon: '✅',
+      duration: 3000,
+    });
+  }
 }
 
-function handleRestaurantMenuItemsCardClick() {
-  switchView('restaurant-menu');
+function handleRestaurantNewIncomingCardClick(count) {
+  const currentCount = typeof count === 'number'
+    ? count
+    : Number(document.getElementById('stat-restaurant-incoming')?.textContent || 0);
+  if (currentCount === 0) {
+    showTileValuePopup('needs_acceptance', 0, 'restaurant');
+  } else {
+    switchView('restaurant-orders', 'incoming');
+  }
 }
 
-function handleRestaurantCookingCardClick() {
-  switchView('restaurant-orders', 'cooking');
+function handleRestaurantCookingCardClick(count) {
+  const currentCount = typeof count === 'number'
+    ? count
+    : Number(document.getElementById('stat-restaurant-cooking')?.textContent || 0);
+  if (currentCount === 0) {
+    showTileValuePopup('kitchen_active', 0, 'restaurant');
+  } else {
+    switchView('restaurant-orders', 'cooking');
+  }
 }
 
-function handleShopNewIncomingCardClick() {
-  switchView('shop-orders', 'incoming');
+function handleRestaurantOutForDeliveryCardClick(count) {
+  const currentCount = typeof count === 'number'
+    ? count
+    : Number(document.getElementById('stat-restaurant-out-for-delivery')?.textContent || 0);
+  if (currentCount === 0) {
+    showTileValuePopup('out_for_delivery', 0, 'restaurant');
+  } else {
+    switchView('restaurant-orders', 'out_for_delivery');
+  }
 }
 
-function handleShopPackingCardClick() {
-  switchView('shop-orders', 'cooking');
+function handleRestaurantDeliveredTodayCardClick(count) {
+  const currentCount = typeof count === 'number'
+    ? count
+    : Number(document.getElementById('stat-restaurant-delivered-today')?.textContent || 0);
+  if (currentCount === 0) {
+    showTileValuePopup('delivered_today', 0, 'restaurant');
+  } else {
+    switchView('restaurant-orders', 'delivered_today');
+  }
 }
 
-function handleShopItemsCardClick() {
-  switchView('shop-items');
+function handleRestaurantMenuItemsCardClick(count) {
+  const currentCount = typeof count === 'number'
+    ? count
+    : Number(document.getElementById('stat-restaurant-menu-items')?.textContent || 0);
+  if (currentCount === 0) {
+    showTileValuePopup('dishes_available', 0, 'restaurant');
+  } else {
+    switchView('restaurant-menu');
+  }
+}
+
+function handleRestaurantSalesVolumeCardClick(totalAmount) {
+  showTileValuePopup('total_generated', totalAmount, 'restaurant');
+}
+
+function handleShopNewIncomingCardClick(count) {
+  const currentCount = typeof count === 'number'
+    ? count
+    : Number(document.getElementById('stat-shop-incoming')?.textContent || 0);
+  if (currentCount === 0) {
+    showTileValuePopup('needs_acceptance', 0, 'shop');
+  } else {
+    switchView('shop-orders', 'incoming');
+  }
+}
+
+function handleShopPackingCardClick(count) {
+  const currentCount = typeof count === 'number'
+    ? count
+    : Number(document.getElementById('stat-shop-packing')?.textContent || 0);
+  if (currentCount === 0) {
+    showTileValuePopup('kitchen_active', 0, 'shop');
+  } else {
+    switchView('shop-orders', 'cooking');
+  }
+}
+
+function handleShopOutForDeliveryCardClick(count) {
+  const currentCount = typeof count === 'number'
+    ? count
+    : Number(document.getElementById('stat-shop-out-for-delivery')?.textContent || 0);
+  if (currentCount === 0) {
+    showTileValuePopup('out_for_delivery', 0, 'shop');
+  } else {
+    switchView('shop-orders', 'out_for_delivery');
+  }
+}
+
+function handleShopDeliveredTodayCardClick(count) {
+  const currentCount = typeof count === 'number'
+    ? count
+    : Number(document.getElementById('stat-shop-delivered-today')?.textContent || 0);
+  if (currentCount === 0) {
+    showTileValuePopup('delivered_today', 0, 'shop');
+  } else {
+    switchView('shop-orders', 'delivered_today');
+  }
+}
+
+function handleShopItemsCardClick(count) {
+  const currentCount = typeof count === 'number'
+    ? count
+    : Number(document.getElementById('stat-shop-items')?.textContent || 0);
+  if (currentCount === 0) {
+    showTileValuePopup('dishes_available', 0, 'shop');
+  } else {
+    switchView('shop-items');
+  }
+}
+
+function handleShopSalesVolumeCardClick(totalAmount) {
+  showTileValuePopup('total_generated', totalAmount, 'shop');
 }
 
 window.showAutoDismissNotice = showAutoDismissNotice;
@@ -2527,12 +2792,19 @@ window.handleNoticeModalBackdropClick = handleNoticeModalBackdropClick;
 window.handleActiveOrdersCardClick = handleActiveOrdersCardClick;
 window.handleTotalPlacedCardClick = handleTotalPlacedCardClick;
 window.handleSavedAddressesCardClick = handleSavedAddressesCardClick;
+window.showTileValuePopup = showTileValuePopup;
 window.handleRestaurantNewIncomingCardClick = handleRestaurantNewIncomingCardClick;
 window.handleRestaurantCookingCardClick = handleRestaurantCookingCardClick;
+window.handleRestaurantOutForDeliveryCardClick = handleRestaurantOutForDeliveryCardClick;
+window.handleRestaurantDeliveredTodayCardClick = handleRestaurantDeliveredTodayCardClick;
 window.handleRestaurantMenuItemsCardClick = handleRestaurantMenuItemsCardClick;
+window.handleRestaurantSalesVolumeCardClick = handleRestaurantSalesVolumeCardClick;
 window.handleShopNewIncomingCardClick = handleShopNewIncomingCardClick;
 window.handleShopPackingCardClick = handleShopPackingCardClick;
+window.handleShopOutForDeliveryCardClick = handleShopOutForDeliveryCardClick;
+window.handleShopDeliveredTodayCardClick = handleShopDeliveredTodayCardClick;
 window.handleShopItemsCardClick = handleShopItemsCardClick;
+window.handleShopSalesVolumeCardClick = handleShopSalesVolumeCardClick;
 
 // =========================================================================
 // OVERVIEW STATS & ACTIVITY
@@ -2592,27 +2864,70 @@ async function loadRoleOverview() {
         apiFetch('/api/restaurant/menu').catch(() => ({ menu: [] })),
       ]);
       const orders = ordersData.orders || [];
+      const menu = menuData.menu || [];
+      const menuCount = menu.length;
+
       const newOrders = orders.filter((o) => o.status === 'placed').length;
-      const preparingOrders = orders.filter((o) => ['accepted', 'preparing'].includes(o.status)).length;
-      const revenue = orders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+      const cookingOrders = orders.filter((o) => {
+        const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+        return st === 'accepted' || st === 'preparing' || st === 'ready for pickup';
+      }).length;
+      const outForDeliveryOrders = orders.filter((o) => {
+        const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+        return st === 'out for delivery';
+      }).length;
+
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      const deliveredTodayOrders = orders.filter((o) => {
+        const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+        if (st !== 'delivered') return false;
+        const d = new Date(o.updatedAt || o.deliveredAt || o.createdAt || o.date);
+        return !isNaN(d.getTime()) && d >= startOfToday;
+      }).length;
+
+      const todayOrders = orders.filter((o) => {
+        const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+        if (st === 'cancelled') return false;
+        const d = new Date(o.createdAt || o.date || o.updatedAt);
+        return !isNaN(d.getTime()) && d >= startOfToday;
+      });
+      const todayRevenue = todayOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+      const totalLifetimeRevenue = orders
+        .filter((o) => String(o.status || '').toLowerCase() !== 'cancelled')
+        .reduce((sum, o) => sum + (o.totalAmount || 0), 0);
 
       statsEl.innerHTML = `
-        <div class="stat-card clickable" onclick="handleRestaurantNewIncomingCardClick()" title="Click to view new incoming orders (Placed)">
+        <div class="stat-card clickable" onclick="handleRestaurantNewIncomingCardClick(${newOrders})" title="Click to view new incoming orders (Placed)">
           <span class="stat-label">New Incoming</span>
-          <div class="stat-value" style="color:var(--tomato);">${newOrders}</div>
-          <span class="stat-note">Needs acceptance ↗</span>
+          <div id="stat-restaurant-incoming" class="stat-value" style="color:var(--tomato);">${newOrders}</div>
+          <span id="stat-restaurant-incoming-note" class="stat-note" style="cursor:pointer;" onclick="event.stopPropagation(); showTileValuePopup('needs_acceptance', ${newOrders}, 'restaurant')" title="Click to view details">Needs acceptance: <strong>${newOrders}</strong> ↗</span>
         </div>
-        <div class="stat-card clickable" onclick="handleRestaurantCookingCardClick()" title="Click to view orders on stove / cooking (Accepted, Preparing, Out for Delivery)">
+        <div class="stat-card clickable" onclick="handleRestaurantCookingCardClick(${cookingOrders})" title="Click to view orders on stove / cooking (Accepted, Preparing, Ready for Pickup)">
           <span class="stat-label">On Stove / Cooking</span>
-          <div class="stat-value">${preparingOrders}</div>
-          <span class="stat-note">Kitchen active ↗</span>
+          <div id="stat-restaurant-cooking" class="stat-value">${cookingOrders}</div>
+          <span id="stat-restaurant-cooking-note" class="stat-note" style="cursor:pointer;" onclick="event.stopPropagation(); showTileValuePopup('kitchen_active', ${cookingOrders}, 'restaurant')" title="Click to view details">Kitchen active: <strong>${cookingOrders}</strong> ↗</span>
         </div>
-        <div class="stat-card clickable" onclick="handleRestaurantMenuItemsCardClick()" title="Click to open Menu Management">
+        <div class="stat-card clickable" onclick="handleRestaurantOutForDeliveryCardClick(${outForDeliveryOrders})" title="Click to view orders out for delivery">
+          <span class="stat-label">Out for Delivery</span>
+          <div id="stat-restaurant-out-for-delivery" class="stat-value" style="color:#0284c7;">${outForDeliveryOrders}</div>
+          <span id="stat-restaurant-out-for-delivery-note" class="stat-note" style="cursor:pointer;" onclick="event.stopPropagation(); showTileValuePopup('out_for_delivery', ${outForDeliveryOrders}, 'restaurant')" title="Click to view details">On route to customer: <strong>${outForDeliveryOrders}</strong> ↗</span>
+        </div>
+        <div class="stat-card clickable" onclick="handleRestaurantDeliveredTodayCardClick(${deliveredTodayOrders})" title="Click to view orders delivered today">
+          <span class="stat-label">Delivered Today</span>
+          <div id="stat-restaurant-delivered-today" class="stat-value" style="color:var(--green);">${deliveredTodayOrders}</div>
+          <span id="stat-restaurant-delivered-today-note" class="stat-note" style="cursor:pointer;" onclick="event.stopPropagation(); showTileValuePopup('delivered_today', ${deliveredTodayOrders}, 'restaurant')" title="Click to view details">Completed today: <strong>${deliveredTodayOrders}</strong> ↗</span>
+        </div>
+        <div class="stat-card clickable" onclick="handleRestaurantMenuItemsCardClick(${menuCount})" title="Click to open Menu Management">
           <span class="stat-label">Menu Items</span>
-          <div class="stat-value">${menuData.menu?.length || 0}</div>
-          <span class="stat-note">Dishes available ↗</span>
+          <div id="stat-restaurant-menu-items" class="stat-value">${menuCount}</div>
+          <span id="stat-restaurant-menu-note" class="stat-note" style="cursor:pointer;" onclick="event.stopPropagation(); showTileValuePopup('dishes_available', ${menuCount}, 'restaurant')" title="Click to view details">Dishes available: <strong>${menuCount}</strong> ↗</span>
         </div>
-        <div class="stat-card"><span class="stat-label">Sales Volume</span><div class="stat-value">₹${revenue.toFixed(0)}</div><span class="stat-note">Total generated</span></div>
+        <div class="stat-card clickable" onclick="handleRestaurantSalesVolumeCardClick(${totalLifetimeRevenue})" title="Click to view sales volume summary">
+          <span class="stat-label">Sales Volume</span>
+          <div id="stat-restaurant-revenue-today" class="stat-value" style="color:var(--green);">₹${todayRevenue.toFixed(0)}</div>
+          <span id="stat-restaurant-revenue-all" class="stat-note" style="cursor:pointer; display:block; font-size:0.75rem; color:var(--muted); margin-top:0.25rem;" onclick="event.stopPropagation(); showTileValuePopup('total_generated', ${totalLifetimeRevenue}, 'restaurant')" title="Click to view details">Total generated: <strong>₹${totalLifetimeRevenue.toFixed(0)}</strong></span>
+        </div>
       `;
     } catch (e) {
       console.error(e);
@@ -2626,30 +2941,70 @@ async function loadRoleOverview() {
         apiFetch('/api/shop/items').catch(() => ({ items: [] })),
       ]);
       const orders = ordersData.orders || [];
+      const items = itemsData.items || [];
+      const itemsCount = items.length;
+
       const newOrders = orders.filter((o) => o.status === 'placed').length;
       const packingOrders = orders.filter((o) => {
         const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
-        return st === 'accepted' || st === 'preparing' || st === 'out for delivery';
+        return st === 'accepted' || st === 'preparing' || st === 'ready for pickup';
       }).length;
-      const revenue = orders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+      const outForDeliveryOrders = orders.filter((o) => {
+        const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+        return st === 'out for delivery';
+      }).length;
+
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      const deliveredTodayOrders = orders.filter((o) => {
+        const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+        if (st !== 'delivered') return false;
+        const d = new Date(o.updatedAt || o.deliveredAt || o.createdAt || o.date);
+        return !isNaN(d.getTime()) && d >= startOfToday;
+      }).length;
+
+      const todayOrders = orders.filter((o) => {
+        const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+        if (st === 'cancelled') return false;
+        const d = new Date(o.createdAt || o.date || o.updatedAt);
+        return !isNaN(d.getTime()) && d >= startOfToday;
+      });
+      const todayRevenue = todayOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+      const totalLifetimeRevenue = orders
+        .filter((o) => String(o.status || '').toLowerCase() !== 'cancelled')
+        .reduce((sum, o) => sum + (o.totalAmount || 0), 0);
 
       statsEl.innerHTML = `
-        <div class="stat-card clickable" onclick="handleShopNewIncomingCardClick()" title="Click to view new incoming orders (Placed)">
+        <div class="stat-card clickable" onclick="handleShopNewIncomingCardClick(${newOrders})" title="Click to view new incoming orders (Placed)">
           <span class="stat-label">New Incoming</span>
-          <div class="stat-value" style="color:var(--tomato);">${newOrders}</div>
-          <span class="stat-note">Needs acceptance ↗</span>
+          <div id="stat-shop-incoming" class="stat-value" style="color:var(--tomato);">${newOrders}</div>
+          <span id="stat-shop-incoming-note" class="stat-note" style="cursor:pointer;" onclick="event.stopPropagation(); showTileValuePopup('needs_acceptance', ${newOrders}, 'shop')" title="Click to view details">Needs acceptance: <strong>${newOrders}</strong> ↗</span>
         </div>
-        <div class="stat-card clickable" onclick="handleShopPackingCardClick()" title="Click to view orders in packing / processing">
+        <div class="stat-card clickable" onclick="handleShopPackingCardClick(${packingOrders})" title="Click to view orders in packing / processing">
           <span class="stat-label">In Packing / Processing</span>
-          <div class="stat-value">${packingOrders}</div>
-          <span class="stat-note">Store active ↗</span>
+          <div id="stat-shop-packing" class="stat-value">${packingOrders}</div>
+          <span id="stat-shop-packing-note" class="stat-note" style="cursor:pointer;" onclick="event.stopPropagation(); showTileValuePopup('kitchen_active', ${packingOrders}, 'shop')" title="Click to view details">Kitchen active: <strong>${packingOrders}</strong> ↗</span>
         </div>
-        <div class="stat-card clickable" onclick="handleShopItemsCardClick()" title="Click to open Item Management">
+        <div class="stat-card clickable" onclick="handleShopOutForDeliveryCardClick(${outForDeliveryOrders})" title="Click to view orders out for delivery">
+          <span class="stat-label">Out for Delivery</span>
+          <div id="stat-shop-out-for-delivery" class="stat-value" style="color:#0284c7;">${outForDeliveryOrders}</div>
+          <span id="stat-shop-out-for-delivery-note" class="stat-note" style="cursor:pointer;" onclick="event.stopPropagation(); showTileValuePopup('out_for_delivery', ${outForDeliveryOrders}, 'shop')" title="Click to view details">On route to customer: <strong>${outForDeliveryOrders}</strong> ↗</span>
+        </div>
+        <div class="stat-card clickable" onclick="handleShopDeliveredTodayCardClick(${deliveredTodayOrders})" title="Click to view orders delivered today">
+          <span class="stat-label">Delivered Today</span>
+          <div id="stat-shop-delivered-today" class="stat-value" style="color:var(--green);">${deliveredTodayOrders}</div>
+          <span id="stat-shop-delivered-today-note" class="stat-note" style="cursor:pointer;" onclick="event.stopPropagation(); showTileValuePopup('delivered_today', ${deliveredTodayOrders}, 'shop')" title="Click to view details">Completed today: <strong>${deliveredTodayOrders}</strong> ↗</span>
+        </div>
+        <div class="stat-card clickable" onclick="handleShopItemsCardClick(${itemsCount})" title="Click to open Shop Inventory & Items">
           <span class="stat-label">Shop Items</span>
-          <div class="stat-value">${itemsData.items?.length || 0}</div>
-          <span class="stat-note">Items in catalog ↗</span>
+          <div id="stat-shop-items" class="stat-value">${itemsCount}</div>
+          <span id="stat-shop-items-note" class="stat-note" style="cursor:pointer;" onclick="event.stopPropagation(); showTileValuePopup('dishes_available', ${itemsCount}, 'shop')" title="Click to view details">Dishes available: <strong>${itemsCount}</strong> ↗</span>
         </div>
-        <div class="stat-card"><span class="stat-label">Sales Volume</span><div class="stat-value">₹${revenue.toFixed(0)}</div><span class="stat-note">Total generated</span></div>
+        <div class="stat-card clickable" onclick="handleShopSalesVolumeCardClick(${totalLifetimeRevenue})" title="Click to view sales volume summary">
+          <span class="stat-label">Sales Volume</span>
+          <div id="stat-shop-revenue-today" class="stat-value" style="color:var(--green);">₹${todayRevenue.toFixed(0)}</div>
+          <span id="stat-shop-revenue-all" class="stat-note" style="cursor:pointer; display:block; font-size:0.75rem; color:var(--muted); margin-top:0.25rem;" onclick="event.stopPropagation(); showTileValuePopup('total_generated', ${totalLifetimeRevenue}, 'shop')" title="Click to view details">Total generated: <strong>₹${totalLifetimeRevenue.toFixed(0)}</strong></span>
+        </div>
       `;
     } catch (e) {
       console.error(e);
@@ -2765,6 +3120,131 @@ async function loadRoleOverview() {
 
   loadNotifications(1);
 }
+
+function syncOverviewOrderStats(targetRole, orders) {
+  if (!Array.isArray(orders)) return;
+  const currentRole = targetRole || (typeof role !== 'undefined' ? role : '');
+
+  const newOrders = orders.filter((o) => {
+    const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+    return st === 'placed';
+  }).length;
+
+  const cookingOrders = orders.filter((o) => {
+    const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+    return st === 'accepted' || st === 'preparing' || st === 'ready for pickup';
+  }).length;
+
+  const outForDeliveryOrders = orders.filter((o) => {
+    const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+    return st === 'out for delivery';
+  }).length;
+
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
+  const deliveredTodayOrders = orders.filter((o) => {
+    const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+    if (st !== 'delivered') return false;
+    const d = new Date(o.updatedAt || o.deliveredAt || o.createdAt || o.date);
+    return !isNaN(d.getTime()) && d >= startOfToday;
+  }).length;
+
+  const todayOrders = orders.filter((o) => {
+    const st = String(o.status || '').toLowerCase().replace(/_/g, ' ').trim();
+    if (st === 'cancelled') return false;
+    const d = new Date(o.createdAt || o.date || o.updatedAt);
+    return !isNaN(d.getTime()) && d >= startOfToday;
+  });
+  const todayRevenue = todayOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+  const totalLifetimeRevenue = orders
+    .filter((o) => String(o.status || '').toLowerCase() !== 'cancelled')
+    .reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+
+  if (currentRole === 'restaurant') {
+    const incomingEl = document.getElementById('stat-restaurant-incoming');
+    const cookingEl = document.getElementById('stat-restaurant-cooking');
+    const outForDeliveryEl = document.getElementById('stat-restaurant-out-for-delivery');
+    const deliveredTodayEl = document.getElementById('stat-restaurant-delivered-today');
+    const revTodayEl = document.getElementById('stat-restaurant-revenue-today');
+    const revAllEl = document.getElementById('stat-restaurant-revenue-all');
+    const revEl = document.getElementById('stat-restaurant-revenue');
+
+    if (incomingEl) incomingEl.textContent = newOrders;
+    if (cookingEl) cookingEl.textContent = cookingOrders;
+    if (outForDeliveryEl) outForDeliveryEl.textContent = outForDeliveryOrders;
+    if (deliveredTodayEl) deliveredTodayEl.textContent = deliveredTodayOrders;
+    if (revTodayEl) revTodayEl.textContent = `₹${todayRevenue.toFixed(0)}`;
+    if (revAllEl) revAllEl.innerHTML = `Total generated: <strong>₹${totalLifetimeRevenue.toFixed(0)}</strong>`;
+    if (revEl) revEl.textContent = `₹${todayRevenue.toFixed(0)}`;
+
+    const incomingNote = document.getElementById('stat-restaurant-incoming-note');
+    if (incomingNote) incomingNote.innerHTML = `Needs acceptance: <strong>${newOrders}</strong> ↗`;
+    const cookingNote = document.getElementById('stat-restaurant-cooking-note');
+    if (cookingNote) cookingNote.innerHTML = `Kitchen active: <strong>${cookingOrders}</strong> ↗`;
+    const outForDeliveryNote = document.getElementById('stat-restaurant-out-for-delivery-note');
+    if (outForDeliveryNote) outForDeliveryNote.innerHTML = `On route to customer: <strong>${outForDeliveryOrders}</strong> ↗`;
+    const deliveredTodayNote = document.getElementById('stat-restaurant-delivered-today-note');
+    if (deliveredTodayNote) deliveredTodayNote.innerHTML = `Completed today: <strong>${deliveredTodayOrders}</strong> ↗`;
+
+  } else if (currentRole === 'shop') {
+    const incomingEl = document.getElementById('stat-shop-incoming');
+    const packingEl = document.getElementById('stat-shop-packing');
+    const outForDeliveryEl = document.getElementById('stat-shop-out-for-delivery');
+    const deliveredTodayEl = document.getElementById('stat-shop-delivered-today');
+    const revTodayEl = document.getElementById('stat-shop-revenue-today');
+    const revAllEl = document.getElementById('stat-shop-revenue-all');
+    const revEl = document.getElementById('stat-shop-revenue');
+
+    if (incomingEl) incomingEl.textContent = newOrders;
+    if (packingEl) packingEl.textContent = cookingOrders;
+    if (outForDeliveryEl) outForDeliveryEl.textContent = outForDeliveryOrders;
+    if (deliveredTodayEl) deliveredTodayEl.textContent = deliveredTodayOrders;
+    if (revTodayEl) revTodayEl.textContent = `₹${todayRevenue.toFixed(0)}`;
+    if (revAllEl) revAllEl.innerHTML = `Total generated: <strong>₹${totalLifetimeRevenue.toFixed(0)}</strong>`;
+    if (revEl) revEl.textContent = `₹${todayRevenue.toFixed(0)}`;
+
+    const incomingNote = document.getElementById('stat-shop-incoming-note');
+    if (incomingNote) incomingNote.innerHTML = `Needs acceptance: <strong>${newOrders}</strong> ↗`;
+    const packingNote = document.getElementById('stat-shop-packing-note');
+    if (packingNote) packingNote.innerHTML = `Kitchen active: <strong>${cookingOrders}</strong> ↗`;
+    const outForDeliveryNote = document.getElementById('stat-shop-out-for-delivery-note');
+    if (outForDeliveryNote) outForDeliveryNote.innerHTML = `On route to customer: <strong>${outForDeliveryOrders}</strong> ↗`;
+    const deliveredTodayNote = document.getElementById('stat-shop-delivered-today-note');
+    if (deliveredTodayNote) deliveredTodayNote.innerHTML = `Completed today: <strong>${deliveredTodayOrders}</strong> ↗`;
+  }
+
+  // Fallback to query by label if IDs are not found
+  const statsEl = document.getElementById('stats-container');
+  if (statsEl) {
+    const cards = statsEl.querySelectorAll('.stat-card');
+    cards.forEach((card) => {
+      const label = card.querySelector('.stat-label')?.textContent?.trim()?.toLowerCase();
+      const valEl = card.querySelector('.stat-value');
+      const noteEl = card.querySelector('.stat-note');
+      if (!label) return;
+      if (valEl) {
+        if (label.includes('incoming')) {
+          valEl.textContent = newOrders;
+          if (noteEl) noteEl.innerHTML = `Needs acceptance: <strong>${newOrders}</strong> ↗`;
+        } else if (label.includes('packing') || label.includes('cooking') || label.includes('stove')) {
+          valEl.textContent = cookingOrders;
+          if (noteEl) noteEl.innerHTML = `Kitchen active: <strong>${cookingOrders}</strong> ↗`;
+        } else if (label.includes('out for delivery')) {
+          valEl.textContent = outForDeliveryOrders;
+          if (noteEl) noteEl.innerHTML = `On route to customer: <strong>${outForDeliveryOrders}</strong> ↗`;
+        } else if (label.includes('delivered today')) {
+          valEl.textContent = deliveredTodayOrders;
+          if (noteEl) noteEl.innerHTML = `Completed today: <strong>${deliveredTodayOrders}</strong> ↗`;
+        } else if (label.includes('sales volume') || label.includes('volume')) {
+          valEl.textContent = `₹${todayRevenue.toFixed(0)}`;
+          if (noteEl) noteEl.innerHTML = `Total generated: <strong>₹${totalLifetimeRevenue.toFixed(0)}</strong>`;
+        }
+      }
+    });
+  }
+}
+window.syncOverviewOrderStats = syncOverviewOrderStats;
 
 let currentNotifications = [];
 let currentNotifPage = 1;
@@ -3577,6 +4057,8 @@ function loadProfileSettings() {
     restGroup.style.display = 'block';
     const addrLabel = document.getElementById('set-restaurant-address-label');
     if (addrLabel) addrLabel.textContent = role === 'shop' ? 'Shop Address' : 'Restaurant Address';
+    const cityLabel = document.getElementById('set-restaurant-city-label');
+    if (cityLabel) cityLabel.textContent = role === 'shop' ? 'Shop City' : 'Restaurant City';
     const pinLabel = document.getElementById('set-restaurant-pincode-label');
     if (pinLabel) pinLabel.textContent = role === 'shop' ? 'Shop Pincode (Serviceable Area)' : 'Restaurant Pincode (Serviceable Area)';
     const digipinLabel = document.getElementById('set-restaurant-digipin-label');
@@ -3584,21 +4066,28 @@ function loadProfileSettings() {
     const cuisineLabel = document.getElementById('set-cuisine-label');
     if (cuisineLabel) cuisineLabel.textContent = role === 'shop' ? 'Shop Category / Speciality' : 'Cuisines Served';
     document.getElementById('set-restaurant-address').value = user.shopAddress || user.restaurantAddress || '';
+    const cityInput = document.getElementById('set-restaurant-city');
     const pinInput = document.getElementById('set-restaurant-pincode');
-    if (pinInput) {
-      const partnerPin = (typeof resolveFrontendPartnerPincode === 'function' ? resolveFrontendPartnerPincode(user) : '') || user.pincode || '';
-      pinInput.value = partnerPin;
-      if (partnerPin) {
-        syncTopbarPincode(partnerPin);
-      }
-      if (!pinInput.dataset.boundSync) {
-        pinInput.dataset.boundSync = 'true';
-        pinInput.addEventListener('input', () => {
-          const val = pinInput.value.trim();
-          if (val) syncTopbarPincode(val);
+    if (cityInput) {
+      cityInput.value = user.city || (user.assignedLocation && user.assignedLocation.city) || '';
+      if (!cityInput.dataset.boundSync) {
+        cityInput.dataset.boundSync = 'true';
+        cityInput.addEventListener('input', () => {
+          syncTopbarLocation(cityInput.value, pinInput?.value || user.pincode);
         });
       }
     }
+    if (pinInput) {
+      const partnerPin = (typeof resolveFrontendPartnerPincode === 'function' ? resolveFrontendPartnerPincode(user) : '') || user.pincode || '';
+      pinInput.value = partnerPin;
+      if (!pinInput.dataset.boundSync) {
+        pinInput.dataset.boundSync = 'true';
+        pinInput.addEventListener('input', () => {
+          syncTopbarLocation(cityInput?.value || user.city, pinInput.value);
+        });
+      }
+    }
+    syncTopbarLocation(cityInput?.value || user.city, pinInput?.value || user.pincode);
     const digipinInput = document.getElementById('set-restaurant-digipin');
     if (digipinInput) {
       digipinInput.value = user.digipin || '';
@@ -3614,21 +4103,30 @@ function loadProfileSettings() {
     if (riderAddrInput) {
       riderAddrInput.value = user.address || (user.assignedLocation && user.assignedLocation.locality) || '';
     }
+    const riderCityLabel = document.getElementById('set-rider-city-label');
+    if (riderCityLabel) riderCityLabel.textContent = 'Rider Operating City';
+    const riderCityInput = document.getElementById('set-rider-city');
     const riderPinInput = document.getElementById('set-rider-pincode');
-    if (riderPinInput) {
-      const riderPin = user.pincode || user.postalCode || (user.assignedLocation && user.assignedLocation.postalCode) || '';
-      riderPinInput.value = riderPin;
-      if (riderPin) {
-        syncTopbarPincode(riderPin);
-      }
-      if (!riderPinInput.dataset.boundSync) {
-        riderPinInput.dataset.boundSync = 'true';
-        riderPinInput.addEventListener('input', () => {
-          const val = riderPinInput.value.trim();
-          if (val) syncTopbarPincode(val);
+    if (riderCityInput) {
+      riderCityInput.value = user.city || (user.assignedLocation && user.assignedLocation.city) || '';
+      if (!riderCityInput.dataset.boundSync) {
+        riderCityInput.dataset.boundSync = 'true';
+        riderCityInput.addEventListener('input', () => {
+          syncTopbarLocation(riderCityInput.value, riderPinInput?.value || user.pincode);
         });
       }
     }
+    if (riderPinInput) {
+      const riderPin = user.pincode || user.postalCode || (user.assignedLocation && user.assignedLocation.postalCode) || '';
+      riderPinInput.value = riderPin;
+      if (!riderPinInput.dataset.boundSync) {
+        riderPinInput.dataset.boundSync = 'true';
+        riderPinInput.addEventListener('input', () => {
+          syncTopbarLocation(riderCityInput?.value || user.city, riderPinInput.value);
+        });
+      }
+    }
+    syncTopbarLocation(riderCityInput?.value || user.city, riderPinInput?.value || user.pincode);
     document.getElementById('set-vehicle').value = user.deliveryVehicle || '';
   } else {
     riderGroup.style.display = 'none';
@@ -3660,12 +4158,14 @@ async function saveProfileSettings(e) {
   }
   if (role === 'restaurant') {
     formData.append('restaurantAddress', document.getElementById('set-restaurant-address').value.trim());
+    formData.append('city', (document.getElementById('set-restaurant-city')?.value || '').trim());
     formData.append('pincode', (document.getElementById('set-restaurant-pincode')?.value || '').trim());
     formData.append('digipin', (document.getElementById('set-restaurant-digipin')?.value || '').trim().toUpperCase());
     formData.append('cuisine', document.getElementById('set-cuisine').value.trim());
   }
   if (role === 'shop') {
     formData.append('shopAddress', document.getElementById('set-restaurant-address').value.trim());
+    formData.append('city', (document.getElementById('set-restaurant-city')?.value || '').trim());
     formData.append('pincode', (document.getElementById('set-restaurant-pincode')?.value || '').trim());
     formData.append('digipin', (document.getElementById('set-restaurant-digipin')?.value || '').trim().toUpperCase());
     formData.append('category', document.getElementById('set-cuisine').value.trim());
@@ -3673,6 +4173,7 @@ async function saveProfileSettings(e) {
   if (role === 'deliveryPartner') {
     formData.append('deliveryVehicle', document.getElementById('set-vehicle').value.trim());
     formData.append('address', (document.getElementById('set-rider-address')?.value || '').trim());
+    formData.append('city', (document.getElementById('set-rider-city')?.value || '').trim());
     formData.append('pincode', (document.getElementById('set-rider-pincode')?.value || '').trim());
   }
 
@@ -3700,8 +4201,19 @@ async function saveProfileSettings(e) {
     ).trim();
     if (savedPin) {
       user.pincode = savedPin;
-      syncTopbarPincode(savedPin);
     }
+    const savedCity = (role === 'deliveryPartner'
+      ? (document.getElementById('set-rider-city')?.value || '')
+      : (document.getElementById('set-restaurant-city')?.value || '')
+    ).trim();
+    if (savedCity) {
+      user.city = savedCity;
+      if (!user.assignedLocation) {
+        user.assignedLocation = {};
+      }
+      user.assignedLocation.city = savedCity;
+    }
+    syncTopbarLocation(savedCity || user.city, savedPin || user.pincode);
     localStorage.setItem('tomatoUser', JSON.stringify(user));
 
     notice.textContent = 'Profile successfully updated!';
@@ -4128,7 +4640,37 @@ function renderOrderLiveTracking(rawData) {
   ? `https://www.google.com/maps/dir/?api=1&origin=${rider.location.lat},${rider.location.lng}&destination=${rest.location.lat},${rest.location.lng}`
   : 'https://maps.google.com';
 
+  const isRiderAssigned = Boolean(data.rider || data.riderUserId || data.riderName);
+  const isPickedUp = Boolean(data.isPickedUp || data.pickupStatus === 'picked_up');
+  const isWayToPickup = Boolean(isRiderAssigned && !isPickedUp && statusLower !== 'delivered' && statusLower !== 'cancelled');
+
+  const restCustDist = typeof data.restaurantToCustomerDistanceKm === 'number'
+    ? data.restaurantToCustomerDistanceKm
+    : (typeof data.distanceToDeliveryKm === 'number' ? data.distanceToDeliveryKm : 2.5);
+
+  const expectedTimingMinutes = typeof data.expectedDeliveryTimingMinutes === 'number'
+    ? data.expectedDeliveryTimingMinutes
+    : Math.max(1, Math.round(5 + 2 * restCustDist));
+
+  let deliveryStatusBannerHtml = '';
+  if (isWayToPickup) {
+    deliveryStatusBannerHtml = `
+      <div style="background:#eff6ff; border:1px solid #bfdbfe; color:#1d4ed8; padding:0.6rem 0.9rem; border-radius:8px; font-weight:700; font-size:0.88rem; margin-bottom:1rem; display:flex; align-items:center; gap:0.5rem;">
+        <span style="font-size:1.15rem;">🚴</span>
+        <span>way to pickup order</span>
+      </div>
+    `;
+  } else if (isPickedUp && statusLower !== 'delivered' && statusLower !== 'cancelled') {
+    deliveryStatusBannerHtml = `
+      <div style="background:#f0fdf4; border:1px solid #86efac; color:#15803d; padding:0.6rem 0.9rem; border-radius:8px; font-weight:700; font-size:0.88rem; margin-bottom:1rem; display:flex; align-items:center; gap:0.5rem;">
+        <span style="font-size:1.15rem;">⏱️</span>
+        <span>expected delivery timing(natural weither): <strong>${expectedTimingMinutes} mins</strong> (${restCustDist.toFixed(1)} km)</span>
+      </div>
+    `;
+  }
+
   body.innerHTML = `
+  ${deliveryStatusBannerHtml}
   <!-- KPI Cards -->
   <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:0.75rem; margin-bottom:1.2rem;">
   <div style="background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:0.85rem; text-align:center;">
@@ -4136,12 +4678,12 @@ function renderOrderLiveTracking(rawData) {
   <strong style="font-size:1.3rem; color:var(--ink);">${distRest} km</strong>
   </div>
   <div style="background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:0.85rem; text-align:center;">
-  <span style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:600; display:block;">Rider to Customer</span>
-  <strong style="font-size:1.3rem; color:var(--ink);">${distCust} km</strong>
+  <span style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:600; display:block;">Restaurant to Customer</span>
+  <strong style="font-size:1.3rem; color:var(--ink);">${restCustDist.toFixed(1)} km</strong>
   </div>
   <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:0.85rem; text-align:center;">
-  <span style="font-size:0.75rem; color:#15803d; text-transform:uppercase; font-weight:600; display:block;">Estimated Arrival</span>
-  <strong style="font-size:1.3rem; color:#16a34a;">~${eta} mins</strong>
+  <span style="font-size:0.75rem; color:#15803d; text-transform:uppercase; font-weight:600; display:block;">${isPickedUp ? 'Expected Delivery Timing (Natural Weather)' : (isWayToPickup ? 'Status' : 'Estimated Arrival')}</span>
+  <strong style="font-size:1.3rem; color:#16a34a;">${isPickedUp ? `~${expectedTimingMinutes} mins` : (isWayToPickup ? 'Way to pickup' : `~${eta} mins`)}</strong>
   </div>
   <div style="background:${isOnline ? '#f0fdf4' : '#fef2f2'}; border:1px solid ${isOnline ? '#bbf7d0' : '#fecaca'}; border-radius:10px; padding:0.85rem; text-align:center;">
   <span style="font-size:0.75rem; color:${isOnline ? '#15803d' : '#991b1b'}; text-transform:uppercase; font-weight:600; display:block;">GPS Transmitter</span>

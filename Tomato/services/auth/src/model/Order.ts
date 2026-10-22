@@ -84,12 +84,19 @@ export interface IOrder extends Document {
   paymentStatus: PaymentStatus;
   paymentMethod: PaymentMethod;
   paymentTransactionId?: string;
+  utrNumber?: string;
+  utrReference?: string;
   paidAt?: Date;
   codCollectedVia?: 'cash' | 'upi';
   codCollectedAt?: Date;
   status: OrderStatus;
   statusHistory: IOrderStatusHistory[];
   rejectedByRiders?: mongoose.Types.ObjectId[];
+  isPickedUp?: boolean;
+  pickupStatus?: 'way_to_pickup' | 'picked_up' | string;
+  pickedUpAt?: Date;
+  riderAssignedAt?: Date;
+  expectedDeliveryTimingMinutes?: number;
   isArchived?: boolean;
   archivedAt?: Date | null;
   archivedBy?: string;
@@ -284,6 +291,16 @@ const orderSchema: Schema<IOrder> = new Schema(
       type: String,
       default: '',
     },
+    utrNumber: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    utrReference: {
+      type: String,
+      default: '',
+      trim: true,
+    },
     paidAt: {
       type: Date,
     },
@@ -319,6 +336,24 @@ const orderSchema: Schema<IOrder> = new Schema(
       type: [Schema.Types.ObjectId],
       ref: 'Rider',
       default: [],
+    },
+    isPickedUp: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    pickupStatus: {
+      type: String,
+      default: '',
+    },
+    pickedUpAt: {
+      type: Date,
+    },
+    riderAssignedAt: {
+      type: Date,
+    },
+    expectedDeliveryTimingMinutes: {
+      type: Number,
     },
     isArchived: {
       type: Boolean,

@@ -11,6 +11,8 @@ import {
 } from './injectionAndAccessGuard.js';
 import { safeOutputInterceptorMiddleware } from './safeDatabaseAndAuth.js';
 import { securityEventAuditorMiddleware } from './securityLogger.js';
+import { cookieValidationMiddleware } from './cookieSecurity.js';
+import { reverseProxySecurityMiddleware } from './proxySecurity.js';
 
 export * from './sanitizer.js';
 export * from './xssProtection.js';
@@ -19,6 +21,8 @@ export * from './rateLimiter.js';
 export * from './injectionAndAccessGuard.js';
 export * from './safeDatabaseAndAuth.js';
 export * from './corsConfig.js';
+export * from './cookieSecurity.js';
+export * from './proxySecurity.js';
 export {
   logSecurityEvent,
   logAuthEvent,
@@ -27,6 +31,8 @@ export {
   logPaymentSecurityEvent,
   securityEventAuditorMiddleware,
   sanitizeLogData,
+  sanitizePath,
+  shouldThrottleUnauthLog,
   type SecurityEvent,
   type SecurityEventType,
   type SecuritySeverity,
@@ -52,13 +58,19 @@ export function applySecurityMiddleware(app: Express, options: SecurityModuleOpt
   // Disable Express fingerprint
   app.disable('x-powered-by');
 
-  // 1. Enforce HTTPS in production or when ENFORCE_HTTPS is active
+  // 1. Reverse proxy header sanitization & IP spoofing defense
+  app.use(reverseProxySecurityMiddleware);
+
+  // 2. Enforce HTTPS in production or when ENFORCE_HTTPS is active
   app.use(enforceHttpsMiddleware);
 
   // 2. Audit security responses (401, 403, 429) without leaking credentials
   app.use(securityEventAuditorMiddleware);
 
-  // 3. Apply protective HTTP response headers (HSTS, CSP, nosniff, etc.)
+  // 3. Safe Cookie Parser, Sanitizer & Validator (improves efficiency and protects headers)
+  app.use(cookieValidationMiddleware);
+
+  // 4. Apply protective HTTP response headers (HSTS, CSP, nosniff, etc.)
   app.use(securityHeadersMiddleware(options.headers));
 
   // 3. Prevent unauthorized access & path traversal

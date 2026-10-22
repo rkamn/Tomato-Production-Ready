@@ -32,7 +32,13 @@ export interface AuthenticatedRequest extends Request {
 
 export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
 	const header = req.header('authorization');
-	const token = header?.startsWith('Bearer ') ? header.slice(7) : '';
+	let token = header?.startsWith('Bearer ') ? header.slice(7).trim() : '';
+
+	// Fallback to validated HttpOnly auth cookie for browser efficiency and XSS defense
+	if (!token && req.cookies) {
+		token = (req.cookies.auth_token || req.cookies.token || '').trim();
+	}
+
 	const jwtSecret = process.env.JWT_SECRET || 'tomato-local-development-secret';
 
 	if (!token) {
@@ -43,7 +49,10 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 		const payload = jwt.verify(token, jwtSecret);
 		const uid = (payload as any)?.userId || (payload as any)?.id || (payload as any)?._id;
 		const uRole = (payload as any)?.role;
-		const sessionId = typeof (payload as any)?.sessionId === 'string' ? (payload as any).sessionId : undefined;
+		let sessionId = typeof (payload as any)?.sessionId === 'string' ? (payload as any).sessionId : undefined;
+		if (!sessionId && req.cookies?.sessionId) {
+			sessionId = req.cookies.sessionId;
+		}
 
 		if (typeof payload !== 'object' || typeof uid !== 'string' || typeof uRole !== 'string') {
 			return res.status(401).json({ message: 'Invalid authentication token' });

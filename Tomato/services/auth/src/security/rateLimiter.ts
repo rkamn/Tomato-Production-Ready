@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { z, ZodSchema, ZodError } from 'zod';
+import { getSecureClientIp } from './proxySecurity.js';
 
 export { z, ZodSchema, ZodError };
 
@@ -129,27 +130,7 @@ export const rateLimitStore = new MemoryRateLimitStore();
  * Extracts a robust client IP address from the Express request
  */
 export function getClientIp(req: Request): string {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string' && forwarded.trim()) {
-    const firstIp = forwarded.split(',')[0]?.trim();
-    if (firstIp) return firstIp;
-  } else if (Array.isArray(forwarded) && forwarded[0]) {
-    return forwarded[0].trim();
-  }
-
-  const realIp = req.headers['x-real-ip'];
-  if (typeof realIp === 'string' && realIp.trim()) {
-    return realIp.trim();
-  }
-
-  let ip = req.ip || req.socket?.remoteAddress || '127.0.0.1';
-  if (ip === '::1' || ip === '::ffff:127.0.0.1') {
-    return '127.0.0.1';
-  }
-  if (ip.startsWith('::ffff:')) {
-    return ip.slice(7);
-  }
-  return ip || '127.0.0.1';
+  return getSecureClientIp(req);
 }
 
 /**

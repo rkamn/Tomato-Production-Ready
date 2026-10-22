@@ -818,6 +818,8 @@
               <button id="rest-filter-all" class="btn btn-sm btn-outline active" onclick="setRestaurantOrdersFilter('all')">All Orders</button>
               <button id="rest-filter-cooking" class="btn btn-sm btn-outline" onclick="setRestaurantOrdersFilter('cooking')">🍳 On Stove / Cooking</button>
               <button id="rest-filter-incoming" class="btn btn-sm btn-outline" onclick="setRestaurantOrdersFilter('incoming')">🔔 New Incoming</button>
+              <button id="rest-filter-out-for-delivery" class="btn btn-sm btn-outline" onclick="setRestaurantOrdersFilter('out_for_delivery')">🛵 Out for Delivery</button>
+              <button id="rest-filter-delivered-today" class="btn btn-sm btn-outline" onclick="setRestaurantOrdersFilter('delivered_today')">✅ Delivered Today</button>
               <span id="rest-date-filter-indicator" style="display:none; font-size:0.8rem; color:#1e3a8a; font-weight:600; background:#eff6ff; border:1px solid #bfdbfe; border-radius:999px; padding:0.18rem 0.65rem;"></span>
               <span id="rest-filter-indicator" style="display:none; font-size:0.8rem; color:var(--tomato); font-weight:600; margin-left:auto;"></span>
             </div>
@@ -876,6 +878,8 @@
               <button id="shop-filter-all" class="btn btn-sm btn-outline active" onclick="setShopOrdersFilter('all')">All Orders</button>
               <button id="shop-filter-cooking" class="btn btn-sm btn-outline" onclick="setShopOrdersFilter('cooking')">📦 In Packing / Processing</button>
               <button id="shop-filter-incoming" class="btn btn-sm btn-outline" onclick="setShopOrdersFilter('incoming')">🔔 New Incoming</button>
+              <button id="shop-filter-out-for-delivery" class="btn btn-sm btn-outline" onclick="setShopOrdersFilter('out_for_delivery')">🛵 Out for Delivery</button>
+              <button id="shop-filter-delivered-today" class="btn btn-sm btn-outline" onclick="setShopOrdersFilter('delivered_today')">✅ Delivered Today</button>
               <span id="shop-date-filter-indicator" style="display:none; font-size:0.8rem; color:#1e3a8a; font-weight:600; background:#eff6ff; border:1px solid #bfdbfe; border-radius:999px; padding:0.18rem 0.65rem;"></span>
               <span id="shop-filter-indicator" style="display:none; font-size:0.8rem; color:var(--tomato); font-weight:600; margin-left:auto;"></span>
             </div>
@@ -1002,7 +1006,7 @@
                 <input
                   type="text"
                   id="admin-orders-search"
-                  placeholder="Search #, customer, restaurant..."
+                  placeholder="Search #, customer, restaurant, UTR..."
                   style="padding:0.42rem 0.75rem; border:1px solid var(--line); border-radius:6px; font-size:0.82rem; min-width:180px;"
                   onkeydown="if(event.key==='Enter') fetchAdminOrders(1)"
                 />
@@ -1425,15 +1429,21 @@
                     <input id="set-restaurant-address" type="text" placeholder="12 Indiranagar 100ft Road, Bengaluru" />
                   </div>
                   <div class="form-group">
-                    <label id="set-restaurant-pincode-label">Service Pincode (6 Digits)</label>
-                    <input id="set-restaurant-pincode" type="text" maxlength="6" placeholder="e.g. 560038" />
+                    <label id="set-restaurant-city-label">City</label>
+                    <input id="set-restaurant-city" type="text" placeholder="e.g. Bengaluru" />
                   </div>
                 </div>
                 <div class="form-row">
                   <div class="form-group">
+                    <label id="set-restaurant-pincode-label">Service Pincode (6 Digits)</label>
+                    <input id="set-restaurant-pincode" type="text" maxlength="6" placeholder="e.g. 560038" />
+                  </div>
+                  <div class="form-group">
                     <label id="set-restaurant-digipin-label">Restaurant DIGIPIN</label>
                     <input id="set-restaurant-digipin" type="text" placeholder="e.g. 560038-R01 or DGP-1297-7759" style="text-transform:uppercase;" />
                   </div>
+                </div>
+                <div class="form-row">
                   <div class="form-group">
                     <label id="set-cuisine-label">Cuisines Served</label>
                     <input id="set-cuisine" type="text" placeholder="North Indian, Italian, Desserts" />
@@ -1449,13 +1459,19 @@
                     <input id="set-rider-address" type="text" placeholder="e.g. Hinjewadi Phase 1, Pune" />
                   </div>
                   <div class="form-group">
+                    <label id="set-rider-city-label">City</label>
+                    <input id="set-rider-city" type="text" placeholder="e.g. Pune" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
                     <label id="set-rider-pincode-label">Serviceable Operating Pincode (6 Digits)</label>
                     <input id="set-rider-pincode" type="text" maxlength="6" placeholder="e.g. 411057" />
                   </div>
-                </div>
-                <div class="form-group">
-                  <label>Delivery Vehicle</label>
-                  <input id="set-vehicle" type="text" placeholder="Motorcycle / Scooter / Electric Bike" />
+                  <div class="form-group">
+                    <label>Delivery Vehicle</label>
+                    <input id="set-vehicle" type="text" placeholder="Motorcycle / Scooter / Electric Bike" />
+                  </div>
                 </div>
               </div>
 

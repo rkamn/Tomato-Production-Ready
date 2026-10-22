@@ -5,7 +5,6 @@ import Rider from '../../model/Rider.js';
 import Customer from '../../model/Customer.js';
 import Employee from '../../model/Employee.js';
 import { IOrder } from '../../model/Order.js';
-import arattaiNotificationService from './arattaiService.js';
 import mailService from '../../services/mailService.js';
 import {
   resolveRiderPincode,
@@ -235,17 +234,33 @@ class NotificationService {
       isApproved: { $ne: false },
       _id: { $nin: rejectedIds },
     })
-      .select('_id name phone currentLocation isOnline address pincode postalCode assignedLocation')
+      .select('_id name phone currentLocation isOnline address pincode postalCode assignedLocation city')
       .lean();
 
-    // Filter riders whose operating pincode strictly matches the order's serviceable location pincode
+    // Filter riders whose operating pincode strictly matches the order's serviceable location pincode.
+    // Never fall back to all riders when no matching rider is found.
     const locationMatchedRiders = orderLocationPincode
       ? activeRiders.filter((r) => resolveRiderPincode(r) === orderLocationPincode)
-      : activeRiders;
+      : [];
+
+    const orderCity = String(
+      (order.deliveryAddress as any)?.city ||
+      (order as any).city ||
+      ''
+    ).trim().toLowerCase();
+
+    const cityMatchedRiders = locationMatchedRiders.filter((r) => {
+      if (!orderCity) return true;
+      const rCity = String(
+        (r as any).city || (r as any).assignedLocation?.city || ''
+      ).trim().toLowerCase();
+      if (!rCity) return true;
+      return orderCity.includes(rCity) || rCity.includes(orderCity);
+    });
 
     const candidates: NearbyRiderCandidate[] = [];
 
-    for (const rider of locationMatchedRiders) {
+    for (const rider of cityMatchedRiders) {
       const riderLat = rider.currentLocation?.lat ?? restaurantLat;
       const riderLng = rider.currentLocation?.lng ?? restaurantLng;
 
@@ -294,19 +309,6 @@ class NotificationService {
           status: 'accepted',
         },
       });
-
-      const customerPhone = order.customerPhone || (order.deliveryAddress as any)?.phone;
-      if (customerPhone) {
-        arattaiNotificationService
-          .notifyOrderUpdate({
-            phoneNumber: customerPhone,
-            customerName: order.customerName || 'Customer',
-            orderNumber: order.orderNumber,
-            status: 'accepted',
-            amount: order.totalAmount,
-          })
-          .catch((err) => console.error('[Arattai Order Accepted Alert Error]:', err));
-      }
     }
 
     // 2. Find all nearest riders within 2km circle from restaurant
@@ -346,6 +348,11 @@ class NotificationService {
         });
       }
 
+      const orderLocationPincode =
+        (order as any).serviceablePincode ||
+        resolveAddressPincode(order.deliveryAddress) ||
+        resolvePartnerPincode(order);
+
       // Also broadcast live SSE event to all connected riders so their Available Pickups view auto-refreshes
       this.broadcastToRole('deliveryPartner', 'new_pickup_available', {
         orderId,
@@ -353,6 +360,8 @@ class NotificationService {
         restaurantName: order.restaurantName,
         totalAmount: order.totalAmount,
         radiusKm: 2.0,
+        serviceablePincode: orderLocationPincode,
+        city: String((order.deliveryAddress as any)?.city || (order as any).city || '').trim(),
       });
     } catch (err) {
       console.error('Failed to notify nearest riders on order acceptance:', err);
@@ -459,20 +468,6 @@ class NotificationService {
           status: 'out_for_delivery',
         },
       });
-
-      const customerPhone = order.customerPhone || (order.deliveryAddress as any)?.phone;
-      if (customerPhone) {
-        arattaiNotificationService
-          .notifyOrderUpdate({
-            phoneNumber: customerPhone,
-            customerName: order.customerName || 'Customer',
-            orderNumber: order.orderNumber,
-            status: 'out_for_delivery',
-            amount: order.totalAmount,
-            riderName,
-          })
-          .catch((err) => console.error('[Arattai Rider Assigned Alert Error]:', err));
-      }
     }
 
     // Notify Restaurant
@@ -515,19 +510,6 @@ class NotificationService {
           status: 'delivered',
         },
       });
-
-      const customerPhone = order.customerPhone || (order.deliveryAddress as any)?.phone;
-      if (customerPhone) {
-        arattaiNotificationService
-          .notifyOrderUpdate({
-            phoneNumber: customerPhone,
-            customerName: order.customerName || 'Customer',
-            orderNumber: order.orderNumber,
-            status: 'delivered',
-            amount: order.totalAmount,
-          })
-          .catch((err) => console.error('[Arattai Order Delivered Alert Error]:', err));
-      }
 
       // Trigger order delivered confirmation email to the customer
       try {

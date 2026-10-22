@@ -9,7 +9,6 @@ import Notification from '../../../model/Notification.js';
 import { AuthenticatedRequest } from '../../../middleware/authenticate.js';
 import { transferCreditPoints } from '../../wallet/walletService.js';
 import { createNotificationForRole } from '../../../utils/orderHelpers.js';
-import { arattaiNotificationService } from '../../notification/index.js';
 
 const router = Router();
 
@@ -245,19 +244,6 @@ const router = Router();
           } catch (notifErr) {
             console.warn('Failed to send notification for complaint update:', notifErr);
           }
-        }
-
-        // Real-time telecom / app notification to Indian mobile number via Arattai API
-        if (complaint.userPhone) {
-          arattaiNotificationService
-            .notifyComplaintUpdate({
-              phoneNumber: complaint.userPhone,
-              userName: complaint.userName,
-              ticketId: complaint.ticketId,
-              status: complaint.status,
-              adminComment: complaint.adminComment,
-            })
-            .catch((arError: any) => console.warn('Arattai complaint dispatch error:', arError));
         }
 
         return res.json({

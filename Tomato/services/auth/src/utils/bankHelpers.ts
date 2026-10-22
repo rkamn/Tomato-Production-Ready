@@ -365,6 +365,17 @@ export function extractPincodeFromText(raw?: string | null): string {
   return matchAny && matchAny[1] ? matchAny[1] : '';
 }
 
+export function resolveCoordinatesFromPincode(
+  pincode?: string,
+): { lat: number; lng: number } | null {
+  if (!pincode) return null;
+  const pin = String(pincode).trim();
+  if (pin === '411057') return { lat: 18.5707, lng: 73.6908 };
+  if (pin === '845401') return { lat: 26.6471, lng: 84.9085 };
+  if (pin === '560001') return { lat: 12.9716, lng: 77.5946 };
+  return null;
+}
+
 export function resolvePartnerPincode(partner: any): string {
   if (!partner) return '';
   const explicit = extractPincodeFromText(
@@ -578,11 +589,24 @@ export async function getAdminPincodeMap(): Promise<AdminPincodeInfo[]> {
           if (/^\d{5,6}$/.test(clean)) pinSet.add(clean);
         }
       }
+      // Superadmin and platform administrators oversee all global serviceable pincodes
+      if (admin.role === 'superadmin' || admin.role === 'admin') {
+        globalPincodes.forEach((p) => pinSet.add(p));
+      }
       adminList.push({
         adminId: String(admin._id),
         adminName: admin.name || 'Admin',
         role: admin.role,
         pincodes: Array.from(pinSet),
+      });
+    }
+
+    if (globalPincodes.length > 0 && !adminList.some((a) => a.pincodes.some((p) => globalPincodes.includes(p)))) {
+      adminList.push({
+        adminId: 'platform-superadmin',
+        adminName: 'Platform Administrator',
+        role: 'superadmin',
+        pincodes: globalPincodes,
       });
     }
 
@@ -602,21 +626,21 @@ export function matchAdminForPincodes(
   const cleanCustomerPin = customerPin.trim();
   const cleanStorePin = storePin.trim();
 
+  // If customerPin and storePin are identical, both operate within the same local zone
+  if (cleanCustomerPin === cleanStorePin) {
+    const matchedAdmin = adminList.find((a) => a.pincodes.includes(cleanCustomerPin)) || adminList[0];
+    if (matchedAdmin) {
+      return { matched: true, commonAdmin: matchedAdmin };
+    }
+    return { matched: true };
+  }
+
   // Find if there is an admin whose serviceable pincodes contain BOTH customerPin and storePin
   for (const admin of adminList) {
     const coversCustomer = admin.pincodes.includes(cleanCustomerPin);
     const coversStore = admin.pincodes.includes(cleanStorePin);
     if (coversCustomer && coversStore) {
       return { matched: true, commonAdmin: admin };
-    }
-  }
-
-  // If customerPin and storePin are identical and covered by any active admin, they match
-  if (cleanCustomerPin === cleanStorePin) {
-    for (const admin of adminList) {
-      if (admin.pincodes.includes(cleanCustomerPin)) {
-        return { matched: true, commonAdmin: admin };
-      }
     }
   }
 

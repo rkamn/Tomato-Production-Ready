@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { timingSafeEqual, scryptSync } from 'node:crypto';
-import { logInjectionEvent, logAccessViolation, logSecurityEvent } from './securityLogger.js';
+import { logInjectionEvent, logAccessViolation } from './securityLogger.js';
 
 /* =========================================================================
  * 1. SQL & NOSQL INJECTION PREVENTION

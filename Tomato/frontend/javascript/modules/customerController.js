@@ -2796,11 +2796,20 @@ function handleRiderOverviewNotifClick() {
 }
 window.handleRiderOverviewNotifClick = handleRiderOverviewNotifClick;
 
-function handleRiderOverviewReportClick() {
+function handleRiderOverviewReportClick(targetPeriod = null) {
   if (activeView !== 'overview') {
     switchView('overview');
   }
   showOverviewRiderReportView();
+  if (targetPeriod) {
+    const periodSelect = document.getElementById('rider-report-period');
+    if (periodSelect) {
+      periodSelect.value = targetPeriod;
+      if (typeof renderRiderReportData === 'function') {
+        renderRiderReportData();
+      }
+    }
+  }
   const el = document.getElementById('overview-rider-report-container');
   if (el) {
     el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });

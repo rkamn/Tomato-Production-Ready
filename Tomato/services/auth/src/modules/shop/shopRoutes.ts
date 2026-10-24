@@ -1,9 +1,9 @@
 import express, { Request, Response } from 'express';
 import mongoose from 'mongoose';
-import MenuItem, { FoodItem } from '../../model/MenuItem.js';
+import { FoodItem } from '../../model/MenuItem.js';
 import Notification from '../../model/Notification.js';
-import Shop, { IShop } from '../../model/Shop.js';
-import ShopOrder, { IShopOrder } from '../../model/ShopOrder.js';
+import Shop from '../../model/Shop.js';
+import ShopOrder from '../../model/ShopOrder.js';
 import Customer from '../../model/Customer.js';
 import Rider from '../../model/Rider.js';
 import {
@@ -11,7 +11,11 @@ import {
   AuthenticatedRequest,
   requireRole,
 } from '../../middleware/authenticate.js';
-import { formatBill, resolveAdminGsnNumber } from '../../utils/orderHelpers.js';
+import {
+  formatBill,
+  resolveAdminGsnNumber,
+  getIndianStandardDateString,
+} from '../../utils/orderHelpers.js';
 import Order, { OrderStatus } from '../../model/Order.js';
 import notificationService from '../notification/notificationService.js';
 import { productImageUpload } from '../../middleware/upload.js';
@@ -19,15 +23,13 @@ import {
   validateBankAndPanDetails,
   resolvePartnerPincode,
   getServiceablePincodes,
+  resolveLocationFromDigipinOrPincode,
+  extractPincodeFromText,
 } from '../../utils/bankHelpers.js';
 import Payment from '../../model/Payment.js';
 import Coupon, {
-  COUPON_TYPES,
   COUPON_TYPE_LABELS,
-  SPONSOR_TYPES,
   SPONSOR_TYPE_LABELS,
-  CouponType,
-  SponsorType,
 } from '../../model/Coupon.js';
 import partnerFinanceRoutes from '../partner/partnerFinanceRoutes.js';
 
@@ -182,7 +184,18 @@ const createShopRouter = () => {
         updates.digipin = digipin.trim().toUpperCase();
       if (typeof gsnNumber === 'string')
         updates.gsnNumber = gsnNumber.trim().toUpperCase() || 'NA';
-      if (
+
+      // Shop uses digipin and pincode for location
+      const storeDigipin = (updates.digipin as string) || '';
+      const storePincode =
+        extractPincodeFromText(String(updates.shopAddress || '')) ||
+        extractPincodeFromText(storeDigipin);
+      if (storeDigipin || storePincode) {
+        updates.shopLocation = resolveLocationFromDigipinOrPincode(
+          storeDigipin,
+          storePincode,
+        );
+      } else if (
         lat !== undefined &&
         lng !== undefined &&
         !isNaN(Number(lat)) &&
@@ -210,7 +223,7 @@ const createShopRouter = () => {
   // 4b. Categories Management
   router.get(
     ['/items/categories', '/menu/categories'],
-    async (req: Request, res: Response) => {
+    async (_req: Request, res: Response) => {
       try {
         const distinctCategories: string[] =
           await FoodItem.distinct('category').exec();
@@ -495,7 +508,7 @@ const createShopRouter = () => {
         const shopName = cleanName || (shopUser ? shopUser.name : 'Tomato Supermart & Daily Essentials');
         const shopAddr = shopUser?.shopAddress || '45 CMH Road, Indiranagar, Bengaluru, 560038';
         const shopCode = shopUser?.shopId || 'shop-1001';
-        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        const dateStr = getIndianStandardDateString();
 
         const initialShopOrders = [
           {

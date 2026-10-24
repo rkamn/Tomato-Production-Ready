@@ -582,10 +582,13 @@ async function acceptIncomingDelivery() {
   try {
     await apiFetch(`/api/rider/orders/${orderId}/accept`, { method: 'POST' });
     alert('Delivery order claimed! Proceed to pick up the meal.');
+    if (typeof updateRiderOverviewStatsLive === 'function') updateRiderOverviewStatsLive();
+    if (typeof loadRoleOverview === 'function') loadRoleOverview();
     switchView('rider-active');
   } catch (e) {
     alert(`Accept Error: ${e.message}`);
     fetchAvailableRiderOrders();
+    if (typeof updateRiderOverviewStatsLive === 'function') updateRiderOverviewStatsLive();
   }
 }
 
@@ -599,6 +602,8 @@ async function rejectIncomingDelivery() {
     const res = await apiFetch(`/api/rider/orders/${orderId}/reject`, { method: 'POST' });
     alert(res.message || 'Delivery rejected. Re-routed to other riders within 2km.');
     fetchAvailableRiderOrders();
+    if (typeof updateRiderOverviewStatsLive === 'function') updateRiderOverviewStatsLive();
+    if (typeof loadRoleOverview === 'function') loadRoleOverview();
   } catch (e) {
     console.error('Reject delivery error:', e);
   }
@@ -610,6 +615,8 @@ async function rejectDeliveryOrder(orderId) {
     const res = await apiFetch(`/api/rider/orders/${orderId}/reject`, { method: 'POST' });
     alert(res.message || 'Delivery rejected and re-routed to other nearby riders.');
     fetchAvailableRiderOrders();
+    if (typeof updateRiderOverviewStatsLive === 'function') updateRiderOverviewStatsLive();
+    if (typeof loadRoleOverview === 'function') loadRoleOverview();
   } catch (e) {
     alert(`Reject Error: ${e.message}`);
   }
@@ -618,6 +625,8 @@ async function rejectDeliveryOrder(orderId) {
 let currentRiderCoords = { lat: 12.9718, lng: 77.5948 };
 let riderWatchId = null;
 let riderHeartbeatTimer = null;
+let lastRiderHttpBroadcastTime = 0;
+let lastRiderHttpCoords = { lat: 0, lng: 0 };
 
 function updateRiderTelemetryUI(lat, lng) {
   const coordsText = `${Number(lat).toFixed(4)}° N, ${Number(lng).toFixed(4)}° E`;
@@ -633,10 +642,21 @@ async function broadcastRiderLocation(lat, lng, label = '') {
   currentRiderCoords = { lat: Number(lat), lng: Number(lng) };
   updateRiderTelemetryUI(currentRiderCoords.lat, currentRiderCoords.lng);
 
-  // Push real-time GPS coordinates over WebSocket immediately
+  // Push real-time GPS coordinates over WebSocket immediately on every change
   if (window.TomatoWS && typeof window.TomatoWS.sendRiderLocationPing === 'function') {
     window.TomatoWS.sendRiderLocationPing(currentRiderCoords.lat, currentRiderCoords.lng, true);
   }
+
+  // Throttle HTTP database persistence to at most once every 15 seconds unless manual action (label)
+  const now = Date.now();
+  const timeSinceLastHttp = now - lastRiderHttpBroadcastTime;
+  const distDelta = Math.abs(currentRiderCoords.lat - lastRiderHttpCoords.lat) + Math.abs(currentRiderCoords.lng - lastRiderHttpCoords.lng);
+  const shouldSendHttp = Boolean(label) || timeSinceLastHttp >= 15000 || distDelta > 0.0005;
+
+  if (!shouldSendHttp) return;
+
+  lastRiderHttpBroadcastTime = now;
+  lastRiderHttpCoords = { ...currentRiderCoords };
 
   try {
     await apiFetch('/api/rider/location', {
@@ -655,7 +675,7 @@ async function broadcastRiderLocation(lat, lng, label = '') {
       });
     }
   } catch (err) {
-    console.error('Rider live broadcast error:', err);
+    console.debug('Rider live broadcast HTTP warning:', err.message || err);
   }
 }
 
@@ -868,6 +888,9 @@ function initNotificationStream() {
     try {
       const data = JSON.parse(event.data);
       startPhoneRinging(data);
+      if (typeof updateRiderOverviewStatsLive === 'function') updateRiderOverviewStatsLive();
+      if (typeof loadRoleOverview === 'function') loadRoleOverview();
+      if (activeView === 'rider-available') fetchAvailableRiderOrders();
     } catch (e) {
       console.error('Incoming delivery ring error:', e);
     }
@@ -878,6 +901,8 @@ function initNotificationStream() {
     if (role !== 'deliveryPartner') return;
     stopPhoneRinging();
     closeModal('incoming-delivery-modal');
+    if (typeof updateRiderOverviewStatsLive === 'function') updateRiderOverviewStatsLive();
+    if (typeof loadRoleOverview === 'function') loadRoleOverview();
   });
 
   // Order claimed by another rider
@@ -895,6 +920,8 @@ function initNotificationStream() {
         });
       }
       if (activeView === 'rider-available') fetchAvailableRiderOrders();
+      if (typeof updateRiderOverviewStatsLive === 'function') updateRiderOverviewStatsLive();
+      if (typeof loadRoleOverview === 'function') loadRoleOverview();
     } catch (e) {
       console.error(e);
     }
@@ -978,21 +1005,6 @@ function initNotificationStream() {
     try {
       const data = JSON.parse(event.data);
 
-      // Verify serviceable area matching before showing alert or refreshing pickups for this rider
-      const myPincode = String(
-        user?.pincode || user?.postalCode || (user?.assignedLocation && user.assignedLocation.postalCode) || ''
-      ).trim();
-      const myCity = String(
-        user?.city || (user?.assignedLocation && user.assignedLocation.city) || ''
-      ).trim().toLowerCase();
-
-      if (data.serviceablePincode && myPincode && data.serviceablePincode !== myPincode) {
-        return; // Placed order is out of this rider's serviceable pincode
-      }
-      if (data.city && myCity && !data.city.toLowerCase().includes(myCity) && !myCity.includes(data.city.toLowerCase())) {
-        return; // Placed order is out of this rider's serviceable city
-      }
-
       showToastNotification({
         title: `🛵 Pickup Ready: #${data.orderNumber}`,
         message: `${data.restaurantName || 'Restaurant'} has accepted order (₹${data.totalAmount}). Tap to claim!`,
@@ -1011,6 +1023,9 @@ function initNotificationStream() {
         fetchAvailableRiderOrders();
       }
       loadRoleOverview();
+      if (typeof updateRiderOverviewStatsLive === 'function') {
+        updateRiderOverviewStatsLive();
+      }
     } catch (e) {
       console.error(e);
     }
@@ -1588,42 +1603,9 @@ function showRestaurantTooFarPopup(storeName = 'Restaurant', distanceKm = null) 
 }
 window.showRestaurantTooFarPopup = showRestaurantTooFarPopup;
 
-async function verifyUserOperatingServiceableArea(showAlert = true) {
-  const checkRoles = ['restaurant', 'shop', 'deliveryPartner'];
-  if (!checkRoles.includes(role)) return true;
-
-  const activePincodes = await fetchGlobalServiceablePincodes();
-  if (!Array.isArray(activePincodes) || activePincodes.length === 0) {
-    return true;
-  }
-
-  let userPincode = '';
-  if (role === 'restaurant' || role === 'shop') {
-    userPincode = (typeof resolveFrontendPartnerPincode === 'function' ? resolveFrontendPartnerPincode(user) : '') || user.pincode || user.postalCode || '';
-  } else if (role === 'deliveryPartner') {
-    userPincode = user.pincode || user.postalCode || user.assignedLocation?.postalCode || '';
-    if (!userPincode && user.address) {
-      const m = String(user.address).match(/\b\d{5,6}\b/);
-      if (m) userPincode = m[0];
-    }
-  }
-
-  const isServiceable = Boolean(userPincode && activePincodes.includes(userPincode));
-
-  if (!isServiceable) {
-    showStatusBanner('your area is not in servicable range for now, update your address and pincode for orders.', 'warning');
-    if (showAlert) {
-      showServiceableAreaPopup(userPincode, activePincodes, role);
-    }
-    if (role === 'restaurant' || role === 'shop' || role === 'deliveryPartner') {
-      isDutyActive = false;
-      user.isOpen = false;
-      user.isOnline = false;
-      renderDutyToggleUI();
-    }
-    return false;
-  }
-
+async function verifyUserOperatingServiceableArea(_showAlert = false) {
+  // City and pincode are used purely for visual UI dashboard display.
+  // They do not restrict or force users offline.
   return true;
 }
 window.verifyUserOperatingServiceableArea = verifyUserOperatingServiceableArea;
@@ -1825,6 +1807,12 @@ window.handleSidebarTransferClick = handleSidebarTransferClick;
 
   // Initialize rider location reporting
   initRiderLocationTracking();
+
+  // Initialize dynamic live sync for rider overview metrics
+  if (role === 'deliveryPartner' || role === 'rider') {
+    if (riderOverviewSyncTimer) clearInterval(riderOverviewSyncTimer);
+    riderOverviewSyncTimer = setInterval(updateRiderOverviewStatsLive, 5000);
+  }
 
   // Sign out (with Yes/No confirmation)
   const signOutBtn = document.getElementById('sign-out');
@@ -3047,28 +3035,43 @@ async function loadRoleOverview() {
       statsEl.innerHTML = `
         <div class="stat-card clickable" onclick="switchView('rider-available')" title="Click to view available pickups">
           <span class="stat-label">Available Pickups</span>
-          <div class="stat-value" style="color:var(--tomato);">${availData.orders?.length || 0}</div>
-          <span class="stat-note">Ready for pickup ↗</span>
+          <div id="stat-rider-available" class="stat-value" style="color:var(--tomato);">${availData.orders?.length || 0}</div>
+          <span id="stat-rider-available-note" class="stat-note stat-active-child" onclick="event.stopPropagation(); switchView('rider-available')" title="Click to view Ready for Pickup orders" style="cursor:pointer; display:inline-flex; align-items:center; gap:0.35rem; font-weight:700; color:#dc2626; padding:2px 8px; background:#fef2f2; border:1px solid #fecaca; border-radius:6px; margin-top:0.35rem;">
+            <span class="active-pulse-dot" style="display:inline-block; width:7px; height:7px; border-radius:50%; background:#dc2626; box-shadow:0 0 0 2px rgba(220,38,38,0.25);"></span>
+            Ready for pickup ↗
+          </span>
         </div>
         <div class="stat-card clickable" onclick="switchView('rider-active')" title="Click to view active trip in progress">
           <span class="stat-label">Active Trip</span>
-          <div class="stat-value">${activeData.orders?.length || 0}</div>
-          <span class="stat-note">In transit ↗</span>
+          <div id="stat-rider-active" class="stat-value">${activeData.orders?.length || 0}</div>
+          <span id="stat-rider-active-note" class="stat-note stat-active-child" onclick="event.stopPropagation(); switchView('rider-active')" title="Click to view In Transit delivery" style="cursor:pointer; display:inline-flex; align-items:center; gap:0.35rem; font-weight:700; color:#2563eb; padding:2px 8px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; margin-top:0.35rem;">
+            <span class="active-pulse-dot" style="display:inline-block; width:7px; height:7px; border-radius:50%; background:#2563eb; box-shadow:0 0 0 2px rgba(37,99,235,0.25);"></span>
+            In transit ↗
+          </span>
         </div>
-        <div class="stat-card clickable" onclick="handleRiderOverviewReportClick()" title="Click to view Delivery & Earnings Report (Delivered Today: ${todayDeliveriesCount})">
+        <div class="stat-card clickable" onclick="handleRiderOverviewReportClick('today')" title="Click to view Delivery & Earnings Report (Delivered Today: ${todayDeliveriesCount})">
           <span class="stat-label">Delivered Orders</span>
-          <div class="stat-value">${todayDeliveriesCount}</div>
-          <span class="stat-note">Delivered today ↗</span>
+          <div id="stat-rider-delivered" class="stat-value">${todayDeliveriesCount}</div>
+          <span id="stat-rider-delivered-note" class="stat-note stat-active-child" onclick="event.stopPropagation(); handleRiderOverviewReportClick('today')" title="Click to view Delivered Today report" style="cursor:pointer; display:inline-flex; align-items:center; gap:0.35rem; font-weight:700; color:#16a34a; padding:2px 8px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; margin-top:0.35rem;">
+            <span class="active-pulse-dot" style="display:inline-block; width:7px; height:7px; border-radius:50%; background:#16a34a; box-shadow:0 0 0 2px rgba(22,163,74,0.25);"></span>
+            Delivered today ↗
+          </span>
         </div>
-        <div class="stat-card clickable" onclick="handleRiderOverviewReportClick()" title="Click to view Delivery & Collections Report (Collected Today: ₹${Number(todayCodCollections.total || 0).toLocaleString('en-IN')})">
+        <div class="stat-card clickable" onclick="handleRiderOverviewReportClick('today')" title="Click to view Delivery & Collections Report (Collected Today: ₹${Number(todayCodCollections.total || 0).toLocaleString('en-IN')})">
           <span class="stat-label">Collections</span>
-          <div class="stat-value" style="color:#0f172a;">₹${Number(todayCodCollections.total || 0).toLocaleString('en-IN')}</div>
-          <span class="stat-note" style="font-weight:700; color:#1d4ed8;">UPI: ₹${Number(todayCodCollections.upi || 0).toLocaleString('en-IN')} / Cash: ₹${Number(todayCodCollections.cash || 0).toLocaleString('en-IN')} (Today) ↗</span>
+          <div id="stat-rider-collections" class="stat-value" style="color:#0f172a;">₹${Number(todayCodCollections.total || 0).toLocaleString('en-IN')}</div>
+          <span id="stat-rider-collections-note" class="stat-note stat-active-child" onclick="event.stopPropagation(); handleRiderOverviewReportClick('today')" title="Click to view UPI & Cash collections breakdown" style="cursor:pointer; display:inline-flex; align-items:center; gap:0.35rem; font-weight:700; color:#1d4ed8; padding:2px 8px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; margin-top:0.35rem;">
+            <span class="active-pulse-dot" style="display:inline-block; width:7px; height:7px; border-radius:50%; background:#1d4ed8; box-shadow:0 0 0 2px rgba(29,78,216,0.25);"></span>
+            UPI: ₹${Number(todayCodCollections.upi || 0).toLocaleString('en-IN')} / Cash: ₹${Number(todayCodCollections.cash || 0).toLocaleString('en-IN')} (Today) ↗
+          </span>
         </div>
-        <div class="stat-card clickable" onclick="handleRiderOverviewReportClick()" title="Click to view Delivery & Earnings Report (Earned Today: ₹${todayEarnings})">
+        <div class="stat-card clickable" onclick="handleRiderOverviewReportClick('today')" title="Click to view Delivery & Earnings Report (Earned Today: ₹${todayEarnings})">
           <span class="stat-label">Trip Earnings</span>
-          <div class="stat-value" style="color:var(--green);">₹${Number(todayEarnings).toLocaleString('en-IN')}</div>
-          <span class="stat-note">₹40 per delivery today ↗</span>
+          <div id="stat-rider-earnings" class="stat-value" style="color:var(--green);">₹${Number(todayEarnings).toLocaleString('en-IN')}</div>
+          <span id="stat-rider-earnings-note" class="stat-note stat-active-child" onclick="event.stopPropagation(); handleRiderOverviewReportClick('today')" title="Click to view Trip Earnings details" style="cursor:pointer; display:inline-flex; align-items:center; gap:0.35rem; font-weight:700; color:var(--green); padding:2px 8px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; margin-top:0.35rem;">
+            <span class="active-pulse-dot" style="display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--green); box-shadow:0 0 0 2px rgba(22,163,74,0.25);"></span>
+            ₹40 per delivery today ↗
+          </span>
         </div>
       `;
     } catch (e) {
@@ -3120,6 +3123,69 @@ async function loadRoleOverview() {
 
   loadNotifications(1);
 }
+
+let riderOverviewSyncTimer = null;
+
+async function updateRiderOverviewStatsLive() {
+  if (role !== 'deliveryPartner' && role !== 'rider') return;
+  try {
+    const [availData, activeData, histData] = await Promise.all([
+      apiFetch('/api/rider/orders/available').catch(() => ({ orders: [] })),
+      apiFetch('/api/rider/orders/active').catch(() => ({ orders: [] })),
+      apiFetch('/api/rider/orders/history').catch(() => ({ orders: [], totalEarnings: 0, totalDeliveries: 0 })),
+    ]);
+
+    const allOrders = histData.orders || [];
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    const todayDeliveredOrders = allOrders.filter((o) => {
+      const orderDate = new Date(o.updatedAt || o.createdAt || o.date);
+      return orderDate >= startOfToday;
+    });
+
+    const todayDeliveriesCount = todayDeliveredOrders.length;
+    const todayEarnings = todayDeliveriesCount * 40;
+
+    const todayCodCollections = {
+      cash: todayDeliveredOrders
+        .filter(o => o.paymentMethod === 'cod' && o.codCollectedVia !== 'upi')
+        .reduce((s, o) => s + Number(o.totalAmount || 0), 0),
+      upi: todayDeliveredOrders
+        .filter(o => o.paymentMethod === 'cod' && o.codCollectedVia === 'upi')
+        .reduce((s, o) => s + Number(o.totalAmount || 0), 0),
+      total: todayDeliveredOrders
+        .filter(o => o.paymentMethod === 'cod')
+        .reduce((s, o) => s + Number(o.totalAmount || 0), 0),
+    };
+
+    const elAvail = document.getElementById('stat-rider-available');
+    if (elAvail) elAvail.textContent = String(availData.orders?.length || 0);
+
+    const elActive = document.getElementById('stat-rider-active');
+    if (elActive) elActive.textContent = String(activeData.orders?.length || 0);
+
+    const elDelivered = document.getElementById('stat-rider-delivered');
+    if (elDelivered) elDelivered.textContent = String(todayDeliveriesCount);
+
+    const elCollections = document.getElementById('stat-rider-collections');
+    if (elCollections) elCollections.textContent = `₹${Number(todayCodCollections.total || 0).toLocaleString('en-IN')}`;
+
+    const elCollectionsNote = document.getElementById('stat-rider-collections-note');
+    if (elCollectionsNote) {
+      elCollectionsNote.innerHTML = `
+        <span class="active-pulse-dot" style="display:inline-block; width:7px; height:7px; border-radius:50%; background:#1d4ed8; box-shadow:0 0 0 2px rgba(29,78,216,0.25);"></span>
+        UPI: ₹${Number(todayCodCollections.upi || 0).toLocaleString('en-IN')} / Cash: ₹${Number(todayCodCollections.cash || 0).toLocaleString('en-IN')} (Today) ↗
+      `;
+    }
+
+    const elEarnings = document.getElementById('stat-rider-earnings');
+    if (elEarnings) elEarnings.textContent = `₹${Number(todayEarnings).toLocaleString('en-IN')}`;
+  } catch (err) {
+    console.debug('Rider live overview sync warning:', err);
+  }
+}
+window.updateRiderOverviewStatsLive = updateRiderOverviewStatsLive;
 
 function syncOverviewOrderStats(targetRole, orders) {
   if (!Array.isArray(orders)) return;
@@ -4711,7 +4777,7 @@ function renderOrderLiveTracking(rawData) {
   <span class="badge" style="background:#e0f2fe; color:#0369a1; font-weight:700; font-size:0.75rem;">📍 DIGIPIN: ${escapeHtml(rest.digipin || 'DGP-BLR')}</span>
   </div>
   <div style="font-size:0.78rem; color:var(--muted); margin-top:0.35rem;">
-  GPS: ${rest.location?.lat ? `${Number(rest.location.lat).toFixed(4)}, ${Number(rest.location.lng).toFixed(4)}` : 'Bengaluru'}
+  Location: DigiPIN & Pincode (${rest.location?.lat ? `${Number(rest.location.lat).toFixed(4)}, ${Number(rest.location.lng).toFixed(4)}` : 'Bengaluru'})
   </div>
   </div>
   <!-- Rider -->
@@ -4720,11 +4786,11 @@ function renderOrderLiveTracking(rawData) {
   <div style="font-weight:700; font-size:0.95rem; color:var(--ink);">${escapeHtml(formatCleanName(rider.displayName || rider.name || 'Assigned Partner'))}</div>
   <div style="margin-top:0.3rem;">
   <span class="badge" style="background:${isOnline ? '#dcfce7' : '#f1f5f9'}; color:${isOnline ? '#15803d' : '#475569'}; font-size:0.75rem;">
-  ${isOnline ? '🟢 Continuous Live GPS Active' : '⚪ Signal Standby'}
+  ${isOnline ? '🟢 Live GPS Tracking via WebSocket' : '⚪ Signal Standby'}
   </span>
   </div>
   <div style="font-size:0.78rem; color:var(--muted); margin-top:0.35rem;">
-  GPS: ${rider.location?.lat ? `${Number(rider.location.lat).toFixed(4)}, ${Number(rider.location.lng).toFixed(4)}` : 'Indiranagar'}
+  GPS: ${rider.location?.lat ? `${Number(rider.location.lat).toFixed(4)}, ${Number(rider.location.lng).toFixed(4)}` : 'Live Stream'}
   </div>
   </div>
   <!-- Customer -->
@@ -4733,6 +4799,13 @@ function renderOrderLiveTracking(rawData) {
   <div style="font-weight:700; font-size:0.95rem; color:var(--ink);">${escapeHtml(cust.name || 'Customer')}</div>
   <div style="font-size:0.8rem; color:var(--ink); margin-top:0.3rem;">
   ${escapeHtml(cust.address?.line1 || 'Delivery Address')}${cust.address?.city ? ', ' + escapeHtml(cust.address.city) : ''}
+  </div>
+  <div style="margin-top:0.3rem; display:flex; gap:0.4rem; flex-wrap:wrap;">
+  <span class="badge" style="background:#ecfdf5; color:#047857; font-weight:700; font-size:0.75rem;">📍 DIGIPIN: ${escapeHtml(cust.digipin || cust.address?.digipin || 'DGP-BLR')}</span>
+  <span class="badge" style="background:#f1f5f9; color:#475569; font-weight:700; font-size:0.75rem;">📮 PIN: ${escapeHtml(cust.pincode || cust.address?.postalCode || '560001')}</span>
+  </div>
+  <div style="font-size:0.78rem; color:var(--muted); margin-top:0.35rem;">
+  Location: DigiPIN & Pincode (${cust.location?.lat ? `${Number(cust.location.lat).toFixed(4)}, ${Number(cust.location.lng).toFixed(4)}` : 'Default'})
   </div>
   </div>
   </div>
@@ -4874,8 +4947,14 @@ function drawLiveOrderRadar(canvas, rawData) {
   ctx.font = 'bold 11px sans-serif';
   const cName = (data.customer?.name || 'Customer').slice(0, 14);
   ctx.fillText(cName, custPt.x, custPt.y + 24);
+  const custBadge = data.customer?.digipin || data.customer?.pincode || data.deliveryAddress?.digipin || data.deliveryAddress?.postalCode || '';
+  if (custBadge) {
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '9px monospace';
+    ctx.fillText(`[${custBadge}]`, custPt.x, custPt.y + 36);
+  }
 
-  // 3. Rider Pin
+  // 3. Rider Pin (Dynamic Live GPS via WebSocket)
   ctx.fillStyle = '#22c55e';
   ctx.beginPath();
   ctx.arc(riderPt.x, riderPt.y, 11, 0, Math.PI * 2);
@@ -4890,7 +4969,7 @@ function drawLiveOrderRadar(canvas, rawData) {
   ctx.fillText(rdName, riderPt.x, riderPt.y - 18);
   ctx.fillStyle = '#38bdf8';
   ctx.font = '10px sans-serif';
-  ctx.fillText('🟢 LIVE GPS', riderPt.x, riderPt.y - 6);
+  ctx.fillText('🟢 LIVE GPS (WebSocket)', riderPt.x, riderPt.y - 6);
 }
 
 

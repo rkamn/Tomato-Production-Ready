@@ -1,9 +1,24 @@
 import Order, { IOrder } from '../model/Order.js';
 import Restaurant from '../model/Restaurant.js';
-import Customer from '../model/Customer.js';
 import Rider from '../model/Rider.js';
 import Employee from '../model/Employee.js';
 import notificationService from '../modules/notification/notificationService.js';
+import { resolveLocationFromDigipinOrPincode } from './bankHelpers.js';
+
+/**
+ * Formats a date into YYYYMMDD string according to Indian Standard Time (IST / Asia/Kolkata).
+ * Ensures order numbers generated after midnight IST align with the local Indian calendar day.
+ */
+export const getIndianStandardDateString = (date: Date = new Date()): string => {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+    .format(date)
+    .replace(/-/g, '');
+};
 
 export const resolveAdminGsnNumber = async (): Promise<string> => {
   try {
@@ -181,13 +196,20 @@ export const buildOrderLiveTrackingData = async (orderId: string) => {
     const ShopModel = (await import('../model/Shop.js')).default;
     const shop = await ShopModel.findById(order.shopId).lean();
     if (shop) {
+      const storeDigipin = shop.digipin || order.digipin || '';
+      const storePincode = (shop as any).pincode || (shop as any).postalCode || order.serviceablePincode || '';
+      const storeLoc = resolveLocationFromDigipinOrPincode(
+        storeDigipin,
+        storePincode,
+        shop.shopLocation || order.shopLocation,
+      );
       restaurantData = {
         restaurantId: shop.shopId || '',
         name: shop.name,
         displayName: shop.name,
         address: shop.shopAddress || order.shopAddress || '',
-        location: shop.shopLocation || order.shopLocation || { lat: 12.9716, lng: 77.5946 },
-        digipin: shop.digipin || order.digipin || '',
+        location: storeLoc,
+        digipin: storeDigipin,
         phone: shop.phone || '',
       };
     }
@@ -195,14 +217,20 @@ export const buildOrderLiveTrackingData = async (orderId: string) => {
     const rest = await Restaurant.findById(order.restaurantId).lean();
     if (rest) {
       const restIdStr = rest.restaurantId || '';
+      const storeDigipin = rest.digipin || order.digipin || '';
+      const storePincode = (rest as any).pincode || (rest as any).postalCode || order.serviceablePincode || '';
+      const storeLoc = resolveLocationFromDigipinOrPincode(
+        storeDigipin,
+        storePincode,
+        rest.restaurantLocation || order.restaurantLocation,
+      );
       restaurantData = {
         restaurantId: restIdStr,
         name: rest.name,
         displayName: rest.name,
         address: rest.restaurantAddress || order.restaurantAddress || '',
-        location: rest.restaurantLocation ||
-          order.restaurantLocation || { lat: 12.9716, lng: 77.5946 },
-        digipin: rest.digipin || order.digipin || '',
+        location: storeLoc,
+        digipin: storeDigipin,
         phone: rest.phone || '',
       };
     }
@@ -210,13 +238,20 @@ export const buildOrderLiveTrackingData = async (orderId: string) => {
 
   if (!restaurantData) {
     const fallbackName = order.restaurantName || order.shopName || 'Restaurant';
+    const storeDigipin = order.digipin || '';
+    const storePincode = order.serviceablePincode || '';
+    const storeLoc = resolveLocationFromDigipinOrPincode(
+      storeDigipin,
+      storePincode,
+      order.restaurantLocation || order.shopLocation,
+    );
     restaurantData = {
       restaurantId: order.restaurantCode || order.shopCode || '',
       name: fallbackName,
       displayName: fallbackName,
       address: order.restaurantAddress || order.shopAddress || 'Bengaluru',
-      location: order.restaurantLocation || order.shopLocation || { lat: 12.9716, lng: 77.5946 },
-      digipin: order.digipin || '',
+      location: storeLoc,
+      digipin: storeDigipin,
       phone: '',
     };
   }
@@ -241,7 +276,9 @@ export const buildOrderLiveTrackingData = async (orderId: string) => {
     );
   }
 
-  const custCoords =
+  const custDigipin = order.deliveryAddress?.digipin || (order as any).digipin || '';
+  const custPincode = order.deliveryAddress?.postalCode || order.serviceablePincode || '';
+  const fallbackCustCoords =
     order.deliveryAddress?.coordinates &&
     Array.isArray(order.deliveryAddress.coordinates) &&
     order.deliveryAddress.coordinates.length >= 2
@@ -249,7 +286,13 @@ export const buildOrderLiveTrackingData = async (orderId: string) => {
           lng: Number(order.deliveryAddress.coordinates[0]),
           lat: Number(order.deliveryAddress.coordinates[1]),
         }
-      : { lat: 12.9716, lng: 77.5946 };
+      : undefined;
+
+  const custCoords = resolveLocationFromDigipinOrPincode(
+    custDigipin,
+    custPincode,
+    fallbackCustCoords,
+  );
 
   if (riderData) {
     const dLat = (custCoords.lat - riderData.currentLocation.lat) * (Math.PI / 180);
@@ -304,8 +347,11 @@ export const buildOrderLiveTrackingData = async (orderId: string) => {
       phone: order.customerPhone || '',
       address: order.deliveryAddress || { line1: 'Delivery Address', city: 'Bengaluru' },
       location: custCoords,
+      digipin: custDigipin,
+      pincode: custPincode,
     },
     telemetry: {
+      trackingMode: 'websocket_live_gps',
       isLiveOnline: riderData ? riderData.isOnline : false,
       riderToRestaurantDistanceKm: isTrackingClosed ? 0 : (distanceToPickupKm ?? 0.85),
       riderToCustomerDistanceKm: isTrackingClosed ? 0 : (distanceToDeliveryKm ?? 1.45),

@@ -38,11 +38,15 @@ export const RateLimitConfigSchema = z.object({
   keyGenerator: z
     .function()
     .optional(),
+  skip: z
+    .custom<(req: Request) => boolean>()
+    .optional(),
 });
 
 export type RateLimitConfig = z.infer<typeof RateLimitConfigSchema>;
 export type RateLimitInputOptions = Partial<z.input<typeof RateLimitConfigSchema>> & {
   keyGenerator?: (req: Request) => string;
+  skip?: (req: Request) => boolean;
 };
 
 interface RateLimitRecord {
@@ -141,8 +145,12 @@ export function createRateLimiter(options: RateLimitInputOptions = {}) {
   // Validate and parse options using Zod schema
   const parsedOptions = RateLimitConfigSchema.parse(options);
   const keyGen = options.keyGenerator || ((req: Request) => `${getClientIp(req)}:${req.baseUrl || ''}${req.path || ''}`);
+  const skipFn = options.skip;
 
   return (req: Request, res: Response, next: NextFunction) => {
+    if (skipFn && skipFn(req)) {
+      return next();
+    }
     const key = keyGen(req);
     const { count, resetTime } = rateLimitStore.increment(key, parsedOptions.windowMs);
     const now = Date.now();
@@ -241,13 +249,24 @@ export const otpRateLimiter = createRateLimiter({
 });
 
 /**
- * Preconfigured general API rate limiter: 200 requests per 15 minutes per IP
+ * Preconfigured general API rate limiter: 3000 requests per 15 minutes per IP
+ * Allows seamless real-time operation of dashboards (orders, updates, SSE, telemetry)
+ * while still defending against abusive automated DDoS floods.
  */
 export const apiRateLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
-  maxAttempts: 200,
+  maxAttempts: Number(process.env.API_RATE_LIMIT_MAX || 3000),
   message: 'API rate limit exceeded. Please throttle your requests.',
+  skipSuccessfulRequests: true,
   keyGenerator: (req: Request) => `api:${getClientIp(req)}`,
+  skip: (req: Request) => {
+    const p = (req.originalUrl || req.baseUrl || req.path || '').toLowerCase();
+    return (
+      p.includes('/rider/location') ||
+      p.includes('/notifications/stream') ||
+      p.includes('/health')
+    );
+  },
 });
 
 /* =========================================================================

@@ -1,14 +1,8 @@
 import { Router, Request, Response } from 'express';
 import mongoose from 'mongoose';
 import Complaint, { cleanupExpiredClosedComplaints } from '../../../model/Complaint.js';
-import Customer from '../../../model/Customer.js';
-import Restaurant from '../../../model/Restaurant.js';
-import Shop from '../../../model/Shop.js';
-import Rider from '../../../model/Rider.js';
 import Notification from '../../../model/Notification.js';
 import { AuthenticatedRequest } from '../../../middleware/authenticate.js';
-import { transferCreditPoints } from '../../wallet/walletService.js';
-import { createNotificationForRole } from '../../../utils/orderHelpers.js';
 
 const router = Router();
 

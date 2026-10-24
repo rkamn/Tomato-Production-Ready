@@ -1,5 +1,4 @@
 import { Router, Request, Response } from 'express';
-import mongoose from 'mongoose';
 import Restaurant from '../../../model/Restaurant.js';
 import Shop from '../../../model/Shop.js';
 import Rider from '../../../model/Rider.js';
@@ -9,7 +8,7 @@ import Payment from '../../../model/Payment.js';
 import Notification from '../../../model/Notification.js';
 import WalletCreditTrack from '../../../model/WalletCreditTrack.js';
 import Wallet from '../../../model/Wallet.js';
-import { AuthenticatedRequest, requireRole } from '../../../middleware/authenticate.js';
+import { AuthenticatedRequest } from '../../../middleware/authenticate.js';
 import {
   syncOrderToTomatoPayment,
   adjustTomatoCentralBankBalance,

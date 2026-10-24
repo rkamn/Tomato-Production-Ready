@@ -1,12 +1,12 @@
 import { Router, Request, Response } from 'express';
 import mongoose from 'mongoose';
 import Address from '../../../model/Address.js';
-import MenuItem, { FoodItem } from '../../../model/MenuItem.js';
+import { FoodItem } from '../../../model/MenuItem.js';
 import Customer, { ICustomer } from '../../../model/Customer.js';
-import Restaurant, { IRestaurant } from '../../../model/Restaurant.js';
-import Shop, { IShop } from '../../../model/Shop.js';
+import Restaurant from '../../../model/Restaurant.js';
+import Shop from '../../../model/Shop.js';
 import Rider, { IRider } from '../../../model/Rider.js';
-import Employee, { IEmployee, USER_ROLES, UserRole } from '../../../model/Employee.js';
+import Employee, { USER_ROLES, UserRole } from '../../../model/Employee.js';
 import Notification from '../../../model/Notification.js';
 import Order from '../../../model/Order.js';
 import Wallet from '../../../model/Wallet.js';
@@ -40,6 +40,7 @@ import {
   getServiceablePincodes,
   resolvePartnerPincode,
   resolveCoordinatesFromPincode,
+  resolveLocationFromDigipinOrPincode,
 } from '../../../utils/bankHelpers.js';
 import mailService from '../../../services/mailService.js';
 import {
@@ -898,11 +899,9 @@ const router = Router();
         };
       } else {
         const pinToResolve = (updates.pincode as string) || (pincode ? String(pincode).trim() : '');
-        if (pinToResolve) {
-          const resolved = resolveCoordinatesFromPincode(pinToResolve);
-          if (resolved) {
-            updates.restaurantLocation = resolved;
-          }
+        const dgpToResolve = (updates.digipin as string) || (req.body?.digipin ? String(req.body.digipin).trim() : '');
+        if (dgpToResolve || pinToResolve) {
+          updates.restaurantLocation = resolveLocationFromDigipinOrPincode(dgpToResolve, pinToResolve);
         }
       }
 
@@ -926,10 +925,11 @@ const router = Router();
         }
         if (updates.restaurantLocation) {
           shopUpdates.shopLocation = updates.restaurantLocation;
-        } else if (shopUpdates.pincode) {
-          const resolved = resolveCoordinatesFromPincode(String(shopUpdates.pincode));
-          if (resolved) {
-            shopUpdates.shopLocation = resolved;
+        } else {
+          const shopDgp = (shopUpdates.digipin as string) || (updates.digipin as string);
+          const shopPin = String(shopUpdates.pincode || '');
+          if (shopDgp || shopPin) {
+            shopUpdates.shopLocation = resolveLocationFromDigipinOrPincode(shopDgp, shopPin);
           }
         }
         user = await Shop.findByIdAndUpdate(
@@ -2340,7 +2340,6 @@ const router = Router();
 
   const handleRejectEmployee = async (req: Request, res: Response) => {
     try {
-      const caller = (req as AuthenticatedRequest).user;
       const targetId = String(req.params.id || '').trim();
       const reason =
         typeof req.body?.reason === 'string' && req.body.reason.trim()
@@ -2655,8 +2654,9 @@ const router = Router();
       const cleanLabel = typeof label === 'string' && label.trim() ? label.trim() : `${cleanCity} Regional Office`;
       const cleanDigipin = typeof digipin === 'string' ? digipin.trim() : '';
 
-      let coordinates: [number, number] = [77.5946, 12.9716];
-      if (lat !== undefined && lng !== undefined && !isNaN(Number(lat)) && !isNaN(Number(lng))) {
+      const resolvedLoc = resolveLocationFromDigipinOrPincode(cleanDigipin, cleanPincode);
+      let coordinates: [number, number] = [resolvedLoc.lng, resolvedLoc.lat];
+      if (!cleanDigipin && !cleanPincode && lat !== undefined && lng !== undefined && !isNaN(Number(lat)) && !isNaN(Number(lng))) {
         coordinates = [Number(lng), Number(lat)];
       }
 
@@ -2942,7 +2942,6 @@ const router = Router();
     requireRole('superadmin'),
     async (req: Request, res: Response) => {
       try {
-        const caller = (req as AuthenticatedRequest).user;
         const targetId = String(req.params.id || '').trim();
         const { displayName, baseRole, description, permissions } = req.body;
 
@@ -3015,7 +3014,6 @@ const router = Router();
     requireRole('superadmin'),
     async (req: Request, res: Response) => {
       try {
-        const caller = (req as AuthenticatedRequest).user;
         const targetId = String(req.params.id || '').trim();
 
         if (!targetId) {

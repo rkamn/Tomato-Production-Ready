@@ -2,13 +2,11 @@ import { Router, Request, Response } from 'express';
 import mongoose from 'mongoose';
 import Notification from '../../../model/Notification.js';
 import Order from '../../../model/Order.js';
-import ShopOrder from '../../../model/ShopOrder.js';
 import Customer from '../../../model/Customer.js';
 import Restaurant from '../../../model/Restaurant.js';
 import Shop from '../../../model/Shop.js';
 import Rider from '../../../model/Rider.js';
 import Employee from '../../../model/Employee.js';
-import Payment from '../../../model/Payment.js';
 import WalletCreditTrack from '../../../model/WalletCreditTrack.js';
 import { AuthenticatedRequest, requireRole, requirePermission } from '../../../middleware/authenticate.js';
 
@@ -698,7 +696,7 @@ const router = Router();
             periodCustomersCount,
             periodRestaurantsCount,
             periodRidersCount,
-            totalUsersCount: customers.length + restaurants.length + riders.length + employees.length,
+            totalUsersCount: customers.length + restaurants.length + shops.length + riders.length + employees.length,
             totalCustomers,
             totalRestaurants,
             totalRiders,

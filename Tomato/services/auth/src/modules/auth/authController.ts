@@ -3,14 +3,14 @@ import mongoose from 'mongoose';
 import { promisify } from 'node:util';
 import { createHash, randomBytes, randomInt, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import jwt from 'jsonwebtoken';
-import Employee, { IEmployee, USER_ROLES, UserRole } from '../../model/Employee.js';
+import Employee, { USER_ROLES, UserRole } from '../../model/Employee.js';
 import Restaurant, { IRestaurant } from '../../model/Restaurant.js';
 import Customer, { ICustomer } from '../../model/Customer.js';
 import Rider, { IRider } from '../../model/Rider.js';
 import Shop, { IShop } from '../../model/Shop.js';
 import Notification from '../../model/Notification.js';
 import Address from '../../model/Address.js';
-import Counter, { getNextCounterValue, generateIdFromCounter } from '../../model/Counter.js';
+import { generateIdFromCounter } from '../../model/Counter.js';
 import { AuthenticatedRequest } from '../../middleware/authenticate.js';
 import {
 	extractPincodeFromText,
@@ -717,12 +717,8 @@ export const loginUser = async (req: Request, res: Response) => {
 			return res.status(401).json({ message: 'Invalid email, mobile number, or password' });
 		}
 
-		// Login succeeded -> reset failed attempt tracking and log security event
+		// Login succeeded -> reset failed attempt tracking
 		credentialAttemptTracker.recordSuccess(rawValue);
-		logAuthEvent(true, rawValue, req, 'User authenticated successfully', {
-			userId: String(user._id || user.id),
-			role: user.role,
-		});
 
 		if (user.isBlocked) {
 			return res.status(403).json({ message: 'This account has been blocked by an administrator. Please contact support.' });
@@ -1358,7 +1354,14 @@ export const updateProfile = async (req: AuthenticatedRequest & { file?: Express
 			if (updates.pincode || updates.address || updates.city) {
 				const pin = String(updates.pincode || '');
 				const addr = String(updates.address || '');
-				const city = String(updates.city || 'Bengaluru');
+				let city = String(updates.city || '').trim();
+				if (!city) {
+					if (pin === '411057') city = 'Pune';
+					else if (pin === '845401') city = 'Motihari';
+					else if (pin.startsWith('56')) city = 'Bengaluru';
+					else city = 'Bengaluru';
+				}
+				updates.city = city;
 				updates.assignedLocation = {
 					postalCode: pin,
 					locality: addr,

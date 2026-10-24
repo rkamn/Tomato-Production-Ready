@@ -299,6 +299,7 @@ proxyServer.on('upgrade', (clientReq, clientSocket, clientHead) => {
         clientSocket.destroy();
     });
     clientSocket.on('error', (err) => {
+        console.error(`[WebSocket Client Socket Error] ${err.message}`);
         backendSocket.destroy();
     });
 });

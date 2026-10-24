@@ -148,7 +148,7 @@
             </div>
 
             <!-- Restaurant Location & DIGIPIN Registration Fields -->
-            <div id="restaurant-reg-fields" class="field hidden" style="border-top:1px dashed var(--line); padding-top:0.85rem; margin-top:0.85rem;">
+            <div id="restaurant-reg-fields" class="field hidden" style="border:1px dashed var(--line); border-radius:20px; padding:1.1rem; margin-top:0.85rem; background:rgba(30,29,26,0.02);">
               <label for="restaurant-address">Restaurant Address (Pickup Point)</label>
               <input id="restaurant-address" name="restaurantAddress" type="text" placeholder="12 MG Road / Indiranagar, Bengaluru" />
 
@@ -164,7 +164,7 @@
                 <label for="restaurant-digipin">Restaurant Location / DIGIPIN <span style="color:var(--tomato);">*Required</span></label>
                 <div style="display:flex; gap:0.4rem; margin-top:0.25rem;">
                   <input id="restaurant-digipin" name="digipin" type="text" placeholder="e.g. DGP-560038-A1" style="flex:1;" />
-                  <button type="button" id="btn-detect-rest-gps" style="width:auto; padding:0 0.75rem; font-size:0.75rem; min-height:2.6rem;" onclick="detectRestaurantGPS()">📍 GPS Pin</button>
+                  <button type="button" id="btn-detect-rest-gps" style="width:auto; padding:0 1rem; font-size:0.75rem; min-height:2.6rem; border-radius:9999px;" onclick="detectRestaurantGPS()">📍 GPS Pin</button>
                 </div>
                 <small id="rest-helper-note" style="color:var(--muted); font-size:0.75rem; display:block; margin-top:0.3rem;">
                   Used for order pickup by delivery riders. Each restaurant will receive a unique <strong>&lt;name&gt;/restaurantId</strong>.
@@ -176,7 +176,7 @@
             </div>
 
             <!-- Rider Registration Fields -->
-            <div id="rider-reg-fields" class="field hidden" style="border-top:1px dashed var(--line); padding-top:0.85rem; margin-top:0.85rem;">
+            <div id="rider-reg-fields" class="field hidden" style="border:1px dashed var(--line); border-radius:20px; padding:1.1rem; margin-top:0.85rem; background:rgba(30,29,26,0.02);">
               <label for="rider-vehicle">Delivery Vehicle</label>
               <input id="rider-vehicle" name="deliveryVehicle" type="text" placeholder="Motorcycle, Scooter, EV Bike" />
               <div style="margin-top:0.4rem; font-size:0.75rem; color:var(--muted); line-height:1.4;">

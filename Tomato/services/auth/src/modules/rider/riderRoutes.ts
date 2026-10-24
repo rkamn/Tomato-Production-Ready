@@ -1,22 +1,16 @@
 import express, { Request, Response } from 'express';
 import mongoose from 'mongoose';
-import Address from '../../model/Address.js';
 import Notification from '../../model/Notification.js';
-import Order, { IOrder, OrderStatus } from '../../model/Order.js';
-import Restaurant, { IRestaurant } from '../../model/Restaurant.js';
-import Customer, { ICustomer } from '../../model/Customer.js';
-import Rider, { IRider } from '../../model/Rider.js';
+import Order, { OrderStatus } from '../../model/Order.js';
+import Rider from '../../model/Rider.js';
 import {
   authenticate,
   AuthenticatedRequest,
   requireRole,
-  requirePermission,
 } from '../../middleware/authenticate.js';
 import notificationService from '../notification/notificationService.js';
 import {
-  formatBill,
   buildOrderLiveTrackingData,
-  createNotificationForRole,
 } from '../../utils/orderHelpers.js';
 import {
   validateBankAndPanDetails,
@@ -245,59 +239,51 @@ const createRiderRouter = () => {
         filter.rejectedByRiders = { $ne: riderObjId };
       }
 
-      const orders = await Order.find(filter).sort({ createdAt: -1 });
+      const [platformOrders, shopOrders] = await Promise.all([
+        Order.find(filter).sort({ createdAt: -1 }).lean(),
+        (async () => {
+          try {
+            const ShopOrderModel = (await import('../../model/ShopOrder.js')).default;
+            return await ShopOrderModel.find(filter).sort({ createdAt: -1 }).lean();
+          } catch {
+            return [];
+          }
+        })(),
+      ]);
 
-      const filteredOrders = orders.filter((o) => {
+      const seenOrderNumbers = new Set<string>();
+      const allCandidateOrders: any[] = [];
+      for (const o of platformOrders) {
+        if (!seenOrderNumbers.has(o.orderNumber)) {
+          seenOrderNumbers.add(o.orderNumber);
+          allCandidateOrders.push(o);
+        }
+      }
+      for (const so of shopOrders) {
+        if (!seenOrderNumbers.has(so.orderNumber)) {
+          seenOrderNumbers.add(so.orderNumber);
+          allCandidateOrders.push(so);
+        }
+      }
+
+      const filteredOrders = allCandidateOrders.filter((o) => {
         // If order is already claimed by another rider, do not display
         if (o.riderId && String(o.riderId) !== currentUserId) {
           return false;
         }
-
-        const orderPin = String(
-          (o as any).serviceablePincode ||
-          resolveAddressPincode(o.deliveryAddress) ||
-          resolvePartnerPincode(o) ||
-          ''
-        ).trim();
-
-        const orderCity = String(
-          (o.deliveryAddress as any)?.city ||
-          (o as any).city ||
-          ''
-        ).trim().toLowerCase();
-
-        const restAddress = String(
-          (o as any).restaurantAddress || (o as any).shopAddress || ''
-        ).toLowerCase();
-
-        // 1. Strict serviceable pincode matching:
-        // Placed order must strictly match rider's operating serviceable pincode.
-        if (riderPincode) {
-          if (!orderPin || orderPin !== riderPincode) {
-            return false;
-          }
-        }
-
-        // 2. City matching:
-        if (riderCity) {
-          if (orderCity && !orderCity.includes(riderCity) && !riderCity.includes(orderCity)) {
-            return false;
-          }
-          if (
-            (riderCity.includes('pune') && (restAddress.includes('bengaluru') || restAddress.includes('bangalore'))) ||
-            ((riderCity.includes('bengaluru') || riderCity.includes('bangalore')) && restAddress.includes('pune'))
-          ) {
-            return false;
-          }
-        }
-
-        // If rider has neither pincode nor city configured, do not leak cross-city orders
-        if (!riderPincode && !riderCity) {
-          return Boolean(o.riderId && String(o.riderId) === currentUserId);
-        }
-
         return true;
       });
+
+      // City and pincode are used purely for UI dashboard display; sort local orders first if available
+      if (riderPincode) {
+        filteredOrders.sort((a, b) => {
+          const pinA = String((a as any).serviceablePincode || resolveAddressPincode(a.deliveryAddress) || '').trim();
+          const pinB = String((b as any).serviceablePincode || resolveAddressPincode(b.deliveryAddress) || '').trim();
+          if (pinA === riderPincode && pinB !== riderPincode) return -1;
+          if (pinB === riderPincode && pinA !== riderPincode) return 1;
+          return 0;
+        });
+      }
 
       return res.json({ orders: filteredOrders, isOnline: true });
     } catch (error) {
@@ -323,7 +309,17 @@ const createRiderRouter = () => {
             .json({ message: 'Valid order ID is required' });
         }
 
-        const order = await Order.findById(orderId);
+        let order: any = await Order.findById(orderId);
+        if (!order) {
+          try {
+            const ShopOrderModel = (await import('../../model/ShopOrder.js')).default;
+            const shopOrder = await ShopOrderModel.findById(orderId);
+            if (shopOrder) {
+              order = await Order.findOne({ orderNumber: shopOrder.orderNumber });
+              if (!order) order = shopOrder;
+            }
+          } catch (_) {}
+        }
         if (!order) return res.status(404).json({ message: 'Order not found' });
 
         if (order.riderId && String(order.riderId) !== String(user.userId)) {
@@ -362,7 +358,17 @@ const createRiderRouter = () => {
             .json({ message: 'Valid order ID is required' });
         }
 
-        const order = await Order.findById(orderId);
+        let order: any = await Order.findById(orderId);
+        if (!order) {
+          try {
+            const ShopOrderModel = (await import('../../model/ShopOrder.js')).default;
+            const shopOrder = await ShopOrderModel.findById(orderId);
+            if (shopOrder) {
+              order = await Order.findOne({ orderNumber: shopOrder.orderNumber });
+              if (!order) order = shopOrder;
+            }
+          } catch (_) {}
+        }
         if (!order) return res.status(404).json({ message: 'Order not found' });
 
         if (order.riderId && String(order.riderId) !== String(user.userId)) {
@@ -384,36 +390,6 @@ const createRiderRouter = () => {
           return res.status(400).json({
             message:
               'You are currently OFFLINE. Please toggle your duty status to ONLINE in the sidebar to accept orders.',
-          });
-        }
-
-        const riderPincode = resolveRiderPincode(riderUser);
-        const serviceablePincodes = await getServiceablePincodes();
-        if (!riderPincode || !serviceablePincodes.includes(riderPincode)) {
-          return res.status(400).json({
-            message: 'your area is not in servicable range for now, update your address and pincode for orders.',
-            code: 'AREA_NOT_SERVICEABLE',
-          });
-        }
-
-        const orderPincode =
-          (order as any).serviceablePincode ||
-          resolveAddressPincode(order.deliveryAddress) ||
-          resolvePartnerPincode(order);
-
-        if (riderPincode && orderPincode && riderPincode !== orderPincode) {
-          return res.status(400).json({
-            message: 'your area is not in servicable range for now, update your address and pincode for orders.',
-            code: 'AREA_NOT_SERVICEABLE',
-          });
-        }
-
-        const riderCity = String(riderUser?.city || riderUser?.assignedLocation?.city || '').trim().toLowerCase();
-        const orderCity = String((order.deliveryAddress as any)?.city || '').trim().toLowerCase();
-        if (riderCity && orderCity && !orderCity.includes(riderCity) && !riderCity.includes(orderCity)) {
-          return res.status(400).json({
-            message: 'your area is not in servicable range for now, update your address and pincode for orders.',
-            code: 'AREA_NOT_SERVICEABLE',
           });
         }
 
@@ -488,10 +464,23 @@ const createRiderRouter = () => {
           return res.status(400).json({ message: 'Valid order ID is required' });
         }
 
-        const order = await Order.findOne({
+        let order: any = await Order.findOne({
           _id: new mongoose.Types.ObjectId(orderId),
           riderId: new mongoose.Types.ObjectId(user.userId),
         });
+        if (!order) {
+          try {
+            const ShopOrderModel = (await import('../../model/ShopOrder.js')).default;
+            const shopOrder = await ShopOrderModel.findOne({
+              _id: new mongoose.Types.ObjectId(orderId),
+              riderId: new mongoose.Types.ObjectId(user.userId),
+            });
+            if (shopOrder) {
+              order = await Order.findOne({ orderNumber: shopOrder.orderNumber });
+              if (!order) order = shopOrder;
+            }
+          } catch (_) {}
+        }
         if (!order) {
           return res.status(404).json({ message: 'Order not found or not assigned to you' });
         }
@@ -543,12 +532,43 @@ const createRiderRouter = () => {
       if (!user?.userId)
         return res.status(401).json({ message: 'Authentication required' });
 
-      const orders = await Order.find({
-        riderId: new mongoose.Types.ObjectId(user.userId),
-        status: 'out_for_delivery',
-      }).sort({ updatedAt: -1 });
+      const riderObjId = new mongoose.Types.ObjectId(user.userId);
+      const activeStatuses: OrderStatus[] = ['accepted', 'preparing', 'ready_for_pickup', 'out_for_delivery'];
 
-      return res.json({ orders });
+      const [platformOrders, shopOrders] = await Promise.all([
+        Order.find({
+          riderId: riderObjId,
+          status: { $in: activeStatuses },
+        }).sort({ updatedAt: -1 }).lean(),
+        (async () => {
+          try {
+            const ShopOrderModel = (await import('../../model/ShopOrder.js')).default;
+            return await ShopOrderModel.find({
+              riderId: riderObjId,
+              status: { $in: activeStatuses },
+            }).sort({ updatedAt: -1 }).lean();
+          } catch {
+            return [];
+          }
+        })(),
+      ]);
+
+      const seenNumbers = new Set<string>();
+      const combinedActiveOrders: any[] = [];
+      for (const o of platformOrders) {
+        if (!seenNumbers.has(o.orderNumber)) {
+          seenNumbers.add(o.orderNumber);
+          combinedActiveOrders.push(o);
+        }
+      }
+      for (const so of shopOrders) {
+        if (!seenNumbers.has(so.orderNumber)) {
+          seenNumbers.add(so.orderNumber);
+          combinedActiveOrders.push(so);
+        }
+      }
+
+      return res.json({ orders: combinedActiveOrders });
     } catch (error) {
       console.error('Fetch active deliveries failed:', error);
       return res.status(500).json({ message: 'Unable to fetch active orders' });
@@ -570,10 +590,23 @@ const createRiderRouter = () => {
             .json({ message: 'Valid order ID is required' });
         }
 
-        const order = await Order.findOne({
+        let order: any = await Order.findOne({
           _id: new mongoose.Types.ObjectId(orderId),
           riderId: new mongoose.Types.ObjectId(user.userId),
         });
+        if (!order) {
+          try {
+            const ShopOrderModel = (await import('../../model/ShopOrder.js')).default;
+            const shopOrder = await ShopOrderModel.findOne({
+              _id: new mongoose.Types.ObjectId(orderId),
+              riderId: new mongoose.Types.ObjectId(user.userId),
+            });
+            if (shopOrder) {
+              order = await Order.findOne({ orderNumber: shopOrder.orderNumber });
+              if (!order) order = shopOrder;
+            }
+          } catch (_) {}
+        }
         if (!order)
           return res
             .status(404)

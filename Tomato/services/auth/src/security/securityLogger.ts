@@ -156,6 +156,15 @@ export function shouldThrottleUnauthLog(ip: string, method?: string, rawPath?: s
  * Outputs safe, sanitized, structured log records without leaking credentials.
  */
 export function logSecurityEvent(event: SecurityEvent): void {
+  // Suppress verbose successful login info logs as requested
+  if (
+    event.eventType === 'AUTH_LOGIN_SUCCESS' &&
+    (event.message?.toLowerCase().includes('authenticated successfully') ||
+      event.message?.toLowerCase().includes('login'))
+  ) {
+    return;
+  }
+
   const record: SecurityEvent = {
     eventType: event.eventType,
     severity: event.severity,
@@ -196,10 +205,15 @@ export function logAuthEvent(
   message: string,
   extra?: Record<string, unknown> | undefined,
 ): void {
+  // Do not print log on successful login
+  if (success) {
+    return;
+  }
+
   const userAgentHeader = req.headers['user-agent'];
   logSecurityEvent({
-    eventType: success ? 'AUTH_LOGIN_SUCCESS' : 'AUTH_LOGIN_FAILURE',
-    severity: success ? 'INFO' : 'WARN',
+    eventType: 'AUTH_LOGIN_FAILURE',
+    severity: 'WARN',
     identifier,
     ip: getClientIp(req),
     userAgent: typeof userAgentHeader === 'string' ? userAgentHeader : undefined,

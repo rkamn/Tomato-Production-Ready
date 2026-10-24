@@ -1,39 +1,33 @@
 import express, { Request, Response } from 'express';
 import mongoose from 'mongoose';
-import Address from '../../model/Address.js';
-import MenuItem, { FoodItem } from '../../model/MenuItem.js';
+import { FoodItem } from '../../model/MenuItem.js';
 import Notification from '../../model/Notification.js';
-import Order, { IOrder, OrderStatus } from '../../model/Order.js';
-import Restaurant, { IRestaurant } from '../../model/Restaurant.js';
-import Customer, { ICustomer } from '../../model/Customer.js';
-import Rider, { IRider } from '../../model/Rider.js';
+import Order, { OrderStatus } from '../../model/Order.js';
+import Restaurant from '../../model/Restaurant.js';
+import Customer from '../../model/Customer.js';
 import {
   authenticate,
   AuthenticatedRequest,
   requireRole,
-  requirePermission,
 } from '../../middleware/authenticate.js';
 import notificationService from '../notification/notificationService.js';
 import {
   formatBill,
   resolveAdminGsnNumber,
   buildOrderLiveTrackingData,
-  createNotificationForRole,
 } from '../../utils/orderHelpers.js';
 import { productImageUpload } from '../../middleware/upload.js';
 import {
   validateBankAndPanDetails,
   resolvePartnerPincode,
   getServiceablePincodes,
+  resolveLocationFromDigipinOrPincode,
+  extractPincodeFromText,
 } from '../../utils/bankHelpers.js';
 import Payment from '../../model/Payment.js';
 import Coupon, {
-  COUPON_TYPES,
   COUPON_TYPE_LABELS,
-  SPONSOR_TYPES,
   SPONSOR_TYPE_LABELS,
-  CouponType,
-  SponsorType,
 } from '../../model/Coupon.js';
 import partnerFinanceRoutes from '../partner/partnerFinanceRoutes.js';
 
@@ -186,7 +180,18 @@ const createRestaurantRouter = () => {
         updates.digipin = digipin.trim().toUpperCase();
       if (typeof gsnNumber === 'string')
         updates.gsnNumber = gsnNumber.trim().toUpperCase() || 'NA';
-      if (
+
+      // Restaurant uses digipin and pincode for location
+      const storeDigipin = (updates.digipin as string) || '';
+      const storePincode =
+        extractPincodeFromText(String(updates.restaurantAddress || '')) ||
+        extractPincodeFromText(storeDigipin);
+      if (storeDigipin || storePincode) {
+        updates.restaurantLocation = resolveLocationFromDigipinOrPincode(
+          storeDigipin,
+          storePincode,
+        );
+      } else if (
         lat !== undefined &&
         lng !== undefined &&
         !isNaN(Number(lat)) &&
@@ -212,7 +217,7 @@ const createRestaurantRouter = () => {
   });
 
   // 2. Manage Menu: List, Add, Edit, Delete
-  router.get('/menu/categories', async (req: Request, res: Response) => {
+  router.get('/menu/categories', async (_req: Request, res: Response) => {
     try {
       const distinctCategories: string[] = await FoodItem.distinct('category').exec();
 

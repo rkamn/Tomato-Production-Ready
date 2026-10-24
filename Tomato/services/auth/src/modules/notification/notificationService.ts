@@ -237,30 +237,10 @@ class NotificationService {
       .select('_id name phone currentLocation isOnline address pincode postalCode assignedLocation city')
       .lean();
 
-    // Filter riders whose operating pincode strictly matches the order's serviceable location pincode.
-    // Never fall back to all riders when no matching rider is found.
-    const locationMatchedRiders = orderLocationPincode
-      ? activeRiders.filter((r) => resolveRiderPincode(r) === orderLocationPincode)
-      : [];
-
-    const orderCity = String(
-      (order.deliveryAddress as any)?.city ||
-      (order as any).city ||
-      ''
-    ).trim().toLowerCase();
-
-    const cityMatchedRiders = locationMatchedRiders.filter((r) => {
-      if (!orderCity) return true;
-      const rCity = String(
-        (r as any).city || (r as any).assignedLocation?.city || ''
-      ).trim().toLowerCase();
-      if (!rCity) return true;
-      return orderCity.includes(rCity) || rCity.includes(orderCity);
-    });
-
+    // Candidates evaluated by physical proximity / live GPS coordinates
     const candidates: NearbyRiderCandidate[] = [];
 
-    for (const rider of cityMatchedRiders) {
+    for (const rider of activeRiders) {
       const riderLat = rider.currentLocation?.lat ?? restaurantLat;
       const riderLng = rider.currentLocation?.lng ?? restaurantLng;
 

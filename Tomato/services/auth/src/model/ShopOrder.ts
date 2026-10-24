@@ -37,6 +37,7 @@ export interface IShopOrder extends Document {
   appliedCoupons?: IAppliedOrderCoupon[];
   totalAmount: number;
   deliveryAddress?: IOrderAddress;
+  serviceablePincode?: string;
   paymentStatus: PaymentStatus;
   paymentMethod: PaymentMethod;
   paymentTransactionId?: string;
@@ -215,6 +216,11 @@ const shopOrderSchema: Schema<IShopOrder> = new Schema(
     deliveryAddress: {
       type: shopOrderAddressSchema,
       default: () => ({}),
+    },
+    serviceablePincode: {
+      type: String,
+      default: '',
+      trim: true,
     },
     paymentStatus: {
       type: String,

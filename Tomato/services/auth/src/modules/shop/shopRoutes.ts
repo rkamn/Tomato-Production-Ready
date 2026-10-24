@@ -11,7 +11,11 @@ import {
   AuthenticatedRequest,
   requireRole,
 } from '../../middleware/authenticate.js';
-import { formatBill, resolveAdminGsnNumber } from '../../utils/orderHelpers.js';
+import {
+  formatBill,
+  resolveAdminGsnNumber,
+  getIndianStandardDateString,
+} from '../../utils/orderHelpers.js';
 import Order, { OrderStatus } from '../../model/Order.js';
 import notificationService from '../notification/notificationService.js';
 import { productImageUpload } from '../../middleware/upload.js';
@@ -19,6 +23,8 @@ import {
   validateBankAndPanDetails,
   resolvePartnerPincode,
   getServiceablePincodes,
+  resolveLocationFromDigipinOrPincode,
+  extractPincodeFromText,
 } from '../../utils/bankHelpers.js';
 import Payment from '../../model/Payment.js';
 import Coupon, {
@@ -178,7 +184,18 @@ const createShopRouter = () => {
         updates.digipin = digipin.trim().toUpperCase();
       if (typeof gsnNumber === 'string')
         updates.gsnNumber = gsnNumber.trim().toUpperCase() || 'NA';
-      if (
+
+      // Shop uses digipin and pincode for location
+      const storeDigipin = (updates.digipin as string) || '';
+      const storePincode =
+        extractPincodeFromText(String(updates.shopAddress || '')) ||
+        extractPincodeFromText(storeDigipin);
+      if (storeDigipin || storePincode) {
+        updates.shopLocation = resolveLocationFromDigipinOrPincode(
+          storeDigipin,
+          storePincode,
+        );
+      } else if (
         lat !== undefined &&
         lng !== undefined &&
         !isNaN(Number(lat)) &&
@@ -491,7 +508,7 @@ const createShopRouter = () => {
         const shopName = cleanName || (shopUser ? shopUser.name : 'Tomato Supermart & Daily Essentials');
         const shopAddr = shopUser?.shopAddress || '45 CMH Road, Indiranagar, Bengaluru, 560038';
         const shopCode = shopUser?.shopId || 'shop-1001';
-        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        const dateStr = getIndianStandardDateString();
 
         const initialShopOrders = [
           {

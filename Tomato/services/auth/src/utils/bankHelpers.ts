@@ -353,7 +353,7 @@ export async function syncOrderToTomatoPayment(order: any, isShopOrder = false) 
 }
 
 export const SERVICEABLE_PINCODES_DOC_ID = 'serviceable_pincodes';
-export const DEFAULT_SERVICEABLE_PINCODES = ['560001', '560038', '560008', '560066'];
+export const DEFAULT_SERVICEABLE_PINCODES = ['560001', '560038', '560008', '560066', '411057', '845401'];
 
 export function extractPincodeFromText(raw?: string | null): string {
   if (!raw || typeof raw !== 'string') return '';
@@ -373,7 +373,54 @@ export function resolveCoordinatesFromPincode(
   if (pin === '411057') return { lat: 18.5707, lng: 73.6908 };
   if (pin === '845401') return { lat: 26.6471, lng: 84.9085 };
   if (pin === '560001') return { lat: 12.9716, lng: 77.5946 };
+  if (pin === '560038') return { lat: 12.9780, lng: 77.6408 };
+  if (pin === '560008') return { lat: 12.9719, lng: 77.6200 };
+  if (pin === '560066') return { lat: 12.9698, lng: 77.7499 };
   return null;
+}
+
+export function resolveCoordinatesFromDigipin(
+  digipin?: string,
+): { lat: number; lng: number } | null {
+  if (!digipin || typeof digipin !== 'string') return null;
+  const clean = digipin.trim().toUpperCase();
+  const dgpMatch = clean.match(/DGP-(\d{3,4})-(\d{3,4})/i);
+  if (dgpMatch && dgpMatch[1] && dgpMatch[2]) {
+    const latVal = parseInt(dgpMatch[1], 10) / 100;
+    const lngVal = parseInt(dgpMatch[2], 10) / 100;
+    if (!isNaN(latVal) && !isNaN(lngVal) && latVal > 0 && lngVal > 0) {
+      return { lat: latVal, lng: lngVal };
+    }
+  }
+  const pinMatch = clean.match(/\b\d{6}\b/);
+  if (pinMatch) {
+    return resolveCoordinatesFromPincode(pinMatch[0]);
+  }
+  return null;
+}
+
+export function resolveLocationFromDigipinOrPincode(
+  digipin?: string,
+  pincode?: string,
+  fallbackLoc?: { lat: number; lng: number },
+): { lat: number; lng: number } {
+  if (digipin) {
+    const coords = resolveCoordinatesFromDigipin(digipin);
+    if (coords) return coords;
+  }
+  if (pincode) {
+    const coords = resolveCoordinatesFromPincode(pincode);
+    if (coords) return coords;
+  }
+  if (
+    fallbackLoc &&
+    typeof fallbackLoc.lat === 'number' &&
+    typeof fallbackLoc.lng === 'number' &&
+    (fallbackLoc.lat !== 0 || fallbackLoc.lng !== 0)
+  ) {
+    return fallbackLoc;
+  }
+  return { lat: 12.9716, lng: 77.5946 };
 }
 
 export function resolvePartnerPincode(partner: any): string {

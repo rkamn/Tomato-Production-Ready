@@ -21,6 +21,8 @@ import {
   validateBankAndPanDetails,
   resolvePartnerPincode,
   getServiceablePincodes,
+  resolveLocationFromDigipinOrPincode,
+  extractPincodeFromText,
 } from '../../utils/bankHelpers.js';
 import Payment from '../../model/Payment.js';
 import Coupon, {
@@ -178,7 +180,18 @@ const createRestaurantRouter = () => {
         updates.digipin = digipin.trim().toUpperCase();
       if (typeof gsnNumber === 'string')
         updates.gsnNumber = gsnNumber.trim().toUpperCase() || 'NA';
-      if (
+
+      // Restaurant uses digipin and pincode for location
+      const storeDigipin = (updates.digipin as string) || '';
+      const storePincode =
+        extractPincodeFromText(String(updates.restaurantAddress || '')) ||
+        extractPincodeFromText(storeDigipin);
+      if (storeDigipin || storePincode) {
+        updates.restaurantLocation = resolveLocationFromDigipinOrPincode(
+          storeDigipin,
+          storePincode,
+        );
+      } else if (
         lat !== undefined &&
         lng !== undefined &&
         !isNaN(Number(lat)) &&

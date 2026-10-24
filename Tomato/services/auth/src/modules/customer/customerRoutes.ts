@@ -38,6 +38,7 @@ import {
   formatBill,
   resolveAdminGsnNumber,
   buildOrderLiveTrackingData,
+  getIndianStandardDateString,
 } from '../../utils/orderHelpers.js';
 import {
   syncOrderToTomatoPayment,
@@ -47,6 +48,8 @@ import {
   getServiceablePincodes,
   getAdminPincodeMap,
   matchAdminForPincodes,
+  resolveCoordinatesFromDigipin,
+  resolveCoordinatesFromPincode,
 } from '../../utils/bankHelpers.js';
 import {
   MAX_COUPONS_PER_ORDER,
@@ -273,38 +276,6 @@ const createCustomerRouter = () => {
     }
   });
 
-  // Helper: Resolve coordinates from DigiPIN (e.g. DGP-1297-7759 -> lat: 12.97, lng: 77.59)
-  function resolveCoordinatesFromDigipin(
-    digipin?: string,
-  ): { lat: number; lng: number } | null {
-    if (!digipin || typeof digipin !== 'string') return null;
-    const clean = digipin.trim().toUpperCase();
-    const dgpMatch = clean.match(/DGP-(\d{3,4})-(\d{3,4})/i);
-    if (dgpMatch && dgpMatch[1] && dgpMatch[2]) {
-      const latVal = parseInt(dgpMatch[1], 10) / 100;
-      const lngVal = parseInt(dgpMatch[2], 10) / 100;
-      if (!isNaN(latVal) && !isNaN(lngVal) && latVal > 0 && lngVal > 0) {
-        return { lat: latVal, lng: lngVal };
-      }
-    }
-    const pinMatch = clean.match(/\b\d{6}\b/);
-    if (pinMatch) {
-      return resolveCoordinatesFromPincode(pinMatch[0]);
-    }
-    return null;
-  }
-
-  // Helper: Resolve coordinates from Indian Pincode
-  function resolveCoordinatesFromPincode(
-    pincode?: string,
-  ): { lat: number; lng: number } | null {
-    if (!pincode) return null;
-    const pin = String(pincode).trim();
-    if (pin === '411057') return { lat: 18.5707, lng: 73.6908 };
-    if (pin === '845401') return { lat: 26.6471, lng: 84.9085 };
-    if (pin === '560001') return { lat: 12.9716, lng: 77.5946 };
-    return null;
-  }
 
   // Helper: Extract coordinates from store document
   function getStoreCoordinates(
@@ -2574,26 +2545,13 @@ const createCustomerRouter = () => {
       // Resolve delivery coordinates
       let delivLat: number | null = null;
       let delivLng: number | null = null;
-      if (
-        Array.isArray(deliveryAddress.coordinates) &&
-        deliveryAddress.coordinates.length >= 2
-      ) {
-        const cLng = Number(deliveryAddress.coordinates[0]);
-        const cLat = Number(deliveryAddress.coordinates[1]);
-        if (!isNaN(cLat) && !isNaN(cLng) && (cLat !== 0 || cLng !== 0)) {
-          delivLat = cLat;
-          delivLng = cLng;
-        }
-      }
-      if (delivLat === null || delivLng === null) {
-        if (deliveryAddress.digipin) {
-          const dgpCoords = resolveCoordinatesFromDigipin(
-            deliveryAddress.digipin,
-          );
-          if (dgpCoords) {
-            delivLat = dgpCoords.lat;
-            delivLng = dgpCoords.lng;
-          }
+      if (deliveryAddress.digipin) {
+        const dgpCoords = resolveCoordinatesFromDigipin(
+          deliveryAddress.digipin,
+        );
+        if (dgpCoords) {
+          delivLat = dgpCoords.lat;
+          delivLng = dgpCoords.lng;
         }
       }
       if (delivLat === null || delivLng === null) {
@@ -2604,6 +2562,19 @@ const createCustomerRouter = () => {
           if (pinCoords) {
             delivLat = pinCoords.lat;
             delivLng = pinCoords.lng;
+          }
+        }
+      }
+      if (delivLat === null || delivLng === null) {
+        if (
+          Array.isArray(deliveryAddress.coordinates) &&
+          deliveryAddress.coordinates.length >= 2
+        ) {
+          const cLng = Number(deliveryAddress.coordinates[0]);
+          const cLat = Number(deliveryAddress.coordinates[1]);
+          if (!isNaN(cLat) && !isNaN(cLng) && (cLat !== 0 || cLng !== 0)) {
+            delivLat = cLat;
+            delivLng = cLng;
           }
         }
       }
@@ -2811,25 +2782,28 @@ const createCustomerRouter = () => {
         : restaurantUser
           ? restaurantUser.name
           : 'Tomato Partner Restaurant';
-      const storeAddress = isShopOrder
-        ? shopUser?.shopAddress || '45 CMH Road, Indiranagar, Bengaluru, 560038'
-        : restaurantUser?.restaurantAddress ||
-          '12 Indiranagar 100ft Road, Bengaluru, 560038';
-      const storeLocation = isShopOrder
-        ? shopUser?.shopLocation || { lat: 12.9784, lng: 77.6408 }
-        : restaurantUser?.restaurantLocation || { lat: 12.9716, lng: 77.5946 };
+      let defaultStoreAddr = '12 Indiranagar 100ft Road, Bengaluru, 560038';
+      let defaultStoreLoc = { lat: 12.9716, lng: 77.5946 };
+      if (deliveryPincode === '411057') {
+        defaultStoreAddr = 'Hinjewadi Phase 3, Pune, 411057';
+        defaultStoreLoc = { lat: 18.5707, lng: 73.6908 };
+      } else if (deliveryPincode === '845401') {
+        defaultStoreAddr = 'Main Road, Balua Chowk, Motihari, 845401';
+        defaultStoreLoc = { lat: 26.6471, lng: 84.9085 };
+      }
 
-      // Find eligible riders whose operating pincode matches the serviceable delivery pincode
+      const storeAddress = isShopOrder
+        ? shopUser?.shopAddress || defaultStoreAddr
+        : restaurantUser?.restaurantAddress || defaultStoreAddr;
+      const storeLocation = isShopOrder
+        ? shopUser?.shopLocation || defaultStoreLoc
+        : restaurantUser?.restaurantLocation || defaultStoreLoc;
+
+      // Find eligible riders
       const allRiders = await Rider.find({
         isBlocked: { $ne: true },
         isApproved: { $ne: false },
       }).lean();
-
-      // Only match riders strictly stationed in this order's serviceable delivery pincode.
-      // Never fall back to riders outside this serviceable area.
-      const matchedLocationRiders = allRiders.filter(
-        (r) => resolveRiderPincode(r) === deliveryPincode,
-      );
 
       // Evaluate 1 coupon during billing
       const rawCouponCodes: string[] = Array.isArray(req.body?.couponCodes)
@@ -2900,7 +2874,7 @@ const createCustomerRouter = () => {
       const utrReference = req.body?.utrReference || req.body?.utrNumber || '';
       const paymentStatus = paymentMethod === 'cod' ? 'pending' : 'paid';
 
-      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const dateStr = getIndianStandardDateString();
       const prefix = isShopOrder ? 'SHOP' : 'TOM';
       let orderNumberSuffix = await getNextCounterValue(
         `orderId_${dateStr}`,
@@ -2985,12 +2959,12 @@ const createCustomerRouter = () => {
 
       const order = (await Order.create(orderData)) as unknown as IOrder;
 
-      // Notify online riders working in this specific serviceable area about the new placed pickup
-      const onlineLocationRiders = matchedLocationRiders.filter(
+      // Notify online riders about the new placed pickup
+      const onlineLocationRiders = allRiders.filter(
         (r) => r.isOnline !== false,
       );
       const targetRidersToNotify =
-        onlineLocationRiders.length > 0 ? onlineLocationRiders : matchedLocationRiders;
+        onlineLocationRiders.length > 0 ? onlineLocationRiders : allRiders;
 
       for (const r of targetRidersToNotify) {
         await notificationService.createNotification({
@@ -3050,6 +3024,7 @@ const createCustomerRouter = () => {
                 appliedCoupons,
                 totalAmount: finalTotalAmount,
                 deliveryAddress,
+                serviceablePincode: deliveryPincode,
                 paymentStatus,
                 paymentMethod,
                 paymentTransactionId,

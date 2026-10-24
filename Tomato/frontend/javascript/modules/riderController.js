@@ -25,7 +25,10 @@ async function fetchAvailableRiderOrders() {
     }
 
     container.innerHTML = orders.map((o) => {
-      const restMapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(o.restaurantAddress || o.restaurantName || 'Bengaluru')}`;
+      const isShop = Boolean(o.shopName || (o.orderNumber && o.orderNumber.startsWith('SHOP')));
+      const storeName = o.shopName || o.restaurantName || (isShop ? 'Tomato Grocery Shop' : 'Tomato Kitchen');
+      const storeAddress = o.shopAddress || o.restaurantAddress || '';
+      const restMapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(storeAddress || storeName)}`;
       const custMapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${o.deliveryAddress?.line1 || ''}, ${o.deliveryAddress?.city || ''}`)}`;
 
       return `
@@ -33,7 +36,7 @@ async function fetchAvailableRiderOrders() {
           <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:0.6rem;">
             <div>
               <h3 style="font-size:1.15rem; margin-bottom:0.2rem;">Order #${o.orderNumber}</h3>
-              <span class="badge badge-${o.status}">Restaurant Status: ${o.status.replace(/_/g, ' ')}</span>
+              <span class="badge badge-${o.status}">${isShop ? 'Shop' : 'Restaurant'} Status: ${(o.status || '').replace(/_/g, ' ')}</span>
             </div>
             <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
               <button class="btn btn-danger btn-sm" onclick="rejectDeliveryOrder('${o._id}')">✕ Reject Offer</button>
@@ -43,10 +46,10 @@ async function fetchAvailableRiderOrders() {
 
           <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:1.2rem; margin:1rem 0; padding:0.9rem; background:#f9f6ee; border-radius:8px;">
             <div>
-              <strong style="font-size:0.85rem; color:var(--tomato); text-transform:uppercase;">📍 Restaurant Pickup Location:</strong>
-              <div style="font-weight:700; margin-top:0.2rem;">${escapeHtml(o.restaurantName || 'Tomato Kitchen')}</div>
-              <div style="font-size:0.82rem; color:var(--muted);">${escapeHtml(o.restaurantAddress || 'Bengaluru Quarter')}</div>
-              <a href="${restMapUrl}" target="_blank" style="font-size:0.8rem; color:var(--blue); font-weight:600; display:inline-block; margin-top:0.3rem;">🗺️ Open Restaurant on Map</a>
+              <strong style="font-size:0.85rem; color:var(--tomato); text-transform:uppercase;">📍 ${isShop ? 'Shop' : 'Restaurant'} Pickup Location:</strong>
+              <div style="font-weight:700; margin-top:0.2rem;">${escapeHtml(storeName)}</div>
+              <div style="font-size:0.82rem; color:var(--muted);">${escapeHtml(storeAddress || 'Local Partner Quarter')}</div>
+              <a href="${restMapUrl}" target="_blank" style="font-size:0.8rem; color:var(--blue); font-weight:600; display:inline-block; margin-top:0.3rem;">🗺️ Open ${isShop ? 'Shop' : 'Restaurant'} on Map</a>
             </div>
 
             <div>
@@ -82,6 +85,8 @@ async function acceptDeliveryOrder(orderId) {
   try {
     await apiFetch(`/api/rider/orders/${orderId}/accept`, { method: 'POST' });
     alert('Delivery order claimed! Proceed to pick up the meal.');
+    if (typeof updateRiderOverviewStatsLive === 'function') updateRiderOverviewStatsLive();
+    if (typeof loadRoleOverview === 'function') loadRoleOverview();
     switchView('rider-active');
   } catch (e) {
     if (typeof showServiceableAreaPopup === 'function' && e.message && e.message.toLowerCase().includes('servicable range')) {
@@ -118,6 +123,9 @@ async function fetchActiveRiderOrders() {
     }
 
     container.innerHTML = orders.map((o) => {
+      const isShop = Boolean(o.shopName || (o.orderNumber && o.orderNumber.startsWith('SHOP')));
+      const storeName = o.shopName || o.restaurantName || (isShop ? 'Shop' : 'Restaurant');
+      const storeAddress = o.shopAddress || o.restaurantAddress || '';
       const custMapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${o.deliveryAddress?.line1 || ''}, ${o.deliveryAddress?.city || ''}`)}`;
       const isPickedUp = Boolean(o.isPickedUp || o.pickupStatus === 'picked_up');
       const dist = typeof o.distanceToStoreKm === 'number' ? o.distanceToStoreKm : 2.5;
@@ -159,10 +167,10 @@ async function fetchActiveRiderOrders() {
 
           <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:1.2rem; margin:1.2rem 0; padding:1.2rem; background:#f4f9f5; border-radius:8px;">
             <div>
-              <strong style="color:var(--tomato); font-size:0.82rem; text-transform:uppercase;">Pickup Restaurant:</strong>
-              <div style="font-size:1.05rem; font-weight:700; margin:0.2rem 0;">${escapeHtml(o.restaurantName || 'Restaurant')}</div>
+              <strong style="color:var(--tomato); font-size:0.82rem; text-transform:uppercase;">Pickup ${isShop ? 'Shop' : 'Restaurant'}:</strong>
+              <div style="font-size:1.05rem; font-weight:700; margin:0.2rem 0;">${escapeHtml(storeName)}</div>
               ${o.digipin ? `<div style="font-size:0.82rem; margin:0.2rem 0;"><span class="badge" style="background:#e0f2fe; color:#0369a1; font-weight:700;">📍 DIGIPIN: ${escapeHtml(o.digipin)}</span></div>` : ''}
-              <div style="font-size:0.82rem; color:var(--muted);">${escapeHtml(o.restaurantAddress || 'Bengaluru')}</div>
+              <div style="font-size:0.82rem; color:var(--muted);">${escapeHtml(storeAddress || 'Local Partner Quarter')}</div>
             </div>
             <div>
               <strong style="color:var(--muted); font-size:0.82rem; text-transform:uppercase;">Customer & Contact:</strong>
@@ -218,7 +226,6 @@ async function initiateDeliverOrder(orderId) {
   if (isCod) {
     openRiderCodCollectModal(order || { _id: orderId, orderNumber: '---', totalAmount: 0 });
   } else {
-    if (!confirm('Confirm delivery: Has the order been delivered to the customer?')) return;
     executeDeliverOrder(orderId);
   }
 }
@@ -232,6 +239,8 @@ async function confirmOrderPickup(orderId) {
   try {
     await apiFetch(`/api/rider/orders/${orderId}/pickup`, { method: 'POST' });
     alert('Order marked as picked up from store! Proceed to customer delivery address.');
+    if (typeof updateRiderOverviewStatsLive === 'function') updateRiderOverviewStatsLive();
+    if (typeof loadRoleOverview === 'function') loadRoleOverview();
     await fetchActiveRiderOrders();
   } catch (e) {
     alert(`Pickup confirmation failed: ${e.message}`);
@@ -364,6 +373,9 @@ async function executeDeliverOrder(orderId, codCollectedVia = null, amount = 0) 
       : '';
     alert(`Delivery completed successfully!${collectMsg} ₹40 delivery fee has been credited to your earnings.`);
 
+    if (typeof updateRiderOverviewStatsLive === 'function') {
+      updateRiderOverviewStatsLive();
+    }
     if (typeof loadRoleOverview === 'function') {
       loadRoleOverview();
     }

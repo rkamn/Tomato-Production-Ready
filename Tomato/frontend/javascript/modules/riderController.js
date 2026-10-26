@@ -29,7 +29,45 @@ async function fetchAvailableRiderOrders() {
       const storeName = o.shopName || o.restaurantName || (isShop ? 'Tomato Grocery Shop' : 'Tomato Kitchen');
       const storeAddress = o.shopAddress || o.restaurantAddress || '';
       const restMapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(storeAddress || storeName)}`;
-      const custMapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${o.deliveryAddress?.line1 || ''}, ${o.deliveryAddress?.city || ''}`)}`;
+
+      // Requirement: Customer location priority: Use digipin; if not set, ONLY then search GPS location
+      const custDigipin = (o.deliveryAddress?.digipin || o.digipin || '').trim().toUpperCase();
+      const custHasDigipin = Boolean(custDigipin && custDigipin !== 'NONE' && custDigipin !== 'NULL');
+      const isCustomerLiveGpsShared = Boolean(
+        o.customerLocationMode === 'customer_live_gps_shared' ||
+        o.isLiveGpsShared ||
+        o.customerSharedLocation?.lat !== undefined ||
+        o.deliveryAddress?.isCurrentDeliveryLocation
+      );
+      let custCoords = null;
+
+      // 1. If customer shared current live GPS delivery location, prioritize live GPS
+      if (isCustomerLiveGpsShared) {
+        if (o.customerSharedLocation?.lat !== undefined) {
+          custCoords = { lat: Number(o.customerSharedLocation.lat), lng: Number(o.customerSharedLocation.lng) };
+        } else if (Array.isArray(o.deliveryAddress?.coordinates) && o.deliveryAddress.coordinates.length >= 2) {
+          custCoords = { lat: Number(o.deliveryAddress.coordinates[1]), lng: Number(o.deliveryAddress.coordinates[0]) };
+        }
+      }
+
+      // 2. Otherwise derive from DigiPIN
+      if (!custCoords && custHasDigipin && typeof resolveFrontendCoordinatesFromDigipin === 'function') {
+        custCoords = resolveFrontendCoordinatesFromDigipin(custDigipin);
+      }
+
+      // 3. Fallback: If digipin not set, search GPS coordinates
+      if (!custCoords) {
+        if (Array.isArray(o.deliveryAddress?.coordinates) && o.deliveryAddress.coordinates.length >= 2) {
+          const lng = Number(o.deliveryAddress.coordinates[0]);
+          const lat = Number(o.deliveryAddress.coordinates[1]);
+          if (!isNaN(lat) && !isNaN(lng) && (lat !== 0 || lng !== 0)) {
+            custCoords = { lat, lng };
+          }
+        }
+      }
+      const custMapUrl = custCoords
+        ? `https://www.google.com/maps/dir/?api=1&destination=${custCoords.lat},${custCoords.lng}`
+        : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${o.deliveryAddress?.line1 || ''}, ${o.deliveryAddress?.city || ''}`)}`;
 
       return `
         <div style="border:1px solid var(--line); border-radius:10px; padding:1.2rem; margin-bottom:1.2rem; background:#fff;">
@@ -55,16 +93,31 @@ async function fetchAvailableRiderOrders() {
             <div>
               <strong style="font-size:0.85rem; color:var(--green); text-transform:uppercase;">🏁 Customer Delivery Location:</strong>
               <div style="font-weight:700; margin-top:0.2rem;">${escapeHtml(o.customerName || 'Customer')} (${escapeHtml(o.deliveryAddress?.phone || o.customerPhone || 'N/A')})</div>
+              ${isCustomerLiveGpsShared ? `
+                <div style="font-size:0.82rem; margin:0.2rem 0;">
+                  <span class="badge" style="background:#dbeafe; color:#1e40af; font-weight:700;">📡 Customer Shared Live GPS: ${custCoords ? `${custCoords.lat.toFixed(4)}, ${custCoords.lng.toFixed(4)}` : 'Live'}</span>
+                </div>
+              ` : (custHasDigipin ? `
+                <div style="font-size:0.82rem; margin:0.2rem 0;">
+                  <span class="badge" style="background:#e0f2fe; color:#0369a1; font-weight:700;">📍 Primary Delivery: DigiPIN ${escapeHtml(custDigipin)}</span>
+                </div>
+              ` : `
+                <div style="font-size:0.82rem; margin:0.2rem 0;">
+                  <span class="badge" style="background:#fef3c7; color:#92400e; font-weight:700;">🛰️ No DigiPIN — Using Customer GPS Search</span>
+                </div>
+              `)}
               <div style="font-size:0.84rem; color:var(--ink); margin:0.2rem 0;">
                 ${o.deliveryAddress?.label ? `<span class="badge badge-accepted" style="font-size:0.72rem; padding:1px 6px;">${escapeHtml(o.deliveryAddress.label)}</span> ` : ''}
                 ${escapeHtml(o.deliveryAddress?.line1 || '')}${o.deliveryAddress?.line2 ? ', ' + escapeHtml(o.deliveryAddress.line2) : ''}, ${escapeHtml(o.deliveryAddress?.city || '')} ${escapeHtml(o.deliveryAddress?.postalCode || '')}
               </div>
-              <a href="${custMapUrl}" target="_blank" style="font-size:0.8rem; color:var(--blue); font-weight:600; display:inline-block; margin-top:0.3rem;">🗺️ Open Customer on Map</a>
+              <a href="${custMapUrl}" target="_blank" style="font-size:0.8rem; color:var(--blue); font-weight:600; display:inline-block; margin-top:0.3rem;">
+                ${isCustomerLiveGpsShared ? '🗺️ Navigate to Customer Live GPS' : (custHasDigipin ? '🗺️ Navigate via DigiPIN' : '🛰️ Search Customer GPS Location')}
+              </a>
             </div>
           </div>
 
           <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.85rem; border-top:1px dashed var(--line); padding-top:0.8rem;">
-            <div>Dishes: ${(o.items || []).map((i) => `${i.name} (x${i.quantity})`).join(', ')}</div>
+            <div>Dishes: ${(o.items || []).map((i) => `${i.name}${i.variant ? ' (' + i.variant + ')' : ''} (x${i.quantity})`).join(', ')}</div>
             <div>Payment: <strong>${o.paymentMethod === 'cod' ? '💵 COLLECT ₹' + o.totalAmount + ' COD' : '✓ PREPAID ONLINE'}</strong></div>
           </div>
         </div>
@@ -126,7 +179,40 @@ async function fetchActiveRiderOrders() {
       const isShop = Boolean(o.shopName || (o.orderNumber && o.orderNumber.startsWith('SHOP')));
       const storeName = o.shopName || o.restaurantName || (isShop ? 'Shop' : 'Restaurant');
       const storeAddress = o.shopAddress || o.restaurantAddress || '';
-      const custMapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${o.deliveryAddress?.line1 || ''}, ${o.deliveryAddress?.city || ''}`)}`;
+      const custDigipin = (o.deliveryAddress?.digipin || o.digipin || '').trim().toUpperCase();
+      const custHasDigipin = Boolean(custDigipin && custDigipin !== 'NONE' && custDigipin !== 'NULL');
+      const isCustomerLiveGpsShared = Boolean(
+        o.customerLocationMode === 'customer_live_gps_shared' ||
+        o.isLiveGpsShared ||
+        o.customerSharedLocation?.lat !== undefined ||
+        o.deliveryAddress?.isCurrentDeliveryLocation
+      );
+      let custCoords = null;
+
+      if (isCustomerLiveGpsShared) {
+        if (o.customerSharedLocation?.lat !== undefined) {
+          custCoords = { lat: Number(o.customerSharedLocation.lat), lng: Number(o.customerSharedLocation.lng) };
+        } else if (Array.isArray(o.deliveryAddress?.coordinates) && o.deliveryAddress.coordinates.length >= 2) {
+          custCoords = { lat: Number(o.deliveryAddress.coordinates[1]), lng: Number(o.deliveryAddress.coordinates[0]) };
+        }
+      }
+
+      if (!custCoords && custHasDigipin && typeof resolveFrontendCoordinatesFromDigipin === 'function') {
+        custCoords = resolveFrontendCoordinatesFromDigipin(custDigipin);
+      }
+      if (!custCoords) {
+        // Fallback: If digipin not set, search GPS coordinates
+        if (Array.isArray(o.deliveryAddress?.coordinates) && o.deliveryAddress.coordinates.length >= 2) {
+          const lng = Number(o.deliveryAddress.coordinates[0]);
+          const lat = Number(o.deliveryAddress.coordinates[1]);
+          if (!isNaN(lat) && !isNaN(lng) && (lat !== 0 || lng !== 0)) {
+            custCoords = { lat, lng };
+          }
+        }
+      }
+      const custMapUrl = custCoords
+        ? `https://www.google.com/maps/dir/?api=1&destination=${custCoords.lat},${custCoords.lng}`
+        : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${o.deliveryAddress?.line1 || ''}, ${o.deliveryAddress?.city || ''}`)}`;
       const isPickedUp = Boolean(o.isPickedUp || o.pickupStatus === 'picked_up');
       const dist = typeof o.distanceToStoreKm === 'number' ? o.distanceToStoreKm : 2.5;
       const expectedMins = typeof o.expectedDeliveryTimingMinutes === 'number' ? o.expectedDeliveryTimingMinutes : Math.max(1, Math.round(5 + 2 * dist));
@@ -181,16 +267,31 @@ async function fetchActiveRiderOrders() {
             </div>
             <div>
               <strong style="color:var(--muted); font-size:0.82rem; text-transform:uppercase;">Destination Address:</strong>
+              ${isCustomerLiveGpsShared ? `
+                <div style="font-size:0.82rem; margin:0.2rem 0;">
+                  <span class="badge" style="background:#dbeafe; color:#1e40af; font-weight:700;">📡 Customer Shared Live GPS: ${custCoords ? `${custCoords.lat.toFixed(4)}, ${custCoords.lng.toFixed(4)}` : 'Live'}</span>
+                </div>
+              ` : (custHasDigipin ? `
+                <div style="font-size:0.82rem; margin:0.2rem 0;">
+                  <span class="badge" style="background:#e0f2fe; color:#0369a1; font-weight:700;">📍 Primary Delivery: DigiPIN ${escapeHtml(custDigipin)}</span>
+                </div>
+              ` : `
+                <div style="font-size:0.82rem; margin:0.2rem 0;">
+                  <span class="badge" style="background:#fef3c7; color:#92400e; font-weight:700;">🛰️ No DigiPIN — Using Customer GPS Search</span>
+                </div>
+              `)}
               <div style="font-weight:600; margin:0.2rem 0; font-size:0.92rem; color:var(--ink);">
                 ${o.deliveryAddress?.label ? `<span class="badge badge-accepted" style="font-size:0.72rem; padding:1px 6px;">${escapeHtml(o.deliveryAddress.label)}</span> ` : ''}
                 ${escapeHtml(o.deliveryAddress?.line1 || '')}${o.deliveryAddress?.line2 ? ', ' + escapeHtml(o.deliveryAddress.line2) : ''}, ${escapeHtml(o.deliveryAddress?.city || '')} ${escapeHtml(o.deliveryAddress?.postalCode || '')}
               </div>
-              <a href="${custMapUrl}" target="_blank" class="btn btn-outline btn-sm" style="color:var(--blue);">🗺️ Open GPS Navigation</a>
+              <a href="${custMapUrl}" target="_blank" class="btn btn-outline btn-sm" style="color:var(--blue); font-weight:600;">
+                ${isCustomerLiveGpsShared ? '🗺️ Navigate to Customer Live GPS' : (custHasDigipin ? '🗺️ Navigate via DigiPIN' : '🛰️ Search Customer GPS Location')}
+              </a>
             </div>
           </div>
 
           <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px dashed var(--line); padding-top:0.8rem;">
-            <div>Dishes: ${(o.items || []).map((i) => `${i.name} (x${i.quantity})`).join(', ')}</div>
+            <div>Dishes: ${(o.items || []).map((i) => `${i.name}${i.variant ? ' (' + i.variant + ')' : ''} (x${i.quantity})`).join(', ')}</div>
             <div style="font-weight:700; font-size:1.05rem;">
               ${o.paymentMethod === 'cod' ? '<span style="color:var(--tomato-dark);">💵 Collect Cash on Delivery: ₹' + o.totalAmount + '</span>' : '<span style="color:var(--green);">✓ Paid Online via Gateway</span>'}
             </div>
@@ -875,4 +976,9 @@ window.refreshRiderReportData = refreshRiderReportData;
 window.renderRiderReportData = renderRiderReportData;
 window.exportRiderReportCsv = exportRiderReportCsv;
 window.printRiderReport = printRiderReport;
+
+// Automatically ensure rider live GPS tracking starts over WebSocket
+if (typeof window.initRiderLocationTracking === 'function') {
+  window.initRiderLocationTracking();
+}
 

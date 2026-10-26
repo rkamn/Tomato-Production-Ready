@@ -379,11 +379,73 @@ export function resolveCoordinatesFromPincode(
   return null;
 }
 
+const DIGIPIN_CHARS = '23456789CFJKMPRT';
+
+export function encodeIndiaPostDigipin(lat: number, lng: number): string {
+  let minLat = 2.5;
+  let maxLat = 38.5;
+  let minLng = 63.5;
+  let maxLng = 99.5;
+  let code = '';
+  for (let i = 0; i < 10; i++) {
+    const latSpan = (maxLat - minLat) / 4;
+    const lngSpan = (maxLng - minLng) / 4;
+    let row = Math.floor((maxLat - lat) / latSpan);
+    let col = Math.floor((lng - minLng) / lngSpan);
+    if (row < 0) row = 0;
+    if (row > 3) row = 3;
+    if (col < 0) col = 0;
+    if (col > 3) col = 3;
+    const char = DIGIPIN_CHARS[row * 4 + col];
+    if (char) code += char;
+    maxLat = maxLat - row * latSpan;
+    minLat = maxLat - latSpan;
+    minLng = minLng + col * lngSpan;
+    maxLng = minLng + lngSpan;
+  }
+  return `${code.slice(0, 3)}-${code.slice(3, 6)}-${code.slice(6, 10)}`;
+}
+
+export function decodeIndiaPostDigipin(
+  code: string,
+): { lat: number; lng: number } | null {
+  const clean = code.replace(/[^23456789CFJKMPRT]/gi, '').toUpperCase();
+  if (clean.length < 8) return null;
+  let minLat = 2.5;
+  let maxLat = 38.5;
+  let minLng = 63.5;
+  let maxLng = 99.5;
+  for (let i = 0; i < clean.length; i++) {
+    const char = clean[i];
+    if (!char) return null;
+    const idx = DIGIPIN_CHARS.indexOf(char);
+    if (idx === -1) return null;
+    const row = Math.floor(idx / 4);
+    const col = idx % 4;
+    const latSpan = (maxLat - minLat) / 4;
+    const lngSpan = (maxLng - minLng) / 4;
+    const newMinLat = minLat + (3 - row) * latSpan;
+    const newMaxLat = newMinLat + latSpan;
+    const newMinLng = minLng + col * lngSpan;
+    const newMaxLng = newMinLng + lngSpan;
+    minLat = newMinLat;
+    maxLat = newMaxLat;
+    minLng = newMinLng;
+    maxLng = newMaxLng;
+  }
+  return {
+    lat: Number(((minLat + maxLat) / 2).toFixed(6)),
+    lng: Number(((minLng + maxLng) / 2).toFixed(6)),
+  };
+}
+
 export function resolveCoordinatesFromDigipin(
   digipin?: string,
 ): { lat: number; lng: number } | null {
   if (!digipin || typeof digipin !== 'string') return null;
   const clean = digipin.trim().toUpperCase();
+
+  // 1. Synthetic Tomato format: DGP-XXXX-YYYY (e.g., DGP-1298-7764)
   const dgpMatch = clean.match(/DGP-(\d{3,4})-(\d{3,4})/i);
   if (dgpMatch && dgpMatch[1] && dgpMatch[2]) {
     const latVal = parseInt(dgpMatch[1], 10) / 100;
@@ -392,10 +454,20 @@ export function resolveCoordinatesFromDigipin(
       return { lat: latVal, lng: lngVal };
     }
   }
+
+  // 2. Embedded 6-digit Pincode (e.g. DGP-411057 or 411057-D02)
   const pinMatch = clean.match(/\b\d{6}\b/);
   if (pinMatch) {
-    return resolveCoordinatesFromPincode(pinMatch[0]);
+    const fromPin = resolveCoordinatesFromPincode(pinMatch[0]);
+    if (fromPin) return fromPin;
   }
+
+  // 3. Official India Post DIGIPIN 10-char alphanumeric grid code (e.g. 284-969-9J8K)
+  const officialDecoded = decodeIndiaPostDigipin(clean);
+  if (officialDecoded) {
+    return officialDecoded;
+  }
+
   return null;
 }
 
@@ -404,6 +476,7 @@ export function resolveLocationFromDigipinOrPincode(
   pincode?: string,
   fallbackLoc?: { lat: number; lng: number },
 ): { lat: number; lng: number } {
+  // Requirement: customer, restaurant, shop, admin, subadmin, superadmin use digipin for their address location in place of GPS
   if (digipin) {
     const coords = resolveCoordinatesFromDigipin(digipin);
     if (coords) return coords;

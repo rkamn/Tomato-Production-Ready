@@ -41,25 +41,27 @@ async function loadCustomerMenuSection() {
 
     let custLat = null;
     let custLng = null;
-    if (defaultAddr?.location?.coordinates && Array.isArray(defaultAddr.location.coordinates) && defaultAddr.location.coordinates.length >= 2) {
+    // Requirement: Customer uses digipin for address location in place of GPS location
+    if (defaultAddr?.digipin) {
+      const dgpCoords = resolveFrontendCoordinatesFromDigipin(defaultAddr.digipin);
+      if (dgpCoords) {
+        custLat = dgpCoords.lat;
+        custLng = dgpCoords.lng;
+      }
+    }
+    if ((custLat === null || custLng === null) && customerPin) {
+      const pinCoords = resolveFrontendCoordinatesFromPincode(customerPin);
+      if (pinCoords) {
+        custLat = pinCoords.lat;
+        custLng = pinCoords.lng;
+      }
+    }
+    if ((custLat === null || custLng === null) && defaultAddr?.location?.coordinates && Array.isArray(defaultAddr.location.coordinates) && defaultAddr.location.coordinates.length >= 2) {
       const cLng = Number(defaultAddr.location.coordinates[0]);
       const cLat = Number(defaultAddr.location.coordinates[1]);
       if (!isNaN(cLat) && !isNaN(cLng) && (cLat !== 0 || cLng !== 0)) {
         custLat = cLat;
         custLng = cLng;
-      }
-    }
-    if ((custLat === null || custLng === null) && window.currentUserLat && window.currentUserLng) {
-      custLat = window.currentUserLat;
-      custLng = window.currentUserLng;
-    }
-
-    // If customer's default address is Pune (411057) or Motihari (845401) but coordinates were legacy Bengaluru:
-    if (customerPin && customerPin !== '560001') {
-      const pinCoords = resolveFrontendCoordinatesFromPincode(customerPin);
-      if (pinCoords && (custLat === null || custLng === null || (Math.abs(custLat - 12.9716) < 0.001 && Math.abs(custLng - 77.5946) < 0.001))) {
-        custLat = pinCoords.lat;
-        custLng = pinCoords.lng;
       }
     }
 
@@ -2070,6 +2072,11 @@ function renderMenuItems() {
       const ratingScore = item.rating ? Number(item.rating).toFixed(1) : 'New';
       const reviewCount = item.reviewCount || 0;
 
+      const varList = Array.isArray(item.variants) && item.variants.length > 0 ? item.variants : [];
+      const defaultVar = varList.length > 0 ? (varList.find(v => v.isDefault) || varList[0]) : null;
+      const initialPrice = defaultVar ? Number(defaultVar.price) : Number(item.price);
+      const isInitialFinished = defaultVar ? (defaultVar.isAvailable === false || Number(defaultVar.quantity || 0) <= 0) : false;
+
       return `
         <div class="food-card full-image-item-tile" style="position:relative; overflow:hidden; min-height:225px; border-radius:14px; display:flex; flex-direction:column; justify-content:space-between; padding:1.1rem; color:#ffffff; border:1px solid ${isShopClosed ? '#fca5a5' : 'rgba(255,255,255,0.18)'}; background-color:#1e293b; box-shadow:0 8px 20px rgba(15,23,42,0.18); ${isShopClosed ? 'opacity:0.85;' : ''}">
           ${renderFullTileBackdropHtml(item.image)}
@@ -2098,14 +2105,51 @@ function renderMenuItems() {
           </div>
           <div style="z-index:1; position:relative; margin-top:auto; padding-top:0.5rem;">
             <p class="food-desc" style="margin:0 0 0.4rem 0; font-size:0.83rem; color:#f1f5f9; line-height:1.35; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-shadow:0 1px 3px rgba(0,0,0,0.9);" title="${escapeHtml(item.description || '')}">${escapeHtml(item.description || 'Quality retail item from local store.')}</p>
-            <div class="food-bottom" style="background:rgba(15,23,42,0.32); backdrop-filter:blur(2px); border:1px solid rgba(255,255,255,0.28); border-radius:10px; padding:0.55rem 0.75rem; margin-top:0;">
-              <span class="food-price" style="color:#4ade80; font-weight:800; text-shadow:0 1px 3px rgba(0,0,0,0.85);">₹${Number(item.price).toFixed(2)}</span>
+            <div class="food-bottom" style="background:rgba(15,23,42,0.32); backdrop-filter:blur(2px); border:1px solid rgba(255,255,255,0.28); border-radius:10px; padding:0.55rem 0.75rem; margin-top:0; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.4rem;">
+              <div style="display:flex; align-items:center; gap:0.45rem; flex-wrap:wrap;">
+                <span id="price-${itemIdStr}" class="food-price" style="color:#4ade80; font-weight:800; text-shadow:0 1px 3px rgba(0,0,0,0.85);">₹${initialPrice.toFixed(2)}</span>
+                ${varList.length > 0 ? `
+                  <select
+                    id="variant-select-${itemIdStr}"
+                    class="item-variant-select"
+                    onchange="handleItemVariantSelectChange('${itemIdStr}', this, '${item.restaurantId}', 'shop')"
+                    style="background-color:rgba(15,23,42,0.92); background-image:url(&quot;data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%23ffffff'%3E%3Cpath fill-rule='evenodd' d='M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z' clip-rule='evenodd'/%3E%3C/svg%3E&quot;); background-repeat:no-repeat; background-position:right 0.35rem center; background-size:0.68rem; -webkit-appearance:none; -moz-appearance:none; appearance:none; color:#ffffff; border:1px solid rgba(255,255,255,0.38); border-radius:5px; padding:0.15rem 1.25rem 0.15rem 0.4rem; font-size:0.7rem; font-weight:700; cursor:pointer; max-width:110px; height:25px; outline:none; text-overflow:ellipsis; white-space:nowrap; overflow:hidden;"
+                    title="Select Variant"
+                  >
+                    ${varList.map((v, vIdx) => {
+                      const isFin = v.isAvailable === false || Number(v.quantity || 0) <= 0;
+                      const isDef = defaultVar ? defaultVar.name === v.name : vIdx === 0;
+                      const isSel = isDef;
+                      const formattedPrice = Number(v.price) % 1 === 0 ? Number(v.price).toFixed(0) : Number(v.price).toFixed(2);
+                      const optionLabel = `${escapeHtml(v.name)} - ₹${formattedPrice}${isFin ? ' (Finished)' : ''}`;
+                      return `
+                        <option
+                          value="${escapeHtml(v.name)}"
+                          data-price="${Number(v.price)}"
+                          data-available="${!isFin}"
+                          data-is-default="${isDef}"
+                          ${isSel ? 'selected' : ''}
+                          ${isFin ? 'disabled' : ''}
+                          style="${isFin ? 'color:#94a3b8; background:#1e293b; font-style:italic;' : 'color:#ffffff; background:#0f172a;'}"
+                        >
+                          ${optionLabel}
+                        </option>
+                      `;
+                    }).join('')}
+                  </select>
+                ` : ''}
+              </div>
               ${isShopClosed
                 ? `<button class="btn btn-outline btn-sm" disabled style="opacity:0.75; cursor:not-allowed; border-color:#f87171; color:#fca5a5;" title="Shop is closed and not taking orders">
                     Closed
                   </button>`
-                : `<button class="btn btn-primary btn-sm" style="background:rgba(217,75,53,0.78); border:1px solid rgba(255,255,255,0.35);" onclick="addToCart('${item._id || item.id}', '${escapeHtml(item.name)}', ${Number(item.price)}, '${item.restaurantId}', 'shop')">
-                    + Add to Cart
+                : `<button
+                    id="add-btn-${itemIdStr}"
+                    class="btn btn-primary btn-sm"
+                    ${isInitialFinished ? 'disabled style="opacity:0.6; cursor:not-allowed; background:#64748b;"' : 'style="background:rgba(217,75,53,0.78); border:1px solid rgba(255,255,255,0.35); cursor:pointer;"'}
+                    onclick="handleAddToCartWithVariant('${itemIdStr}', '${escapeHtml(item.name)}', '${item.restaurantId}', 'shop')"
+                  >
+                    ${isInitialFinished ? 'Finished' : '+ Add to Cart'}
                   </button>`
               }
             </div>
@@ -2213,6 +2257,11 @@ function renderMenuItems() {
       ${isNonVeg ? 'NON-VEG' : 'VEG'}
     </span>`;
 
+    const varList = Array.isArray(item.variants) && item.variants.length > 0 ? item.variants : [];
+    const defaultVar = varList.length > 0 ? (varList.find(v => v.isDefault) || varList[0]) : null;
+    const initialPrice = defaultVar ? Number(defaultVar.price) : Number(item.price);
+    const isInitialFinished = defaultVar ? (defaultVar.isAvailable === false || Number(defaultVar.quantity || 0) <= 0) : false;
+
     return `
       <div class="food-card full-image-item-tile" style="position:relative; overflow:hidden; min-height:225px; border-radius:14px; display:flex; flex-direction:column; justify-content:space-between; padding:1.1rem; color:#ffffff; border:1px solid ${isRestClosed ? '#fca5a5' : 'rgba(255,255,255,0.18)'}; background-color:#1e293b; box-shadow:0 8px 20px rgba(15,23,42,0.18); ${isRestClosed ? 'opacity:0.85;' : ''}">
         ${renderFullTileBackdropHtml(item.image)}
@@ -2241,14 +2290,51 @@ function renderMenuItems() {
         </div>
         <div style="z-index:1; position:relative; margin-top:auto; padding-top:0.5rem;">
           <p class="food-desc" style="margin:0 0 0.4rem 0; font-size:0.83rem; color:#f1f5f9; line-height:1.35; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-shadow:0 1px 3px rgba(0,0,0,0.9);" title="${escapeHtml(item.description || '')}">${escapeHtml(item.description || 'Deliciously prepared with authentic ingredients.')}</p>
-          <div class="food-bottom" style="background:rgba(15,23,42,0.32); backdrop-filter:blur(2px); border:1px solid rgba(255,255,255,0.28); border-radius:10px; padding:0.55rem 0.75rem; margin-top:0;">
-            <span class="food-price" style="color:#4ade80; font-weight:800; text-shadow:0 1px 3px rgba(0,0,0,0.85);">₹${Number(item.price).toFixed(2)}</span>
+          <div class="food-bottom" style="background:rgba(15,23,42,0.32); backdrop-filter:blur(2px); border:1px solid rgba(255,255,255,0.28); border-radius:10px; padding:0.55rem 0.75rem; margin-top:0; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.4rem;">
+            <div style="display:flex; align-items:center; gap:0.45rem; flex-wrap:wrap;">
+              <span id="price-${itemIdStr}" class="food-price" style="color:#4ade80; font-weight:800; text-shadow:0 1px 3px rgba(0,0,0,0.85);">₹${initialPrice.toFixed(2)}</span>
+              ${varList.length > 0 ? `
+                <select
+                  id="variant-select-${itemIdStr}"
+                  class="item-variant-select"
+                  onchange="handleItemVariantSelectChange('${itemIdStr}', this, '${item.restaurantId}', 'restaurant')"
+                  style="background-color:rgba(15,23,42,0.92); background-image:url(&quot;data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%23ffffff'%3E%3Cpath fill-rule='evenodd' d='M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z' clip-rule='evenodd'/%3E%3C/svg%3E&quot;); background-repeat:no-repeat; background-position:right 0.35rem center; background-size:0.68rem; -webkit-appearance:none; -moz-appearance:none; appearance:none; color:#ffffff; border:1px solid rgba(255,255,255,0.38); border-radius:5px; padding:0.15rem 1.25rem 0.15rem 0.4rem; font-size:0.7rem; font-weight:700; cursor:pointer; max-width:110px; height:25px; outline:none; text-overflow:ellipsis; white-space:nowrap; overflow:hidden;"
+                  title="Select Variant"
+                >
+                  ${varList.map((v, vIdx) => {
+                    const isFin = v.isAvailable === false || Number(v.quantity || 0) <= 0;
+                    const isDef = defaultVar ? defaultVar.name === v.name : vIdx === 0;
+                    const isSel = isDef;
+                    const formattedPrice = Number(v.price) % 1 === 0 ? Number(v.price).toFixed(0) : Number(v.price).toFixed(2);
+                    const optionLabel = `${escapeHtml(v.name)} - ₹${formattedPrice}${isFin ? ' (Finished)' : ''}`;
+                    return `
+                      <option
+                        value="${escapeHtml(v.name)}"
+                        data-price="${Number(v.price)}"
+                        data-available="${!isFin}"
+                        data-is-default="${isDef}"
+                        ${isSel ? 'selected' : ''}
+                        ${isFin ? 'disabled' : ''}
+                        style="${isFin ? 'color:#94a3b8; background:#1e293b; font-style:italic;' : 'color:#ffffff; background:#0f172a;'}"
+                      >
+                        ${optionLabel}
+                      </option>
+                    `;
+                  }).join('')}
+                </select>
+              ` : ''}
+            </div>
             ${isRestClosed
               ? `<button class="btn btn-outline btn-sm" disabled style="opacity:0.75; cursor:not-allowed; border-color:#f87171; color:#fca5a5;" title="Restaurant is closed and not taking orders">
                   Closed
                 </button>`
-              : `<button class="btn btn-primary btn-sm" style="background:rgba(217,75,53,0.78); border:1px solid rgba(255,255,255,0.35);" onclick="addToCart('${item._id || item.id}', '${escapeHtml(item.name)}', ${Number(item.price)}, '${item.restaurantId}', 'restaurant')">
-                  + Add to Cart
+              : `<button
+                  id="add-btn-${itemIdStr}"
+                  class="btn btn-primary btn-sm"
+                  ${isInitialFinished ? 'disabled style="opacity:0.6; cursor:not-allowed; background:#64748b;"' : 'style="background:rgba(217,75,53,0.78); border:1px solid rgba(255,255,255,0.35); cursor:pointer;"'}
+                  onclick="handleAddToCartWithVariant('${itemIdStr}', '${escapeHtml(item.name)}', '${item.restaurantId}', 'restaurant')"
+                >
+                  ${isInitialFinished ? 'Finished' : '+ Add to Cart'}
                 </button>`
             }
           </div>
@@ -2300,8 +2386,82 @@ function renderMenuItems() {
   grid.innerHTML = cardsHtml;
 }
 
+// Variant Selection Handlers
+function handleItemVariantSelectChange(itemId, selectEl, restaurantId, storeType) {
+  if (!selectEl) return;
+  const selectedOption = selectEl.options[selectEl.selectedIndex];
+  if (!selectedOption) return;
+
+  const price = parseFloat(selectedOption.getAttribute('data-price') || '0');
+  const isAvailable = selectedOption.getAttribute('data-available') === 'true';
+
+  const priceEl = document.getElementById(`price-${itemId}`);
+  if (priceEl) {
+    priceEl.textContent = `₹${price.toFixed(2)}`;
+  }
+
+  const addBtn = document.getElementById(`add-btn-${itemId}`);
+  if (addBtn) {
+    if (!isAvailable) {
+      addBtn.disabled = true;
+      addBtn.textContent = 'Finished';
+      addBtn.style.opacity = '0.6';
+      addBtn.style.cursor = 'not-allowed';
+      addBtn.style.background = '#64748b';
+    } else {
+      addBtn.disabled = false;
+      addBtn.textContent = '+ Add to Cart';
+      addBtn.style.opacity = '1';
+      addBtn.style.cursor = 'pointer';
+      addBtn.style.background = 'rgba(217,75,53,0.78)';
+    }
+  }
+}
+window.handleItemVariantSelectChange = handleItemVariantSelectChange;
+
+function handleAddToCartWithVariant(itemId, name, restaurantId, storeType) {
+  const selectEl = document.getElementById(`variant-select-${itemId}`);
+  let variant = '';
+  let price = 0;
+
+  const sourceList = storeType === 'shop' ? allShopItems : allMenuItems;
+  const item = sourceList.find((m) => String(m.id || m._id) === String(itemId));
+
+  if (selectEl && selectEl.options.length > 0) {
+    const selectedOption = selectEl.options[selectEl.selectedIndex];
+    if (selectedOption) {
+      const isAvail = selectedOption.getAttribute('data-available') === 'true';
+      if (!isAvail) {
+        alert('This variant is finished and out of stock.');
+        return;
+      }
+      variant = selectedOption.value;
+      price = parseFloat(selectedOption.getAttribute('data-price') || (item ? item.price : 0));
+    }
+  } else if (item) {
+    if (Array.isArray(item.variants) && item.variants.length > 0) {
+      const defVar = item.variants.find((v) => v.isDefault) || item.variants[0];
+      if (defVar) {
+        if (defVar.isAvailable === false || Number(defVar.quantity || 0) <= 0) {
+          alert('This variant is finished and out of stock.');
+          return;
+        }
+        variant = defVar.name;
+        price = Number(defVar.price);
+      } else {
+        price = Number(item.price);
+      }
+    } else {
+      price = Number(item.price);
+    }
+  }
+
+  addToCart(itemId, name, price, restaurantId, storeType, variant);
+}
+window.handleAddToCartWithVariant = handleAddToCartWithVariant;
+
 // Cart management
-function addToCart(itemId, name, price, restaurantId, storeType = 'restaurant') {
+function addToCart(itemId, name, price, restaurantId, storeType = 'restaurant', variant = '') {
   let isClosed = false;
   let storeName = 'Store';
   let targetStore = null;
@@ -2379,7 +2539,8 @@ function addToCart(itemId, name, price, restaurantId, storeType = 'restaurant') 
   const storeLoc = targetStore?.location || null;
   const storeAddr = targetStore?.restaurantAddress || targetStore?.shopAddress || targetStore?.address || '';
 
-  const existing = cart.find((i) => i.itemId === itemId);
+  const cleanVariant = (variant || '').trim();
+  const existing = cart.find((i) => String(i.itemId) === String(itemId) && (i.variant || '').trim() === cleanVariant);
   if (existing) {
     existing.quantity += 1;
     if (!existing.category && itemCategory) existing.category = itemCategory;
@@ -2393,6 +2554,7 @@ function addToCart(itemId, name, price, restaurantId, storeType = 'restaurant') 
       name,
       price,
       quantity: 1,
+      variant: cleanVariant,
       restaurantId,
       storeType,
       category: itemCategory,
@@ -2415,9 +2577,11 @@ function addToCart(itemId, name, price, restaurantId, storeType = 'restaurant') 
   }
   updateCartUI();
 }
+window.addToCart = addToCart;
 
-function updateCartQuantity(itemId, delta) {
-  const item = cart.find((i) => i.itemId === itemId);
+function updateCartQuantity(itemId, delta, variant = '') {
+  const cleanVariant = (variant || '').trim();
+  const item = cart.find((i) => String(i.itemId) === String(itemId) && (i.variant || '').trim() === cleanVariant);
   if (!item) return;
   item.quantity += delta;
   if (item.quantity <= 0) {
@@ -2426,24 +2590,27 @@ function updateCartQuantity(itemId, delta) {
   }
   updateCartUI();
 }
+window.updateCartQuantity = updateCartQuantity;
 
 function clearCart() {
   cart.length = 0;
   if (typeof resetAppliedCouponsState === 'function') resetAppliedCouponsState();
   updateCartUI();
 }
+window.clearCart = clearCart;
 
 function renderCartRowsHtml() {
   return cart.map((item) => `
     <div class="cart-row">
       <div>
         <strong>${escapeHtml(item.name)}</strong>
+        ${item.variant ? `<div style="display:inline-block; margin-left:0.35rem; padding:0.12rem 0.45rem; font-size:0.72rem; font-weight:700; border-radius:4px; background:#e0f2fe; color:#0369a1; border:1px solid #7dd3fc;">${escapeHtml(item.variant)}</div>` : ''}
         <div style="font-size:0.75rem; color:var(--muted);">₹${item.price.toFixed(2)} each</div>
       </div>
       <div class="cart-qty-ctrl">
-        <button class="qty-btn" type="button" onclick="updateCartQuantity('${item.itemId}', -1)">-</button>
+        <button class="qty-btn" type="button" onclick="updateCartQuantity('${item.itemId}', -1, '${escapeHtml(item.variant || '')}')">-</button>
         <span style="font-weight:700; width:1.4rem; text-align:center;">${item.quantity}</span>
-        <button class="qty-btn" type="button" onclick="updateCartQuantity('${item.itemId}', 1)">+</button>
+        <button class="qty-btn" type="button" onclick="updateCartQuantity('${item.itemId}', 1, '${escapeHtml(item.variant || '')}')">+</button>
       </div>
       <div style="font-weight:700; min-width:65px; text-align:right;">₹${(item.price * item.quantity).toFixed(2)}</div>
     </div>
@@ -3135,9 +3302,66 @@ async function fetchCustomerServiceablePincodes() {
   return cachedServiceablePincodes;
 }
 
+var DIGIPIN_CHARS = window.DIGIPIN_CHARS || '23456789CFJKMPRT';
+
+function encodeIndiaPostDigipin(lat, lng) {
+  let minLat = 2.5;
+  let maxLat = 38.5;
+  let minLng = 63.5;
+  let maxLng = 99.5;
+  let code = '';
+  for (let i = 0; i < 10; i++) {
+    const latSpan = (maxLat - minLat) / 4;
+    const lngSpan = (maxLng - minLng) / 4;
+    let row = Math.floor((maxLat - lat) / latSpan);
+    let col = Math.floor((lng - minLng) / lngSpan);
+    if (row < 0) row = 0;
+    if (row > 3) row = 3;
+    if (col < 0) col = 0;
+    if (col > 3) col = 3;
+    const char = DIGIPIN_CHARS[row * 4 + col];
+    if (char) code += char;
+    maxLat = maxLat - row * latSpan;
+    minLat = maxLat - latSpan;
+    minLng = minLng + col * lngSpan;
+    maxLng = minLng + lngSpan;
+  }
+  return `${code.slice(0, 3)}-${code.slice(3, 6)}-${code.slice(6, 10)}`;
+}
+window.encodeIndiaPostDigipin = encodeIndiaPostDigipin;
+
+function decodeIndiaPostDigipin(code) {
+  if (!code || typeof code !== 'string') return null;
+  const clean = code.replace(/[^23456789CFJKMPRT]/gi, '').toUpperCase();
+  if (clean.length < 8) return null;
+  let minLat = 2.5, maxLat = 38.5;
+  let minLng = 63.5, maxLng = 99.5;
+  for (let i = 0; i < clean.length; i++) {
+    const idx = DIGIPIN_CHARS.indexOf(clean[i]);
+    if (idx === -1) return null;
+    const row = Math.floor(idx / 4);
+    const col = idx % 4;
+    const latSpan = (maxLat - minLat) / 4;
+    const lngSpan = (maxLng - minLng) / 4;
+    const newMinLat = minLat + (3 - row) * latSpan;
+    const newMaxLat = newMinLat + latSpan;
+    const newMinLng = minLng + col * lngSpan;
+    const newMaxLng = newMinLng + lngSpan;
+    minLat = newMinLat; maxLat = newMaxLat;
+    minLng = newMinLng; maxLng = newMaxLng;
+  }
+  return {
+    lat: Number(((minLat + maxLat) / 2).toFixed(6)),
+    lng: Number(((minLng + maxLng) / 2).toFixed(6)),
+  };
+}
+window.decodeIndiaPostDigipin = decodeIndiaPostDigipin;
+
 function resolveFrontendCoordinatesFromDigipin(digipin) {
   if (!digipin || typeof digipin !== 'string') return null;
   const clean = digipin.trim().toUpperCase();
+
+  // 1. Synthetic Tomato format: DGP-XXXX-YYYY (e.g., DGP-1298-7764)
   const dgpMatch = clean.match(/DGP-(\d{3,4})-(\d{3,4})/i);
   if (dgpMatch && dgpMatch[1] && dgpMatch[2]) {
     const latVal = parseInt(dgpMatch[1], 10) / 100;
@@ -3146,12 +3370,21 @@ function resolveFrontendCoordinatesFromDigipin(digipin) {
       return { lat: latVal, lng: lngVal };
     }
   }
+
+  // 2. Embedded 6-digit Pincode (e.g. DGP-411057 or 411057-D02)
   const pinMatch = clean.match(/\b\d{6}\b/);
   if (pinMatch) {
-    return resolveFrontendCoordinatesFromPincode(pinMatch[0]);
+    const fromPin = resolveFrontendCoordinatesFromPincode(pinMatch[0]);
+    if (fromPin) return fromPin;
   }
+
+  // 3. Official India Post DIGIPIN 10-char alphanumeric grid code (e.g. 284-969-9J8K)
+  const official = decodeIndiaPostDigipin(clean);
+  if (official) return official;
+
   return null;
 }
+window.resolveFrontendCoordinatesFromDigipin = resolveFrontendCoordinatesFromDigipin;
 
 function resolveFrontendCoordinatesFromPincode(pin) {
   if (!pin) return null;
@@ -3159,11 +3392,24 @@ function resolveFrontendCoordinatesFromPincode(pin) {
   if (clean === '411057') return { lat: 18.5707, lng: 73.6908 };
   if (clean === '845401') return { lat: 26.6471, lng: 84.9085 };
   if (clean === '560001') return { lat: 12.9716, lng: 77.5946 };
+  if (clean === '560038') return { lat: 12.9780, lng: 77.6408 };
+  if (clean === '560008') return { lat: 12.9719, lng: 77.6200 };
+  if (clean === '560066') return { lat: 12.9698, lng: 77.7499 };
   return null;
 }
+window.resolveFrontendCoordinatesFromPincode = resolveFrontendCoordinatesFromPincode;
 
 function getAddressCoordinates(addr) {
   if (!addr) return null;
+  // Requirement: Customer uses digipin for address location in place of GPS location
+  if (addr.digipin) {
+    const dgp = resolveFrontendCoordinatesFromDigipin(addr.digipin);
+    if (dgp) return dgp;
+  }
+  const pin = resolveFrontendAddressPincode(addr);
+  const fromPin = resolveFrontendCoordinatesFromPincode(pin);
+  if (fromPin) return fromPin;
+
   if (Array.isArray(addr.location?.coordinates) && addr.location.coordinates.length >= 2) {
     const lng = Number(addr.location.coordinates[0]);
     const lat = Number(addr.location.coordinates[1]);
@@ -3174,16 +3420,25 @@ function getAddressCoordinates(addr) {
     const lng = Number(addr.lng);
     if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
   }
-  if (addr.digipin) {
-    const dgp = resolveFrontendCoordinatesFromDigipin(addr.digipin);
-    if (dgp) return dgp;
-  }
-  const pin = resolveFrontendAddressPincode(addr);
-  return resolveFrontendCoordinatesFromPincode(pin);
+  return null;
 }
 
 function getStoreFrontendCoordinates(store) {
   if (!store) return null;
+  const pin = store.pincode || store.postalCode || resolveFrontendAddressPincode({ line1: store.restaurantAddress || store.shopAddress || store.address || '' });
+  const fromPin = resolveFrontendCoordinatesFromPincode(pin);
+
+  // Requirement: Restaurant/Shop uses digipin for address location in place of GPS location
+  if (store.digipin) {
+    const dgp = resolveFrontendCoordinatesFromDigipin(store.digipin);
+    if (dgp) {
+      if (!fromPin || (typeof calculateFrontendDistanceKm === 'function' ? calculateFrontendDistanceKm(dgp.lat, dgp.lng, fromPin.lat, fromPin.lng) <= 50 : true)) {
+        return dgp;
+      }
+    }
+  }
+  if (fromPin) return fromPin;
+
   if (store.location && typeof store.location.lat === 'number' && typeof store.location.lng === 'number') {
     return { lat: store.location.lat, lng: store.location.lng };
   }
@@ -3192,12 +3447,7 @@ function getStoreFrontendCoordinates(store) {
     const lat = Number(store.location.coordinates[1]);
     if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) return { lat, lng };
   }
-  if (store.digipin) {
-    const dgp = resolveFrontendCoordinatesFromDigipin(store.digipin);
-    if (dgp) return dgp;
-  }
-  const pin = store.pincode || store.postalCode || resolveFrontendAddressPincode({ line1: store.restaurantAddress || store.shopAddress || store.address || '' });
-  return resolveFrontendCoordinatesFromPincode(pin);
+  return null;
 }
 
 function resolveCurrentCartStore() {
@@ -3678,6 +3928,7 @@ async function placeOrderAfterPayment(txnId, method, chosenAddr) {
       quantity: i.quantity,
       price: i.price,
       category: i.category || '',
+      variant: i.variant || '',
     })),
     couponCodes: Array.isArray(appliedCouponCodes) ? appliedCouponCodes.slice(0, 1) : [],
     paymentMethod: method,
@@ -4155,6 +4406,7 @@ function renderCustomerOrdersList(orders) {
             <span class="badge badge-${escapeHtml(o.status || '')}">${escapeHtml(String(o.status || '').replace(/_/g, ' '))}</span>
             ${!['delivered', 'cancelled'].includes(String(o.status || '').toLowerCase()) ? `
               <button class="btn btn-outline btn-sm" style="background:#f0fdf4; border-color:#86efac; color:#15803d; font-weight:600;" onclick="openOrderLiveTrackingModal('${o._id}', 'customer')">📍 Live Tracking</button>
+              <button class="btn btn-outline btn-sm" style="background:#eff6ff; border-color:#93c5fd; color:#1d4ed8; font-weight:600;" onclick="shareCustomerLiveDeliveryLocation('${o._id}')">📍 Share Live GPS</button>
             ` : ''}
             <button class="btn btn-outline btn-sm" onclick="viewOrderBill('${o._id}')">🧾 View Bill</button>
           </div>
@@ -4186,7 +4438,7 @@ function renderCustomerOrdersList(orders) {
                 const canRate = o.status !== 'cancelled';
                 return `
                   <span style="display:inline-flex; align-items:center; gap:0.4rem; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:0.25rem 0.55rem; font-size:0.82rem;">
-                    <span><strong>${escapeHtml(i.name)}</strong> × ${i.quantity}</span>
+                    <span><strong>${escapeHtml(i.name)}</strong>${i.variant ? ` <span style="font-size:0.75rem; color:#0284c7; background:#e0f2fe; padding:0.1rem 0.35rem; border-radius:4px; font-weight:600;">(${escapeHtml(i.variant)})</span>` : ''} × ${i.quantity}</span>
                     ${canRate ? `
                       <button type="button" class="btn-rate-item" data-mode="write" data-item-id="${escapeHtml(itmId)}" data-item-name="${escapeHtml(i.name)}" onclick="handleOrderReviewButtonClick(this)" title="Rate & Review this product">
                         ⭐ Review
@@ -5035,17 +5287,171 @@ function editAddress(id) {
   const digipinInput = document.getElementById('addr-digipin');
   if (digipinInput) digipinInput.value = addr.digipin || '';
   document.getElementById('addr-default').checked = Boolean(addr.isDefault);
+
+  const latInput = document.getElementById('addr-lat');
+  const lngInput = document.getElementById('addr-lng');
+  const isLiveGpsInput = document.getElementById('addr-is-live-gps');
+  const gpsStatus = document.getElementById('addr-gps-status');
+
+  if (Array.isArray(addr.location?.coordinates) && addr.location.coordinates.length >= 2) {
+    if (latInput) latInput.value = addr.location.coordinates[1];
+    if (lngInput) lngInput.value = addr.location.coordinates[0];
+    if (isLiveGpsInput) isLiveGpsInput.value = 'true';
+    if (gpsStatus) {
+      gpsStatus.style.display = 'inline';
+      gpsStatus.style.color = '#15803d';
+      gpsStatus.textContent = `📍 Saved GPS: ${addr.location.coordinates[1]}, ${addr.location.coordinates[0]}`;
+    }
+  } else {
+    if (latInput) latInput.value = '';
+    if (lngInput) lngInput.value = '';
+    if (isLiveGpsInput) isLiveGpsInput.value = 'false';
+    if (gpsStatus) {
+      gpsStatus.style.display = 'none';
+      gpsStatus.textContent = '';
+    }
+  }
+
   document.getElementById('address-edit-form').style.display = 'block';
   document.getElementById('addr-line1').focus();
 }
 
 function cancelAddressEdit() {
   document.getElementById('address-edit-form').style.display = 'none';
+  const gpsStatus = document.getElementById('addr-gps-status');
+  if (gpsStatus) {
+    gpsStatus.style.display = 'none';
+    gpsStatus.textContent = '';
+  }
 }
+
+function shareCurrentDeliveryLocationGps() {
+  const statusEl = document.getElementById('addr-gps-status');
+  if (!navigator.geolocation) {
+    if (typeof showToastNotification === 'function') {
+      showToastNotification('Geolocation is not supported by your browser.', 'error');
+    } else {
+      alert('Geolocation is not supported by your browser.');
+    }
+    return;
+  }
+
+  if (statusEl) {
+    statusEl.style.display = 'inline';
+    statusEl.style.color = '#0284c7';
+    statusEl.textContent = '⏳ Capturing current GPS delivery location...';
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const lat = Number(pos.coords.latitude.toFixed(6));
+      const lng = Number(pos.coords.longitude.toFixed(6));
+
+      const latInput = document.getElementById('addr-lat');
+      const lngInput = document.getElementById('addr-lng');
+      const isLiveGpsInput = document.getElementById('addr-is-live-gps');
+      const line1Input = document.getElementById('addr-line1');
+      const digipinInput = document.getElementById('addr-digipin');
+
+      if (latInput) latInput.value = lat;
+      if (lngInput) lngInput.value = lng;
+      if (isLiveGpsInput) isLiveGpsInput.value = 'true';
+
+      if (line1Input && !line1Input.value.trim()) {
+        line1Input.value = `Current Delivery Location (${lat}, ${lng})`;
+      }
+
+      if (digipinInput && !digipinInput.value.trim() && typeof encodeIndiaPostDigipin === 'function') {
+        digipinInput.value = encodeIndiaPostDigipin(lat, lng);
+      }
+
+      if (statusEl) {
+        statusEl.style.display = 'inline';
+        statusEl.style.color = '#15803d';
+        statusEl.textContent = `✓ Current GPS Location Shared: ${lat}, ${lng}`;
+      }
+
+      if (typeof showToastNotification === 'function') {
+        showToastNotification(`✓ Current delivery GPS location captured (${lat}, ${lng})!`, 'success');
+      }
+    },
+    (err) => {
+      console.warn('Share current delivery location error:', err);
+      if (statusEl) {
+        statusEl.style.display = 'inline';
+        statusEl.style.color = '#dc2626';
+        statusEl.textContent = '✕ Location access denied or unavailable.';
+      }
+      if (typeof showToastNotification === 'function') {
+        showToastNotification('Location access denied or unavailable. Please enter address manually.', 'error');
+      }
+    },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+}
+window.shareCurrentDeliveryLocationGps = shareCurrentDeliveryLocationGps;
+
+async function shareCustomerLiveDeliveryLocation(orderId) {
+  if (!orderId) return;
+  if (!navigator.geolocation) {
+    if (typeof showToastNotification === 'function') {
+      showToastNotification('Geolocation is not supported by your browser.', 'error');
+    }
+    return;
+  }
+
+  if (typeof showToastNotification === 'function') {
+    showToastNotification('Capturing your current GPS location to share with delivery rider...', 'info');
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      const lat = Number(pos.coords.latitude.toFixed(6));
+      const lng = Number(pos.coords.longitude.toFixed(6));
+      try {
+        await apiFetch(`/api/customer/orders/${orderId}/share-gps`, {
+          method: 'POST',
+          body: JSON.stringify({ lat, lng }),
+        });
+
+        if (window.TomatoWS && typeof window.TomatoWS.sendCustomerLocationShare === 'function') {
+          window.TomatoWS.sendCustomerLocationShare(orderId, lat, lng);
+        }
+
+        if (typeof showToastNotification === 'function') {
+          showToastNotification(`✓ Current delivery GPS location (${lat}, ${lng}) shared with delivery rider!`, 'success');
+        }
+
+        if (typeof refreshOrderLiveTracking === 'function') {
+          refreshOrderLiveTracking();
+        }
+        if (typeof loadCustomerOrders === 'function') {
+          loadCustomerOrders();
+        }
+      } catch (err) {
+        if (typeof showToastNotification === 'function') {
+          showToastNotification(`Failed to share GPS location: ${err.message}`, 'error');
+        }
+      }
+    },
+    (err) => {
+      console.warn('GPS location share error:', err);
+      if (typeof showToastNotification === 'function') {
+        showToastNotification('Location permission denied. Unable to share current GPS spot.', 'error');
+      }
+    },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+}
+window.shareCustomerLiveDeliveryLocation = shareCustomerLiveDeliveryLocation;
 
 async function saveCustomerAddress(e) {
   e.preventDefault();
   const id = document.getElementById('addr-id').value;
+  const latVal = Number(document.getElementById('addr-lat')?.value);
+  const lngVal = Number(document.getElementById('addr-lng')?.value);
+  const isLiveGps = document.getElementById('addr-is-live-gps')?.value === 'true';
+
   const payload = {
     label: document.getElementById('addr-label').value.trim(),
     phone: document.getElementById('addr-phone').value.trim(),
@@ -5056,6 +5462,11 @@ async function saveCustomerAddress(e) {
     postalCode: document.getElementById('addr-pincode').value.trim(),
     digipin: (document.getElementById('addr-digipin')?.value || '').trim().toUpperCase(),
     isDefault: document.getElementById('addr-default').checked,
+    ...(isLiveGps && !isNaN(latVal) && !isNaN(lngVal) ? {
+      coordinates: [lngVal, latVal],
+      isCurrentDeliveryLocation: true,
+      isLiveGps: true,
+    } : {}),
   };
 
   try {

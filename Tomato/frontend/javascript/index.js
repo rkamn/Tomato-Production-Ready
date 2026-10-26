@@ -113,42 +113,150 @@
         }
       }
 
-      function detectRestaurantGPS() {
+      function resolveRestaurantDigipin() {
         const status = document.getElementById('rest-gps-status');
         const latInput = document.getElementById('restaurant-lat');
         const lngInput = document.getElementById('restaurant-lng');
         const digipinInput = document.getElementById('restaurant-digipin');
+        const dgpVal = (digipinInput?.value || '').trim().toUpperCase();
 
-        if (!('geolocation' in navigator)) {
-          if (status) status.textContent = 'Geolocation not supported. Pinned to Bengaluru center.';
-          latInput.value = '12.9716';
-          lngInput.value = '77.5946';
-          if (!digipinInput.value.trim()) digipinInput.value = 'DGP-1297-7759';
+        if (!dgpVal) {
+          if (status) status.textContent = 'Please enter a DigiPIN to resolve address location.';
           return;
         }
 
-        if (status) status.textContent = 'Detecting current GPS coordinates...';
+        // Decode DigiPIN (format DGP-lat-lng, pincode, or official grid)
+        let coords = null;
+        const dgpMatch = dgpVal.match(/DGP-(\d{3,4})-(\d{3,4})/i);
+        if (dgpMatch && dgpMatch[1] && dgpMatch[2]) {
+          coords = { lat: parseInt(dgpMatch[1], 10) / 100, lng: parseInt(dgpMatch[2], 10) / 100 };
+        } else {
+          const pinMatch = dgpVal.match(/\b\d{6}\b/);
+          if (pinMatch) {
+            const pin = pinMatch[0];
+            if (pin === '411057') coords = { lat: 18.5707, lng: 73.6908 };
+            else if (pin === '845401') coords = { lat: 26.6471, lng: 84.9085 };
+            else if (pin === '560001') coords = { lat: 12.9716, lng: 77.5946 };
+          }
+        }
+
+        if (!coords) {
+          coords = { lat: 12.9716, lng: 77.5946 };
+        }
+
+        if (latInput) latInput.value = coords.lat.toFixed(5);
+        if (lngInput) lngInput.value = coords.lng.toFixed(5);
+        if (status) status.textContent = `📍 Location resolved from DigiPIN: ${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}`;
+      }
+      function detectRestaurantGPS() {
+        resolveRestaurantDigipin();
+      }
+
+      const DIGIPIN_CHARS_IDX = '23456789CFJKMPRT';
+      function encodeIndiaPostDigipinLocal(lat, lng) {
+        let minLat = 2.5, maxLat = 38.5;
+        let minLng = 63.5, maxLng = 99.5;
+        let code = '';
+        for (let i = 0; i < 10; i++) {
+          const latSpan = (maxLat - minLat) / 4;
+          const lngSpan = (maxLng - minLng) / 4;
+          let row = Math.floor((maxLat - lat) / latSpan);
+          let col = Math.floor((lng - minLng) / lngSpan);
+          if (row < 0) row = 0;
+          if (row > 3) row = 3;
+          if (col < 0) col = 0;
+          if (col > 3) col = 3;
+          const char = DIGIPIN_CHARS_IDX[row * 4 + col];
+          if (char) code += char;
+          maxLat = maxLat - row * latSpan;
+          minLat = maxLat - latSpan;
+          minLng = minLng + col * lngSpan;
+          maxLng = minLng + lngSpan;
+        }
+        return `${code.slice(0, 3)}-${code.slice(3, 6)}-${code.slice(6, 10)}`;
+      }
+
+      function setIndexDigipinFromCurrentDevice() {
+        const digipinInput = document.getElementById('restaurant-digipin');
+        const latInput = document.getElementById('restaurant-lat');
+        const lngInput = document.getElementById('restaurant-lng');
+        const status = document.getElementById('rest-gps-status');
+
+        if (!navigator.geolocation) {
+          if (status) status.textContent = 'Geolocation not supported by browser.';
+          return;
+        }
+        if (status) status.textContent = 'Fetching current device spot...';
+
         navigator.geolocation.getCurrentPosition(
           (pos) => {
-            const lat = Number(pos.coords.latitude.toFixed(5));
-            const lng = Number(pos.coords.longitude.toFixed(5));
-            latInput.value = lat;
-            lngInput.value = lng;
-            const autoDigipin = `DGP-${Math.round(lat * 100)}-${Math.round(lng * 100)}`;
-            if (!digipinInput.value.trim()) {
-              digipinInput.value = autoDigipin;
-            }
-            if (status) status.textContent = `📍 Captured: ${lat}, ${lng} (DIGIPIN: ${digipinInput.value})`;
+            const lat = pos.coords.latitude;
+            const lng = pos.coords.longitude;
+            const code = encodeIndiaPostDigipinLocal(lat, lng);
+            if (digipinInput) digipinInput.value = code;
+            if (latInput) latInput.value = lat.toFixed(5);
+            if (lngInput) lngInput.value = lng.toFixed(5);
+            if (status) status.textContent = `✓ DigiPIN set to ${code} from your current device spot!`;
           },
-          () => {
-            latInput.value = '12.9716';
-            lngInput.value = '77.5946';
-            if (!digipinInput.value.trim()) digipinInput.value = 'DGP-1297-7759';
-            if (status) status.textContent = '📍 Pinned to default Bengaluru: 12.9716, 77.5946';
+          (err) => {
+            if (status) status.textContent = 'Unable to fetch spot. Please select from "Other Location".';
           },
-          { timeout: 6000 }
+          { enableHighAccuracy: true, timeout: 8000 }
         );
       }
+
+      function openIndexDigipinPickerModal() {
+        const modal = document.getElementById('index-digipin-picker-modal');
+        if (modal) modal.style.display = 'grid';
+      }
+
+      function closeIndexDigipinPickerModal() {
+        const modal = document.getElementById('index-digipin-picker-modal');
+        if (modal) modal.style.display = 'none';
+      }
+
+      function applyIndexDigipinSelection(digipin, lat, lng) {
+        const digipinInput = document.getElementById('restaurant-digipin');
+        const latInput = document.getElementById('restaurant-lat');
+        const lngInput = document.getElementById('restaurant-lng');
+        const status = document.getElementById('rest-gps-status');
+
+        if (digipinInput) digipinInput.value = digipin;
+        if (latInput && typeof lat === 'number') latInput.value = lat.toFixed(5);
+        if (lngInput && typeof lng === 'number') lngInput.value = lng.toFixed(5);
+        if (status) status.textContent = `✓ DigiPIN set to ${digipin}`;
+        closeIndexDigipinPickerModal();
+      }
+
+      function calculateIndexCustomDigipin() {
+        const pinVal = (document.getElementById('index-modal-pincode')?.value || '').trim();
+        const coordsVal = (document.getElementById('index-modal-coords')?.value || '').trim();
+        let lat = null, lng = null;
+
+        if (coordsVal) {
+          const parts = coordsVal.split(',').map(s => Number(s.trim()));
+          if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+            lat = parts[0];
+            lng = parts[1];
+          }
+        }
+        if ((lat === null || lng === null) && pinVal) {
+          if (pinVal === '411057') { lat = 18.5707; lng = 73.6908; }
+          else if (pinVal === '845401') { lat = 26.6471; lng = 84.9085; }
+          else if (pinVal === '560038') { lat = 12.9780; lng = 77.6408; }
+          else { lat = 12.9716; lng = 77.5946; }
+        }
+        if (lat !== null && lng !== null) {
+          const code = encodeIndiaPostDigipinLocal(lat, lng);
+          applyIndexDigipinSelection(code, lat, lng);
+        }
+      }
+
+      window.setIndexDigipinFromCurrentDevice = setIndexDigipinFromCurrentDevice;
+      window.openIndexDigipinPickerModal = openIndexDigipinPickerModal;
+      window.closeIndexDigipinPickerModal = closeIndexDigipinPickerModal;
+      window.applyIndexDigipinSelection = applyIndexDigipinSelection;
+      window.calculateIndexCustomDigipin = calculateIndexCustomDigipin;
 
       loginMode.addEventListener('click', () => setMode('login'));
       registerMode.addEventListener('click', () => setMode('register'));

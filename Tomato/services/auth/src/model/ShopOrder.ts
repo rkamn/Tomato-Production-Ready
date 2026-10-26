@@ -68,6 +68,7 @@ const shopOrderItemSchema: Schema<IOrderItem> = new Schema(
     quantity: { type: Number, required: true, min: 1 },
     price: { type: Number, required: true, min: 0 },
     totalPrice: { type: Number, default: 0 },
+    variant: { type: String, trim: true, default: '' },
   },
   { _id: false },
 );

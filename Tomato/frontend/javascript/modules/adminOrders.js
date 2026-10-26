@@ -1039,31 +1039,31 @@ function refreshAdminViews() {
   else loadRoleOverview();
 }
 
-function detectAdminRestaurantGPS() {
-  if (!('geolocation' in navigator)) {
-    alert('Geolocation not supported in this browser.');
+function resolveAdminRestaurantDigipin() {
+  const digipinEl = document.getElementById('adm-restaurant-digipin');
+  const latEl = document.getElementById('adm-restaurant-lat');
+  const lngEl = document.getElementById('adm-restaurant-lng');
+  const digipinVal = (digipinEl?.value || '').trim().toUpperCase();
+
+  if (!digipinVal) {
+    alert('Please enter a DigiPIN (e.g. DGP-1857-7369 or India Post DIGIPIN) to resolve location.');
     return;
   }
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      const lat = Number(pos.coords.latitude.toFixed(5));
-      const lng = Number(pos.coords.longitude.toFixed(5));
-      const latEl = document.getElementById('adm-restaurant-lat');
-      const lngEl = document.getElementById('adm-restaurant-lng');
-      const digipinEl = document.getElementById('adm-restaurant-digipin');
-      if (latEl) latEl.value = lat;
-      if (lngEl) lngEl.value = lng;
-      if (digipinEl && !digipinEl.value) {
-        digipinEl.value = `DGP-${Math.round(lat * 100)}-${Math.round(lng * 100)}`;
-      }
-      alert(`Detected restaurant GPS coordinates: ${lat}, ${lng}`);
-    },
-    (err) => {
-      alert(`GPS Error: ${err.message}. Please enter manually or try again.`);
-    },
-    { enableHighAccuracy: true, timeout: 8000 }
-  );
+
+  const coords = typeof resolveFrontendCoordinatesFromDigipin === 'function'
+    ? resolveFrontendCoordinatesFromDigipin(digipinVal)
+    : null;
+
+  if (coords) {
+    if (latEl) latEl.value = coords.lat.toFixed(5);
+    if (lngEl) lngEl.value = coords.lng.toFixed(5);
+    alert(`📍 Location resolved from DigiPIN: ${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`);
+  } else {
+    alert('Unable to decode DigiPIN. Please enter a valid DigiPIN code.');
+  }
 }
+window.resolveAdminRestaurantDigipin = resolveAdminRestaurantDigipin;
+window.detectAdminRestaurantGPS = resolveAdminRestaurantDigipin;
 
 // Admin Add / Edit User Modal
 function openAdminCreateUserModal(defaultRole = 'restaurant') {

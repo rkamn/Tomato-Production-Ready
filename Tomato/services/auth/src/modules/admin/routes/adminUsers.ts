@@ -40,6 +40,7 @@ import {
   getServiceablePincodes,
   resolvePartnerPincode,
   resolveCoordinatesFromPincode,
+  resolveCoordinatesFromDigipin,
   resolveLocationFromDigipinOrPincode,
 } from '../../../utils/bankHelpers.js';
 import mailService from '../../../services/mailService.js';
@@ -438,35 +439,35 @@ const router = Router();
           lat: 12.9716,
           lng: 77.5946,
         };
-        const rawLat = req.body?.restaurantLocation?.lat ?? req.body?.lat;
-        const rawLng = req.body?.restaurantLocation?.lng ?? req.body?.lng;
-        if (
-          rawLat !== undefined &&
-          rawLng !== undefined &&
-          !isNaN(Number(rawLat)) &&
-          !isNaN(Number(rawLng))
-        ) {
-          restaurantLocation = { lat: Number(rawLat), lng: Number(rawLng) };
-        }
-        if (!digipin) {
-          digipin = `DGP-${Math.round(restaurantLocation.lat * 100)}-${Math.round(restaurantLocation.lng * 100)}`;
-        }
-
         const rAddr = restaurantAddress ? restaurantAddress.trim() : '';
         const rPincode =
           extractPincodeFromText(req.body?.pincode) ||
           extractPincodeFromText(rAddr) ||
           '';
-        if (
-          (rawLat === undefined || rawLng === undefined || (Number(rawLat) === 12.9716 && Number(rawLng) === 77.5946)) &&
-          rPincode
-        ) {
+
+        // Requirement: Restaurant uses digipin for address location in place of GPS location
+        if (digipin) {
+          const dgpCoords = resolveCoordinatesFromDigipin(digipin);
+          if (dgpCoords) restaurantLocation = dgpCoords;
+        } else if (rPincode) {
           const pinCoords = resolveCoordinatesFromPincode(rPincode);
           if (pinCoords) {
             restaurantLocation = pinCoords;
-            if (!req.body?.digipin) {
-              digipin = `DGP-${Math.round(restaurantLocation.lat * 100)}-${Math.round(restaurantLocation.lng * 100)}`;
-            }
+            digipin = `DGP-${Math.round(restaurantLocation.lat * 100)}-${Math.round(restaurantLocation.lng * 100)}`;
+          }
+        } else {
+          const rawLat = req.body?.restaurantLocation?.lat ?? req.body?.lat;
+          const rawLng = req.body?.restaurantLocation?.lng ?? req.body?.lng;
+          if (
+            rawLat !== undefined &&
+            rawLng !== undefined &&
+            !isNaN(Number(rawLat)) &&
+            !isNaN(Number(rawLng))
+          ) {
+            restaurantLocation = { lat: Number(rawLat), lng: Number(rawLng) };
+          }
+          if (!digipin) {
+            digipin = `DGP-${Math.round(restaurantLocation.lat * 100)}-${Math.round(restaurantLocation.lng * 100)}`;
           }
         }
         const serviceablePincodes = await getServiceablePincodes();
@@ -544,34 +545,35 @@ const router = Router();
           lat: 12.9716,
           lng: 77.5946,
         };
-        const rawLat = req.body?.shopLocation?.lat ?? req.body?.restaurantLocation?.lat ?? req.body?.lat;
-        const rawLng = req.body?.shopLocation?.lng ?? req.body?.restaurantLocation?.lng ?? req.body?.lng;
-        if (
-          rawLat !== undefined &&
-          rawLng !== undefined &&
-          !isNaN(Number(rawLat)) &&
-          !isNaN(Number(rawLng))
-        ) {
-          shopLocation = { lat: Number(rawLat), lng: Number(rawLng) };
-        }
-        if (!digipin) {
-          digipin = `DGP-${Math.round(shopLocation.lat * 100)}-${Math.round(shopLocation.lng * 100)}`;
-        }
         const sAddress = (req.body?.shopAddress || req.body?.restaurantAddress || '').trim();
         const sPincode =
           extractPincodeFromText(req.body?.pincode) ||
           extractPincodeFromText(sAddress) ||
           '';
-        if (
-          (rawLat === undefined || rawLng === undefined || (Number(rawLat) === 12.9716 && Number(rawLng) === 77.5946)) &&
-          sPincode
-        ) {
+
+        // Requirement: Shop uses digipin for address location in place of GPS location
+        if (digipin) {
+          const dgpCoords = resolveCoordinatesFromDigipin(digipin);
+          if (dgpCoords) shopLocation = dgpCoords;
+        } else if (sPincode) {
           const pinCoords = resolveCoordinatesFromPincode(sPincode);
           if (pinCoords) {
             shopLocation = pinCoords;
-            if (!req.body?.digipin) {
-              digipin = `DGP-${Math.round(shopLocation.lat * 100)}-${Math.round(shopLocation.lng * 100)}`;
-            }
+            digipin = `DGP-${Math.round(shopLocation.lat * 100)}-${Math.round(shopLocation.lng * 100)}`;
+          }
+        } else {
+          const rawLat = req.body?.shopLocation?.lat ?? req.body?.restaurantLocation?.lat ?? req.body?.lat;
+          const rawLng = req.body?.shopLocation?.lng ?? req.body?.restaurantLocation?.lng ?? req.body?.lng;
+          if (
+            rawLat !== undefined &&
+            rawLng !== undefined &&
+            !isNaN(Number(rawLat)) &&
+            !isNaN(Number(rawLng))
+          ) {
+            shopLocation = { lat: Number(rawLat), lng: Number(rawLng) };
+          }
+          if (!digipin) {
+            digipin = `DGP-${Math.round(shopLocation.lat * 100)}-${Math.round(shopLocation.lng * 100)}`;
           }
         }
         const serviceablePincodes = await getServiceablePincodes();
@@ -886,7 +888,13 @@ const router = Router();
         updates.deliveryVehicle = deliveryVehicle.trim();
       if (typeof digipin === 'string')
         updates.digipin = digipin.trim().toUpperCase();
-      if (
+
+      const pinToResolve = (updates.pincode as string) || (pincode ? String(pincode).trim() : '');
+      const dgpToResolve = (updates.digipin as string) || (req.body?.digipin ? String(req.body.digipin).trim() : '');
+      if (dgpToResolve || pinToResolve) {
+        // Requirement: Restaurant/Shop uses digipin for address location in place of GPS location
+        updates.restaurantLocation = resolveLocationFromDigipinOrPincode(dgpToResolve, pinToResolve);
+      } else if (
         req.body?.lat !== undefined &&
         req.body?.lng !== undefined &&
         !isNaN(Number(req.body.lat)) &&
@@ -897,12 +905,6 @@ const router = Router();
           lat: Number(req.body.lat),
           lng: Number(req.body.lng),
         };
-      } else {
-        const pinToResolve = (updates.pincode as string) || (pincode ? String(pincode).trim() : '');
-        const dgpToResolve = (updates.digipin as string) || (req.body?.digipin ? String(req.body.digipin).trim() : '');
-        if (dgpToResolve || pinToResolve) {
-          updates.restaurantLocation = resolveLocationFromDigipinOrPincode(dgpToResolve, pinToResolve);
-        }
       }
 
       let user: any = await Restaurant.findByIdAndUpdate(

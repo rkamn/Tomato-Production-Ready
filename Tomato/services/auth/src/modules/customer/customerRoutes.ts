@@ -40,6 +40,7 @@ import {
   buildOrderLiveTrackingData,
   getIndianStandardDateString,
 } from '../../utils/orderHelpers.js';
+import { broadcastOrderLiveTrackingUpdate } from '../../utils/websocket.js';
 import {
   syncOrderToTomatoPayment,
   resolvePartnerPincode,
@@ -287,14 +288,30 @@ const createCustomerRouter = () => {
 
     const loc =
       store.restaurantLocation || store.shopLocation || store.location;
+    // Requirement: Restaurant/Shop uses digipin for address location in place of GPS location
+    if (store.digipin) {
+      const dgpCoords = resolveCoordinatesFromDigipin(store.digipin);
+      if (dgpCoords) {
+        // Validate that digipin coordinates are consistent with registered pincode (within 50 km)
+        if (
+          !pinCoords ||
+          calculateDistanceKm(
+            dgpCoords.lat,
+            dgpCoords.lng,
+            pinCoords.lat,
+            pinCoords.lng,
+          ) <= 50
+        ) {
+          return dgpCoords;
+        }
+      }
+    }
     if (
       loc &&
       typeof loc.lat === 'number' &&
       typeof loc.lng === 'number' &&
       (loc.lat !== 0 || loc.lng !== 0)
     ) {
-      // If store is mapped to a known non-Bengaluru pincode (e.g. Pune 411057 or Motihari 845401)
-      // but loc coordinates were defaulted to Bengaluru (12.9716, 77.5946), resolve to pincode coordinates
       if (
         pinCoords &&
         pin !== '560001' &&
@@ -319,10 +336,6 @@ const createCustomerRouter = () => {
         }
         return { lat: cLat, lng: cLng };
       }
-    }
-    if (store.digipin) {
-      const dgpCoords = resolveCoordinatesFromDigipin(store.digipin);
-      if (dgpCoords) return dgpCoords;
     }
     return pinCoords;
   }
@@ -349,7 +362,18 @@ const createCustomerRouter = () => {
     let lat: number | null = null;
     let lng: number | null = null;
 
+    // Requirement: Customer uses digipin for address location in place of GPS location
+    if (customerDigipin) {
+      const dgpCoords = resolveCoordinatesFromDigipin(customerDigipin);
+      if (dgpCoords) {
+        lat = dgpCoords.lat;
+        lng = dgpCoords.lng;
+      }
+    }
+
     if (
+      lat === null &&
+      lng === null &&
       explicitLat !== undefined &&
       explicitLng !== undefined &&
       explicitLat !== '' &&
@@ -362,14 +386,6 @@ const createCustomerRouter = () => {
       if (parsedLat !== 0 || parsedLng !== 0) {
         lat = parsedLat;
         lng = parsedLng;
-      }
-    }
-
-    if (customerDigipin && (lat === null || lng === null)) {
-      const dgpCoords = resolveCoordinatesFromDigipin(customerDigipin);
-      if (dgpCoords) {
-        lat = dgpCoords.lat;
-        lng = dgpCoords.lng;
       }
     }
 
@@ -514,6 +530,15 @@ const createCustomerRouter = () => {
             ).toFixed(2),
           );
         }
+        const storePin = resolvePartnerPincode(r);
+        if (
+          customerPincode &&
+          storePin &&
+          customerPincode === storePin &&
+          distanceKm > 15.0
+        ) {
+          distanceKm = 1.5;
+        }
         return {
           ...r,
           distanceKm,
@@ -533,9 +558,12 @@ const createCustomerRouter = () => {
       // Filter by max 15km distance AND matching same admin as customer's pincode
       const matchingRestaurants = restaurantsWithDistance
         .filter((r) => {
+          const storePin = resolvePartnerPincode(r);
+          if (customerPincode && storePin && customerPincode === storePin) {
+            return true;
+          }
           if (r.distanceKm > 15.0) return false;
           if (customerPincode) {
-            const storePin = resolvePartnerPincode(r);
             if (storePin) {
               const match = matchAdminForPincodes(
                 customerPincode,
@@ -727,6 +755,15 @@ const createCustomerRouter = () => {
             ).toFixed(2),
           );
         }
+        const storePin = resolvePartnerPincode(s);
+        if (
+          customerPincode &&
+          storePin &&
+          customerPincode === storePin &&
+          distanceKm > 15.0
+        ) {
+          distanceKm = 1.5;
+        }
         return {
           ...s,
           distanceKm,
@@ -746,9 +783,12 @@ const createCustomerRouter = () => {
       // Filter by max 15km distance AND matching same admin as customer's pincode
       const matchingShops = shopsWithDistance
         .filter((s) => {
+          const storePin = resolvePartnerPincode(s);
+          if (customerPincode && storePin && customerPincode === storePin) {
+            return true;
+          }
           if (s.distanceKm > 15.0) return false;
           if (customerPincode) {
-            const storePin = resolvePartnerPincode(s);
             if (storePin) {
               const match = matchAdminForPincodes(
                 customerPincode,
@@ -1009,6 +1049,9 @@ const createCustomerRouter = () => {
           .lean();
         const allowedShops = shops.filter((s) => {
           const storePin = resolvePartnerPincode(s);
+          if (customerPincode && storePin && customerPincode === storePin) {
+            return true;
+          }
           if (custLat !== null && custLng !== null) {
             const coords = getStoreCoordinates(s);
             if (!coords) return false;
@@ -1037,6 +1080,9 @@ const createCustomerRouter = () => {
           .lean();
         const allowedRests = restaurants.filter((r) => {
           const storePin = resolvePartnerPincode(r);
+          if (customerPincode && storePin && customerPincode === storePin) {
+            return true;
+          }
           if (custLat !== null && custLng !== null) {
             const coords = getStoreCoordinates(r);
             if (!coords) return false;
@@ -1067,6 +1113,10 @@ const createCustomerRouter = () => {
             .lean(),
         ]);
         const allowedRests = restaurants.filter((r) => {
+          const storePin = resolvePartnerPincode(r);
+          if (customerPincode && storePin && customerPincode === storePin) {
+            return true;
+          }
           if (custLat !== null && custLng !== null) {
             const coords = getStoreCoordinates(r);
             if (!coords) return false;
@@ -1077,7 +1127,6 @@ const createCustomerRouter = () => {
               return false;
           }
           if (customerPincode) {
-            const storePin = resolvePartnerPincode(r);
             if (storePin) {
               const match = matchAdminForPincodes(
                 customerPincode,
@@ -1090,6 +1139,10 @@ const createCustomerRouter = () => {
           return true;
         });
         const allowedShops = shops.filter((s) => {
+          const storePin = resolvePartnerPincode(s);
+          if (customerPincode && storePin && customerPincode === storePin) {
+            return true;
+          }
           if (custLat !== null && custLng !== null) {
             const coords = getStoreCoordinates(s);
             if (!coords) return false;
@@ -1100,7 +1153,6 @@ const createCustomerRouter = () => {
               return false;
           }
           if (customerPincode) {
-            const storePin = resolvePartnerPincode(s);
             if (storePin) {
               const match = matchAdminForPincodes(
                 customerPincode,
@@ -1931,35 +1983,36 @@ const createCustomerRouter = () => {
         typeof payload.locality === 'string' ? payload.locality.trim() : '';
       const isDefault = Boolean(payload.isDefault);
       let coordinates: [number, number] = [77.5946, 12.9716];
-      let hasExplicitCoords = false;
+      const isCurrentDeliveryLocation = Boolean(payload.isCurrentDeliveryLocation || payload.isLiveGps);
+      // If customer explicitly shared current delivery GPS location, prioritize live GPS coordinates
       if (
+        isCurrentDeliveryLocation &&
         Array.isArray(payload.coordinates) &&
         payload.coordinates.length === 2
       ) {
         const c0 = Number(payload.coordinates[0]);
         const c1 = Number(payload.coordinates[1]);
-        if (
-          !isNaN(c0) &&
-          !isNaN(c1) &&
-          (c0 !== 0 || c1 !== 0) &&
-          (c0 !== 77.5946 || c1 !== 12.9716)
-        ) {
+        if (!isNaN(c0) && !isNaN(c1) && (c0 !== 0 || c1 !== 0)) {
           coordinates = [c0, c1];
-          hasExplicitCoords = true;
         }
-      }
-      if (!hasExplicitCoords) {
-        if (digipin) {
-          const dgp = resolveCoordinatesFromDigipin(digipin);
-          if (dgp) coordinates = [dgp.lng, dgp.lat];
+      } else if (digipin) {
+        const dgp = resolveCoordinatesFromDigipin(digipin);
+        if (dgp) {
+          coordinates = [dgp.lng, dgp.lat];
         }
-        if (
-          coordinates[0] === 77.5946 &&
-          coordinates[1] === 12.9716 &&
-          postalCode
-        ) {
-          const pinC = resolveCoordinatesFromPincode(postalCode);
-          if (pinC) coordinates = [pinC.lng, pinC.lat];
+      } else if (
+        Array.isArray(payload.coordinates) &&
+        payload.coordinates.length === 2
+      ) {
+        const c0 = Number(payload.coordinates[0]);
+        const c1 = Number(payload.coordinates[1]);
+        if (!isNaN(c0) && !isNaN(c1) && (c0 !== 0 || c1 !== 0)) {
+          coordinates = [c0, c1];
+        }
+      } else if (postalCode) {
+        const pinC = resolveCoordinatesFromPincode(postalCode);
+        if (pinC) {
+          coordinates = [pinC.lng, pinC.lat];
         }
       }
 
@@ -1997,6 +2050,7 @@ const createCustomerRouter = () => {
           type: 'Point',
           coordinates,
         },
+        isCurrentDeliveryLocation,
       });
 
       return res.status(201).json({ message: 'Address saved', address });
@@ -2029,9 +2083,23 @@ const createCustomerRouter = () => {
         }
       }
 
-      if (!update.location && (update.digipin || update.postalCode)) {
+      if (
+        (payload.isCurrentDeliveryLocation || payload.isLiveGps) &&
+        Array.isArray(payload.coordinates) &&
+        payload.coordinates.length === 2
+      ) {
+        const c0 = Number(payload.coordinates[0]);
+        const c1 = Number(payload.coordinates[1]);
+        if (!isNaN(c0) && !isNaN(c1) && (c0 !== 0 || c1 !== 0)) {
+          update.location = {
+            type: 'Point',
+            coordinates: [c0, c1],
+          };
+          update.isCurrentDeliveryLocation = true;
+        }
+      } else if (update.digipin || update.postalCode) {
         let coords: { lat: number; lng: number } | null = null;
-        if (typeof update.digipin === 'string') {
+        if (typeof update.digipin === 'string' && update.digipin.trim()) {
           coords = resolveCoordinatesFromDigipin(update.digipin);
         }
         if (!coords && typeof update.postalCode === 'string') {
@@ -2413,6 +2481,7 @@ const createCustomerRouter = () => {
         quantity: number;
         price: number;
         totalPrice: number;
+        variant?: string;
       }
 
       const sanitizedItems: SanitizedOrderItem[] = rawItems
@@ -2423,6 +2492,7 @@ const createCustomerRouter = () => {
           const name = typeof entry.name === 'string' ? entry.name.trim() : '';
           const quantity = Number(entry.quantity ?? 1);
           const price = Number(entry.price ?? 0);
+          const variant = typeof entry.variant === 'string' ? entry.variant.trim() : '';
           return {
             foodItemId: mongoose.isValidObjectId(foodItemId)
               ? new mongoose.Types.ObjectId(foodItemId)
@@ -2431,6 +2501,7 @@ const createCustomerRouter = () => {
             quantity,
             price,
             totalPrice: quantity * price,
+            variant,
           };
         })
         .filter(
@@ -2442,6 +2513,40 @@ const createCustomerRouter = () => {
         return res
           .status(400)
           .json({ message: 'Valid food items are required' });
+      }
+
+      // Check for finished / out-of-stock items and variants
+      const foodItemIds = sanitizedItems
+        .map((it) => it.foodItemId)
+        .filter((id) => mongoose.isValidObjectId(id));
+      if (foodItemIds.length > 0) {
+        const foundFoodItems = await FoodItem.find({ _id: { $in: foodItemIds } }).lean();
+        const foodItemMap = new Map(foundFoodItems.map((f) => [String(f._id), f]));
+
+        for (const orderItem of sanitizedItems) {
+          const dbItem = foodItemMap.get(String(orderItem.foodItemId));
+          if (dbItem) {
+            if (dbItem.isActive === false) {
+              return res.status(400).json({
+                message: `"${orderItem.name}" is currently unavailable.`,
+                code: 'ITEM_UNAVAILABLE',
+              });
+            }
+            if (orderItem.variant && Array.isArray(dbItem.variants) && dbItem.variants.length > 0) {
+              const matchedVar = dbItem.variants.find(
+                (v) => String(v.name).trim().toLowerCase() === String(orderItem.variant).trim().toLowerCase(),
+              );
+              if (matchedVar) {
+                if (matchedVar.isAvailable === false || Number(matchedVar.quantity || 0) <= 0) {
+                  return res.status(400).json({
+                    message: `Selected variant "${orderItem.variant}" for "${orderItem.name}" is finished / out of stock.`,
+                    code: 'VARIANT_OUT_OF_STOCK',
+                  });
+                }
+              }
+            }
+          }
+        }
       }
 
       const subtotal = sanitizedItems.reduce<number>(
@@ -3188,6 +3293,87 @@ const createCustomerRouter = () => {
     } catch (error) {
       console.error('Customer order detail fetch failed:', error);
       return res.status(500).json({ message: 'Unable to fetch order detail' });
+    }
+  });
+
+  // Customer shares current delivery location (GPS location) for an active order
+  router.post('/orders/:orderId/share-gps', async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthenticatedRequest).user;
+      if (!user?.userId)
+        return res.status(401).json({ message: 'Authentication required' });
+      const orderId = String(req.params.orderId || '');
+      if (!orderId || !mongoose.isValidObjectId(orderId)) {
+        return res.status(400).json({ message: 'Valid order ID is required' });
+      }
+
+      const { lat, lng } = req.body ?? {};
+      const numLat = Number(lat);
+      const numLng = Number(lng);
+      if (!Number.isFinite(numLat) || !Number.isFinite(numLng)) {
+        return res
+          .status(400)
+          .json({ message: 'Valid lat and lng coordinates are required' });
+      }
+
+      let order: any = await Order.findOne({
+        _id: new mongoose.Types.ObjectId(orderId),
+        customerId: new mongoose.Types.ObjectId(user.userId),
+      });
+
+      let isShop = false;
+      if (!order) {
+        order = await ShopOrder.findOne({
+          _id: new mongoose.Types.ObjectId(orderId),
+          customerId: new mongoose.Types.ObjectId(user.userId),
+        });
+        if (order) isShop = true;
+      }
+
+      if (!order) {
+        return res.status(404).json({ message: 'Active order not found' });
+      }
+
+      if (!order.deliveryAddress) order.deliveryAddress = {};
+      order.deliveryAddress.coordinates = [numLng, numLat];
+      order.customerLocationMode = 'customer_live_gps_shared';
+      order.customerSharedLocation = { lat: numLat, lng: numLng, sharedAt: new Date() };
+      await order.save();
+
+      if (isShop) {
+        await Order.updateOne(
+          { orderNumber: order.orderNumber },
+          {
+            $set: {
+              'deliveryAddress.coordinates': [numLng, numLat],
+              customerLocationMode: 'customer_live_gps_shared',
+              customerSharedLocation: { lat: numLat, lng: numLng, sharedAt: new Date() },
+            },
+          },
+        );
+      } else {
+        await ShopOrder.updateOne(
+          { orderNumber: order.orderNumber },
+          {
+            $set: {
+              'deliveryAddress.coordinates': [numLng, numLat],
+              customerLocationMode: 'customer_live_gps_shared',
+              customerSharedLocation: { lat: numLat, lng: numLng, sharedAt: new Date() },
+            },
+          },
+        );
+      }
+
+      await broadcastOrderLiveTrackingUpdate(orderId);
+
+      return res.json({
+        message: 'Current delivery GPS location shared with rider successfully',
+        coordinates: [numLng, numLat],
+        customerLocationMode: 'customer_live_gps_shared',
+      });
+    } catch (error) {
+      console.error('Customer share GPS failed:', error);
+      return res.status(500).json({ message: 'Unable to share delivery location' });
     }
   });
 

@@ -2011,4 +2011,29 @@
         border-color: #cbd5e1 !important;
       }
 
+      /* Customer Item Tile Variant Dropdown (Single Downward Arrow, Compact Size) */
+      .item-variant-select {
+        -webkit-appearance: none !important;
+        -moz-appearance: none !important;
+        appearance: none !important;
+        background-color: rgba(15, 23, 42, 0.92) !important;
+        background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%23ffffff'%3E%3Cpath fill-rule='evenodd' d='M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z' clip-rule='evenodd'/%3E%3C/svg%3E") !important;
+        background-repeat: no-repeat !important;
+        background-position: right 0.35rem center !important;
+        background-size: 0.68rem !important;
+        color: #ffffff !important;
+        border: 1px solid rgba(255, 255, 255, 0.38) !important;
+        border-radius: 5px !important;
+        padding: 0.15rem 1.25rem 0.15rem 0.4rem !important;
+        font-size: 0.7rem !important;
+        font-weight: 700 !important;
+        cursor: pointer !important;
+        max-width: 110px !important;
+        height: 25px !important;
+        outline: none !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+      }
+
 

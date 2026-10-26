@@ -1,6 +1,7 @@
 const API_ROOT = window.location.hostname
   ? `${window.location.protocol}//${window.location.hostname}:5050`
   : 'http://localhost:5050';
+window.API_ROOT = API_ROOT;
 
 function isTokenExpired(tokenStr) {
   if (window.TomatoSecurity && typeof window.TomatoSecurity.isTokenExpired === 'function') {
@@ -26,6 +27,7 @@ function isTokenExpired(tokenStr) {
 }
 
 const token = localStorage.getItem('tomatoToken');
+window.token = token;
 const storedUser = JSON.parse(localStorage.getItem('tomatoUser') || 'null');
 if (!token || !storedUser || !storedUser.role || isTokenExpired(token)) {
   if (window.TomatoSecurity && typeof window.TomatoSecurity.clearClientSession === 'function') {
@@ -346,9 +348,10 @@ let selectedPaymentMethod = 'razorpay';
 
 // Safe fetch helper with Auth
 async function apiFetch(endpoint, options = {}) {
+  const currentToken = localStorage.getItem('tomatoToken') || token;
   const headers = {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
+    Authorization: `Bearer ${currentToken}`,
     ...(options.headers || {}),
   };
   const res = await fetch(`${API_ROOT}${endpoint}`, {
@@ -642,9 +645,14 @@ async function broadcastRiderLocation(lat, lng, label = '') {
   currentRiderCoords = { lat: Number(lat), lng: Number(lng) };
   updateRiderTelemetryUI(currentRiderCoords.lat, currentRiderCoords.lng);
 
-  // Push real-time GPS coordinates over WebSocket immediately on every change
+  const riderPhone =
+    (typeof storedUser !== 'undefined' ? storedUser?.phone : null) ||
+    (typeof user !== 'undefined' ? user?.phone : null) ||
+    '';
+
+  // Push real-time GPS coordinates over WebSocket immediately on every change, tracked by phone/mobile number
   if (window.TomatoWS && typeof window.TomatoWS.sendRiderLocationPing === 'function') {
-    window.TomatoWS.sendRiderLocationPing(currentRiderCoords.lat, currentRiderCoords.lng, true);
+    window.TomatoWS.sendRiderLocationPing(currentRiderCoords.lat, currentRiderCoords.lng, true, riderPhone);
   }
 
   // Throttle HTTP database persistence to at most once every 15 seconds unless manual action (label)
@@ -664,6 +672,8 @@ async function broadcastRiderLocation(lat, lng, label = '') {
       body: JSON.stringify({
         lat: currentRiderCoords.lat,
         lng: currentRiderCoords.lng,
+        phone: riderPhone,
+        mobile: riderPhone,
         isOnline: true,
       }),
     });
@@ -743,6 +753,7 @@ function initRiderLocationTracking() {
     broadcastRiderLocation(currentRiderCoords.lat, currentRiderCoords.lng);
   }, 10000);
 }
+window.initRiderLocationTracking = initRiderLocationTracking;
 
 function playNotificationSound() {
   try {
@@ -4789,7 +4800,10 @@ function renderOrderLiveTracking(rawData) {
   ${isOnline ? '🟢 Live GPS Tracking via WebSocket' : '⚪ Signal Standby'}
   </span>
   </div>
-  <div style="font-size:0.78rem; color:var(--muted); margin-top:0.35rem;">
+  <div style="font-size:0.78rem; color:#0369a1; font-weight:700; margin-top:0.35rem;">
+  📱 Tracked via Mobile: ${escapeHtml(rider.phone || 'Live Number Connected')}
+  </div>
+  <div style="font-size:0.75rem; color:var(--muted); margin-top:0.2rem;">
   GPS: ${rider.location?.lat ? `${Number(rider.location.lat).toFixed(4)}, ${Number(rider.location.lng).toFixed(4)}` : 'Live Stream'}
   </div>
   </div>
@@ -4801,11 +4815,17 @@ function renderOrderLiveTracking(rawData) {
   ${escapeHtml(cust.address?.line1 || 'Delivery Address')}${cust.address?.city ? ', ' + escapeHtml(cust.address.city) : ''}
   </div>
   <div style="margin-top:0.3rem; display:flex; gap:0.4rem; flex-wrap:wrap;">
-  <span class="badge" style="background:#ecfdf5; color:#047857; font-weight:700; font-size:0.75rem;">📍 DIGIPIN: ${escapeHtml(cust.digipin || cust.address?.digipin || 'DGP-BLR')}</span>
+  ${cust.isLiveGpsShared || telem.customerLocationMode === 'customer_live_gps_shared' ? `
+    <span class="badge" style="background:#dbeafe; color:#1e40af; font-weight:700; font-size:0.75rem;">📡 Live GPS Shared by Customer</span>
+  ` : `
+    <span class="badge" style="background:#ecfdf5; color:#047857; font-weight:700; font-size:0.75rem;">📍 DIGIPIN: ${escapeHtml(cust.digipin || cust.address?.digipin || 'DGP-BLR')}</span>
+  `}
   <span class="badge" style="background:#f1f5f9; color:#475569; font-weight:700; font-size:0.75rem;">📮 PIN: ${escapeHtml(cust.pincode || cust.address?.postalCode || '560001')}</span>
   </div>
   <div style="font-size:0.78rem; color:var(--muted); margin-top:0.35rem;">
-  Location: DigiPIN & Pincode (${cust.location?.lat ? `${Number(cust.location.lat).toFixed(4)}, ${Number(cust.location.lng).toFixed(4)}` : 'Default'})
+  ${cust.isLiveGpsShared || telem.customerLocationMode === 'customer_live_gps_shared'
+    ? `Spot: Live GPS Coordinates (${cust.location?.lat ? `${Number(cust.location.lat).toFixed(4)}, ${Number(cust.location.lng).toFixed(4)}` : 'Shared'})`
+    : `Location: DigiPIN & Pincode (${cust.location?.lat ? `${Number(cust.location.lat).toFixed(4)}, ${Number(cust.location.lng).toFixed(4)}` : 'Default'})`}
   </div>
   </div>
   </div>
@@ -4814,6 +4834,7 @@ function renderOrderLiveTracking(rawData) {
   <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
   <button class="btn btn-outline btn-sm" onclick="refreshOrderLiveTracking()">🔄 Refresh Coordinates</button>
   <a href="${mapsUrl}" target="_blank" class="btn btn-outline btn-sm" style="color:var(--blue);">🗺️ Open in Google Maps</a>
+  <button class="btn btn-outline btn-sm" style="color:#0284c7; border-color:#0284c7; background:#f0f9ff; font-weight:700;" onclick="shareCustomerLiveDeliveryLocation('${data.orderId || activeTrackingOrderId}')">📍 Share My Current Delivery Location (GPS)</button>
   </div>
   ${role === 'deliveryPartner' ? `
   <button class="btn btn-primary btn-sm" onclick="simulateRiderMovement(); setTimeout(refreshOrderLiveTracking, 400);">🚴 Simulate Step Ahead (~100m)</button>
@@ -5101,7 +5122,240 @@ async function triggerGlobalResetCodeForCurrentUser() {
   }
 }
 
+// =========================================================================
+// INDIA POST DIGIPIN ENGINE & INSTANT LOCATION PICKER (OFFLINE / NO MAPPLS LOGIN)
+// =========================================================================
+var DIGIPIN_CHARS = '23456789CFJKMPRT';
+window.DIGIPIN_CHARS = DIGIPIN_CHARS;
+
+function encodeIndiaPostDigipin(lat, lng) {
+  let minLat = 2.5;
+  let maxLat = 38.5;
+  let minLng = 63.5;
+  let maxLng = 99.5;
+  let code = '';
+  for (let i = 0; i < 10; i++) {
+    const latSpan = (maxLat - minLat) / 4;
+    const lngSpan = (maxLng - minLng) / 4;
+    let row = Math.floor((maxLat - lat) / latSpan);
+    let col = Math.floor((lng - minLng) / lngSpan);
+    if (row < 0) row = 0;
+    if (row > 3) row = 3;
+    if (col < 0) col = 0;
+    if (col > 3) col = 3;
+    const char = DIGIPIN_CHARS[row * 4 + col];
+    if (char) code += char;
+    maxLat = maxLat - row * latSpan;
+    minLat = maxLat - latSpan;
+    minLng = minLng + col * lngSpan;
+    maxLng = minLng + lngSpan;
+  }
+  return `${code.slice(0, 3)}-${code.slice(3, 6)}-${code.slice(6, 10)}`;
+}
+
+function decodeIndiaPostDigipin(code) {
+  if (!code || typeof code !== 'string') return null;
+  const clean = code.replace(/[^23456789CFJKMPRT]/gi, '').toUpperCase();
+  if (clean.length < 8) return null;
+  let minLat = 2.5, maxLat = 38.5;
+  let minLng = 63.5, maxLng = 99.5;
+  for (let i = 0; i < clean.length; i++) {
+    const char = clean[i];
+    if (!char) return null;
+    const idx = DIGIPIN_CHARS.indexOf(char);
+    if (idx === -1) return null;
+    const row = Math.floor(idx / 4);
+    const col = idx % 4;
+    const latSpan = (maxLat - minLat) / 4;
+    const lngSpan = (maxLng - minLng) / 4;
+    const newMinLat = minLat + (3 - row) * latSpan;
+    const newMaxLat = newMinLat + latSpan;
+    const newMinLng = minLng + col * lngSpan;
+    const newMaxLng = newMinLng + lngSpan;
+    minLat = newMinLat; maxLat = newMaxLat;
+    minLng = newMinLng; maxLng = newMaxLng;
+  }
+  return {
+    lat: Number(((minLat + maxLat) / 2).toFixed(6)),
+    lng: Number(((minLng + maxLng) / 2).toFixed(6)),
+  };
+}
+
+let currentDigipinPickerTarget = 'addr-digipin';
+
+function openDigipinPickerModal(targetInputId) {
+  currentDigipinPickerTarget = targetInputId || 'addr-digipin';
+  const targetHidden = document.getElementById('digipin-picker-target-id');
+  if (targetHidden) targetHidden.value = currentDigipinPickerTarget;
+  const modal = document.getElementById('digipin-picker-modal');
+  if (modal) {
+    modal.classList.add('visible');
+    modal.style.display = 'grid';
+  }
+}
+
+function closeDigipinPickerModal() {
+  const modal = document.getElementById('digipin-picker-modal');
+  if (modal) {
+    modal.classList.remove('visible');
+    modal.style.display = 'none';
+  }
+}
+
+function applyDigipinSelection(digipin, locationLabel, lat, lng) {
+  const targetId = document.getElementById('digipin-picker-target-id')?.value || currentDigipinPickerTarget || 'addr-digipin';
+  const target = document.getElementById(targetId);
+  if (target) {
+    target.value = digipin;
+    target.dispatchEvent(new Event('input', { bubbles: true }));
+    target.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  // Also auto-fill companion lat/lng inputs if present
+  if (typeof lat === 'number' && typeof lng === 'number') {
+    const latInput = document.getElementById(targetId.replace('digipin', 'lat'));
+    const lngInput = document.getElementById(targetId.replace('digipin', 'lng'));
+    if (latInput) latInput.value = lat.toFixed(6);
+    if (lngInput) lngInput.value = lng.toFixed(6);
+  }
+
+  // If this was addr-digipin, also auto-populate pincode if available
+  if (targetId === 'addr-digipin' && locationLabel) {
+    const pinMatch = locationLabel.match(/\b\d{6}\b/);
+    const pinInput = document.getElementById('addr-pincode');
+    if (pinInput && pinMatch) {
+      pinInput.value = pinMatch[0];
+    }
+  }
+
+  closeDigipinPickerModal();
+  if (typeof showToastNotification === 'function') {
+    showToastNotification(`✓ DigiPIN set to ${digipin} (${locationLabel || 'Selected Hub'})!`, 'success');
+  }
+}
+
+function calculateCustomDigipinAndApply() {
+  const pinInput = document.getElementById('modal-digipin-pincode');
+  const coordsInput = document.getElementById('modal-digipin-coords');
+  const pinVal = (pinInput?.value || '').trim();
+  const coordsVal = (coordsInput?.value || '').trim();
+
+  let lat = null, lng = null, label = '';
+
+  if (coordsVal) {
+    const parts = coordsVal.split(',').map(s => Number(s.trim()));
+    if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+      lat = parts[0];
+      lng = parts[1];
+      label = `Coords: ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    }
+  }
+
+  if ((lat === null || lng === null) && pinVal) {
+    if (typeof resolveFrontendCoordinatesFromPincode === 'function') {
+      const coords = resolveFrontendCoordinatesFromPincode(pinVal);
+      if (coords) {
+        lat = coords.lat;
+        lng = coords.lng;
+        label = `Pincode: ${pinVal}`;
+      }
+    }
+    if (lat === null || lng === null) {
+      const pinMap = {
+        '411057': { lat: 18.5707, lng: 73.6908 },
+        '845401': { lat: 26.6471, lng: 84.9085 },
+        '560001': { lat: 12.9716, lng: 77.5946 },
+        '560038': { lat: 12.9780, lng: 77.6408 },
+        '560034': { lat: 12.9352, lng: 77.6245 },
+        '560066': { lat: 12.9698, lng: 77.7499 },
+        '110001': { lat: 28.6315, lng: 77.2167 },
+        '400050': { lat: 19.0596, lng: 72.8295 },
+      };
+      if (pinMap[pinVal]) {
+        lat = pinMap[pinVal].lat;
+        lng = pinMap[pinVal].lng;
+        label = `Pincode: ${pinVal}`;
+      } else {
+        lat = 12.9716;
+        lng = 77.5946;
+        label = `Pincode: ${pinVal}`;
+      }
+    }
+  }
+
+  if (lat !== null && lng !== null) {
+    const digipin = encodeIndiaPostDigipin(lat, lng);
+    applyDigipinSelection(digipin, label, lat, lng);
+  } else {
+    if (typeof showToastNotification === 'function') {
+      showToastNotification('Please enter a valid 6-digit pincode or lat, lng coordinates.', 'error');
+    } else {
+      alert('Please enter a valid 6-digit pincode or lat, lng coordinates.');
+    }
+  }
+}
+
+function setDigipinFromCurrentDevice(targetInputId) {
+  const target = document.getElementById(targetInputId);
+  if (!target) {
+    if (typeof showToastNotification === 'function') {
+      showToastNotification('Target DigiPIN input not found.', 'error');
+    }
+    return;
+  }
+  if (!navigator.geolocation) {
+    if (typeof showToastNotification === 'function') {
+      showToastNotification('Geolocation is not supported by your browser.', 'error');
+    } else {
+      alert('Geolocation is not supported by your browser.');
+    }
+    return;
+  }
+
+  if (typeof showToastNotification === 'function') {
+    showToastNotification('Capturing your current spot coordinates...', 'info');
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      const digipin = encodeIndiaPostDigipin(lat, lng);
+      
+      target.value = digipin;
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+      target.dispatchEvent(new Event('change', { bubbles: true }));
+
+      // Also auto-fill companion coordinates if present
+      const latInput = document.getElementById(targetInputId.replace('digipin', 'lat'));
+      const lngInput = document.getElementById(targetInputId.replace('digipin', 'lng'));
+      if (latInput) latInput.value = lat.toFixed(6);
+      if (lngInput) lngInput.value = lng.toFixed(6);
+
+      if (typeof showToastNotification === 'function') {
+        showToastNotification(`✓ DigiPIN set to ${digipin} from your current device spot!`, 'success');
+      }
+    },
+    (err) => {
+      console.warn('Current spot geolocation error:', err);
+      if (typeof showToastNotification === 'function') {
+        showToastNotification('Unable to fetch device spot. Please select from "Other Location" hubs.', 'error');
+      } else {
+        alert('Unable to fetch device spot. Please select from "Other Location" hubs.');
+      }
+    },
+    { enableHighAccuracy: true, timeout: 8000 }
+  );
+}
+
 // Explicit window exports for modular domain controllers
+window.encodeIndiaPostDigipin = encodeIndiaPostDigipin;
+window.decodeIndiaPostDigipin = decodeIndiaPostDigipin;
+window.setDigipinFromCurrentDevice = setDigipinFromCurrentDevice;
+window.openDigipinPickerModal = openDigipinPickerModal;
+window.closeDigipinPickerModal = closeDigipinPickerModal;
+window.applyDigipinSelection = applyDigipinSelection;
+window.calculateCustomDigipinAndApply = calculateCustomDigipinAndApply;
 window.openGlobalChangePasswordModal = openGlobalChangePasswordModal;
 window.submitGlobalChangePassword = submitGlobalChangePassword;
 window.triggerGlobalResetCodeForCurrentUser = triggerGlobalResetCodeForCurrentUser;

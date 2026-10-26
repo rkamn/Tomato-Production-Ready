@@ -19,6 +19,7 @@ import {
 import Order, { OrderStatus } from '../../model/Order.js';
 import notificationService from '../notification/notificationService.js';
 import { productImageUpload } from '../../middleware/upload.js';
+import { getCatalogVariants, sanitizeItemVariants } from '../../utils/variantHelpers.js';
 import {
   validateBankAndPanDetails,
   resolvePartnerPincode,
@@ -298,6 +299,18 @@ const createShopRouter = () => {
   );
 
   // 5. Manage Shop Items / Inventory
+  router.get(['/items/variants', '/menu/variants'], async (req: Request, res: Response) => {
+    try {
+      const name = typeof req.query.name === 'string' ? req.query.name : '';
+      const category = typeof req.query.category === 'string' ? req.query.category : '';
+      const variants = await getCatalogVariants(name, category);
+      return res.json({ variants });
+    } catch (error) {
+      console.error('Shop variant suggestions failed:', error);
+      return res.status(500).json({ message: 'Unable to fetch variant suggestions', variants: [] });
+    }
+  });
+
   router.get(['/items', '/menu'], async (req: Request, res: Response) => {
     try {
       const user = (req as AuthenticatedRequest).user;
@@ -323,6 +336,7 @@ const createShopRouter = () => {
       const category = typeof req.body?.category === 'string'
         ? req.body.category.trim()
         : 'Packaged Goods';
+      const unit = typeof req.body?.unit === 'string' ? req.body.unit.trim() : '';
       const description = typeof req.body?.description === 'string'
         ? req.body.description.trim()
         : '';
@@ -332,13 +346,21 @@ const createShopRouter = () => {
       const quantity = Number(req.body?.quantity ?? 10);
       const price = Number(req.body?.price ?? 0);
       const image = typeof req.body?.image === 'string' ? req.body.image.trim() : '';
+      const variants = sanitizeItemVariants(req.body?.variants);
+      const defaultVariant = variants.find((v) => v.isDefault)?.name || (variants[0] ? variants[0].name : '');
+      const effectivePrice = variants.length > 0 && variants[0]
+        ? (variants.find((v) => v.isDefault)?.price ?? variants[0].price)
+        : price;
+      const effectiveQuantity = variants.length > 0
+        ? variants.reduce((sum, v) => sum + (v.quantity || 0), 0)
+        : quantity;
 
       if (
         !name ||
-        !Number.isFinite(quantity) ||
-        quantity < 0 ||
-        !Number.isFinite(price) ||
-        price < 0
+        !Number.isFinite(effectiveQuantity) ||
+        effectiveQuantity < 0 ||
+        !Number.isFinite(effectivePrice) ||
+        effectivePrice < 0
       ) {
         return res.status(400).json({
           message: 'Valid item name, quantity, and price are required',
@@ -352,11 +374,14 @@ const createShopRouter = () => {
         restaurantName: shopUser?.name || 'Partner Shop',
         name,
         category,
+        unit,
         description,
         dietary,
-        quantity,
-        price,
+        quantity: effectiveQuantity,
+        price: effectivePrice,
         image,
+        variants,
+        defaultVariant,
         isActive: true,
       });
 
@@ -364,7 +389,7 @@ const createShopRouter = () => {
         userId: user.userId,
         role: 'shop',
         title: 'Shop item added',
-        message: `${name} (${category}) is now in stock at ₹${price}.`,
+        message: `${name} (${category}) is now in stock at ₹${effectivePrice}${variants.length ? ` with ${variants.length} variants` : ''}.`,
         type: 'menu',
         entityId: String(item._id),
       });
@@ -413,10 +438,25 @@ const createShopRouter = () => {
       if (req.body.price !== undefined) updates.price = Number(req.body.price);
       if (['veg', 'non-veg', 'vegan'].includes(req.body.dietary))
         updates.dietary = req.body.dietary;
+      if (typeof req.body.unit === 'string')
+        updates.unit = req.body.unit.trim();
       if (req.body.isActive !== undefined)
         updates.isActive = Boolean(req.body.isActive);
       if (typeof req.body.image === 'string')
         updates.image = req.body.image.trim();
+      if (req.body.variants !== undefined) {
+        const variants = sanitizeItemVariants(req.body.variants);
+        updates.variants = variants;
+        if (variants.length > 0) {
+          const defVar = variants.find((v) => v.isDefault) || variants[0];
+          if (defVar) {
+            updates.defaultVariant = defVar.name;
+            if (req.body.price === undefined) {
+              updates.price = defVar.price;
+            }
+          }
+        }
+      }
 
       const updated = await FoodItem.findOneAndUpdate(
         {

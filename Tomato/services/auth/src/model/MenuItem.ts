@@ -1,5 +1,13 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
+export interface IItemVariant {
+  name: string;
+  price: number;
+  quantity?: number;
+  isDefault?: boolean;
+  isAvailable?: boolean;
+}
+
 export interface IMenuItem extends Document {
   restaurantId: mongoose.Types.ObjectId;
   restaurantName?: string;
@@ -11,6 +19,9 @@ export interface IMenuItem extends Document {
   quantity: number;
   price: number;
   isActive: boolean;
+  unit?: string;
+  variants?: IItemVariant[];
+  defaultVariant?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -69,6 +80,25 @@ const menuItemSchema: Schema<IMenuItem> = new Schema(
     isActive: {
       type: Boolean,
       default: true,
+    },
+    unit: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    variants: [
+      {
+        name: { type: String, trim: true, default: '' },
+        price: { type: Number, min: 0, default: 0 },
+        quantity: { type: Number, min: 0, default: 10 },
+        isDefault: { type: Boolean, default: false },
+        isAvailable: { type: Boolean, default: true },
+      },
+    ],
+    defaultVariant: {
+      type: String,
+      trim: true,
+      default: '',
     },
   },
   { timestamps: true, collection: 'menuitems' },

@@ -15,6 +15,7 @@ export interface WsClientConnection {
   socket: Duplex;
   userId?: string;
   role?: string;
+  phone?: string;
   subscribedOrderIds: Set<string>;
   subscribedFleet: boolean;
   isAlive: boolean;
@@ -165,47 +166,81 @@ export async function broadcastOrderLiveTrackingUpdate(orderId: string) {
  * 2. Admin / Sub-Admin live fleet radar subscribers
  */
 export async function handleRiderLocationRealtimeUpdate(args: {
-  riderUserId: string;
+  riderUserId?: string | undefined;
+  phone?: string | undefined;
+  mobile?: string | undefined;
   lat: number;
   lng: number;
-  isOnline?: boolean;
+  isOnline?: boolean | undefined;
 }) {
-  const { riderUserId, lat, lng, isOnline } = args;
-  if (!riderUserId || !mongoose.isValidObjectId(riderUserId)) return null;
-
+  const { riderUserId, phone, mobile, lat, lng, isOnline } = args;
   const numLat = Number(lat);
   const numLng = Number(lng);
   if (!Number.isFinite(numLat) || !Number.isFinite(numLng)) return null;
 
-  const updatedRider: any = await Rider.findByIdAndUpdate(
-    riderUserId,
-    {
-      $set: {
-        currentLocation: { lat: numLat, lng: numLng },
-        isOnline: isOnline !== undefined ? Boolean(isOnline) : true,
-        lastLocationUpdated: new Date(),
+  const targetPhone = (phone || mobile || '').trim();
+  let updatedRider: any = null;
+
+  // Requirement: Live location of the rider will be tracked based on his phone number or mobile number
+  if (targetPhone) {
+    const cleanPhone = targetPhone.replace(/[^\d+]/g, '');
+    const last10 = cleanPhone.replace(/[^\d]/g, '').slice(-10);
+    updatedRider = await Rider.findOneAndUpdate(
+      {
+        $or: [
+          { phone: targetPhone },
+          { phone: cleanPhone },
+          ...(last10 ? [{ phone: new RegExp(last10 + '$') }] : []),
+        ],
       },
-    },
-    { returnDocument: 'after' },
-  ).lean();
+      {
+        $set: {
+          currentLocation: { lat: numLat, lng: numLng },
+          isOnline: isOnline !== undefined ? Boolean(isOnline) : true,
+          lastLocationUpdated: new Date(),
+        },
+      },
+      { returnDocument: 'after' },
+    ).lean();
+  }
+
+  if (!updatedRider && riderUserId && mongoose.isValidObjectId(riderUserId)) {
+    updatedRider = await Rider.findByIdAndUpdate(
+      riderUserId,
+      {
+        $set: {
+          currentLocation: { lat: numLat, lng: numLng },
+          isOnline: isOnline !== undefined ? Boolean(isOnline) : true,
+          lastLocationUpdated: new Date(),
+        },
+      },
+      { returnDocument: 'after' },
+    ).lean();
+  }
 
   if (!updatedRider) return null;
 
-  // Find all active orders assigned to this rider (picking up from restaurant/shop or out_for_delivery to customer)
-  const riderObjId = new mongoose.Types.ObjectId(riderUserId);
+  const riderObjId = new mongoose.Types.ObjectId(String(updatedRider._id));
+  const riderPhoneStr = updatedRider.phone || targetPhone || '';
+  const cleanRiderPhone = riderPhoneStr.replace(/[^\d+]/g, '');
+  const last10Rider = cleanRiderPhone.replace(/[^\d]/g, '').slice(-10);
+
+  // Find active orders assigned to this rider by riderId OR by phone/mobile number
+  const orderRiderQuery: any = {
+    $or: [
+      { riderId: riderObjId },
+      ...(riderPhoneStr ? [
+        { riderPhone: riderPhoneStr },
+        { riderPhone: cleanRiderPhone },
+        ...(last10Rider ? [{ riderPhone: new RegExp(last10Rider + '$') }] : []),
+      ] : []),
+    ],
+    status: { $in: ['accepted', 'preparing', 'ready_for_pickup', 'out_for_delivery'] },
+  };
+
   const [activeRestOrders, activeShopOrders] = await Promise.all([
-    Order.find({
-      riderId: riderObjId,
-      status: { $in: ['accepted', 'preparing', 'ready_for_pickup', 'out_for_delivery'] },
-    })
-      .select('_id')
-      .lean(),
-    ShopOrder.find({
-      riderId: riderObjId,
-      status: { $in: ['accepted', 'preparing', 'ready_for_pickup', 'out_for_delivery'] },
-    })
-      .select('_id')
-      .lean(),
+    Order.find(orderRiderQuery).select('_id').lean(),
+    ShopOrder.find(orderRiderQuery).select('_id').lean(),
   ]);
 
   const activeOrderIds = [
@@ -224,7 +259,8 @@ export async function handleRiderLocationRealtimeUpdate(args: {
       riderId: updatedRider.riderId || '',
       name: updatedRider.name,
       displayName: updatedRider.name,
-      phone: updatedRider.phone || '',
+      phone: updatedRider.phone || riderPhoneStr || '',
+      mobile: updatedRider.phone || riderPhoneStr || '',
       deliveryVehicle: updatedRider.deliveryVehicle || 'motorcycle',
       currentLocation: { lat: numLat, lng: numLng },
       isOnline: updatedRider.isOnline ?? true,
@@ -240,13 +276,64 @@ export async function handleRiderLocationRealtimeUpdate(args: {
       client.subscribedFleet ||
       client.role === 'admin' ||
       client.role === 'subadmin' ||
-      client.userId === String(updatedRider._id)
+      client.userId === String(updatedRider._id) ||
+      (client.phone && (client.phone === updatedRider.phone || client.phone === riderPhoneStr))
     ) {
       sendJson(client, riderBroadcastPayload);
     }
   }
 
   return updatedRider;
+}
+
+/**
+ * Updates an active order with customer's live shared GPS delivery location
+ * and broadcasts telemetry immediately to the assigned rider and live tracking radars.
+ */
+export async function handleCustomerShareLocationUpdate(args: {
+  orderId: string;
+  lat: number;
+  lng: number;
+  customerId?: string | undefined;
+}) {
+  const { orderId, lat, lng } = args;
+  if (!orderId || !mongoose.isValidObjectId(orderId)) return null;
+
+  const numLat = Number(lat);
+  const numLng = Number(lng);
+  if (!Number.isFinite(numLat) || !Number.isFinite(numLng)) return null;
+
+  let order: any = await Order.findById(orderId);
+  if (!order) {
+    try {
+      const ShopOrderModel = (await import('../model/ShopOrder.js')).default;
+      order = await ShopOrderModel.findById(orderId);
+    } catch (_) {}
+  }
+  if (!order) return null;
+
+  if (!order.deliveryAddress) order.deliveryAddress = {};
+  order.deliveryAddress.coordinates = [numLng, numLat];
+  (order as any).customerLocationMode = 'customer_live_gps_shared';
+  (order as any).customerSharedLocation = { lat: numLat, lng: numLng, sharedAt: new Date() };
+  await order.save();
+
+  try {
+    const ShopOrderModel = (await import('../model/ShopOrder.js')).default;
+    await ShopOrderModel.updateOne(
+      { orderNumber: order.orderNumber },
+      {
+        $set: {
+          'deliveryAddress.coordinates': [numLng, numLat],
+          customerLocationMode: 'customer_live_gps_shared',
+          customerSharedLocation: { lat: numLat, lng: numLng, sharedAt: new Date() },
+        },
+      },
+    );
+  } catch (_) {}
+
+  await broadcastOrderLiveTrackingUpdate(orderId);
+  return order;
 }
 
 async function handleIncomingWsMessage(client: WsClientConnection, rawText: string) {
@@ -268,10 +355,14 @@ async function handleIncomingWsMessage(client: WsClientConnection, rawText: stri
           const decoded = jwt.verify(token, secret) as any;
           client.userId = String(decoded.userId || decoded.id || decoded._id || '');
           client.role = String(decoded.role || '');
+          if (decoded.phone || msg.phone) {
+            client.phone = String(decoded.phone || msg.phone || '');
+          }
           sendJson(client, {
             type: 'auth_ok',
             userId: client.userId,
             role: client.role,
+            phone: client.phone,
           });
         } catch {
           sendJson(client, { type: 'auth_error', message: 'Invalid token' });
@@ -318,12 +409,28 @@ async function handleIncomingWsMessage(client: WsClientConnection, rawText: stri
 
     case 'rider_location_ping': {
       const riderUserId = client.userId || String(msg.riderUserId || '');
-      if (riderUserId && msg.lat !== undefined && msg.lng !== undefined) {
+      const phone = String(msg.phone || msg.mobile || client.phone || '').trim();
+      if ((riderUserId || phone) && msg.lat !== undefined && msg.lng !== undefined) {
         await handleRiderLocationRealtimeUpdate({
-          riderUserId,
+          riderUserId: riderUserId || undefined,
+          phone: phone || undefined,
+          mobile: phone || undefined,
           lat: Number(msg.lat),
           lng: Number(msg.lng),
           isOnline: msg.isOnline !== undefined ? Boolean(msg.isOnline) : true,
+        });
+      }
+      break;
+    }
+
+    case 'customer_share_location': {
+      const orderId = String(msg.orderId || '').trim();
+      if (orderId && msg.lat !== undefined && msg.lng !== undefined) {
+        await handleCustomerShareLocationUpdate({
+          orderId,
+          lat: Number(msg.lat),
+          lng: Number(msg.lng),
+          customerId: client.userId,
         });
       }
       break;

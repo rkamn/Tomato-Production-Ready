@@ -22,13 +22,14 @@
      */
     getWebSocketUrl() {
       const authToken =
-        typeof token !== 'undefined' && token
-          ? token
-          : localStorage.getItem('tomatoToken') || '';
+        (typeof window !== 'undefined' && window.token) ||
+        localStorage.getItem('tomatoToken') ||
+        '';
       const baseRoot =
-        typeof API_ROOT !== 'undefined' && API_ROOT
-          ? API_ROOT
-          : window.location.origin || 'http://localhost:5050';
+        (typeof window !== 'undefined' && window.API_ROOT) ||
+        (typeof window !== 'undefined' && window.location.hostname
+          ? `${window.location.protocol}//${window.location.hostname}:5050`
+          : 'http://localhost:5050');
       const wsBase = baseRoot
         .replace(/^https:\/\//i, 'wss://')
         .replace(/^http:\/\//i, 'ws://')
@@ -214,18 +215,26 @@
 
     /**
      * Stream live Rider GPS coordinates over WebSocket as the rider picks up
-     * orders from the restaurant and delivers to the customer address
+     * orders from the restaurant and delivers to the customer address.
+     * Live location of the rider is tracked based on his phone number or mobile number.
      */
-    sendRiderLocationPing(lat, lng, isOnline = true) {
+    sendRiderLocationPing(lat, lng, isOnline = true, phone = null) {
       const numericLat = Number(lat);
       const numericLng = Number(lng);
       if (!Number.isFinite(numericLat) || !Number.isFinite(numericLng)) {
         return false;
       }
 
+      const riderPhone =
+        phone ||
+        (typeof storedUser !== 'undefined' ? storedUser?.phone : null) ||
+        (typeof user !== 'undefined' ? user?.phone : null) ||
+        '';
+
       this.lastRiderPing = {
         lat: numericLat,
         lng: numericLng,
+        phone: riderPhone,
         isOnline: Boolean(isOnline),
         at: Date.now(),
       };
@@ -238,7 +247,29 @@
         type: 'rider_location_ping',
         lat: numericLat,
         lng: numericLng,
+        phone: riderPhone,
+        mobile: riderPhone,
         isOnline: Boolean(isOnline),
+      });
+    }
+
+    /**
+     * Customer shares current delivery location (GPS location) with assigned rider in real-time
+     */
+    sendCustomerLocationShare(orderId, lat, lng) {
+      const numericLat = Number(lat);
+      const numericLng = Number(lng);
+      if (!orderId || !Number.isFinite(numericLat) || !Number.isFinite(numericLng)) {
+        return false;
+      }
+      if (!this.isConnected) {
+        this.connect();
+      }
+      return this.send({
+        type: 'customer_share_location',
+        orderId: String(orderId),
+        lat: numericLat,
+        lng: numericLng,
       });
     }
 

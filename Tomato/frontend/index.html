@@ -161,10 +161,16 @@
               </div>
 
               <div style="margin-top:0.8rem;">
-                <label for="restaurant-digipin">Restaurant Location / DIGIPIN <span style="color:var(--tomato);">*Required</span></label>
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.3rem;">
+                  <label for="restaurant-digipin" style="margin-bottom:0;">Restaurant Location / DIGIPIN <span style="color:var(--tomato);">*Required</span></label>
+                  <div style="display:flex; gap:0.35rem;">
+                    <button type="button" class="btn btn-outline" style="font-size:0.72rem; padding:2px 7px; min-height:auto; width:auto; border-radius:6px; background:#fff; border:1px solid var(--line);" onclick="setIndexDigipinFromCurrentDevice()">📍 My Spot</button>
+                    <button type="button" class="btn btn-outline" style="font-size:0.72rem; padding:2px 7px; min-height:auto; width:auto; border-radius:6px; background:#fff; border:1px solid var(--line);" onclick="openIndexDigipinPickerModal()">🏙️ Other Location</button>
+                  </div>
+                </div>
                 <div style="display:flex; gap:0.4rem; margin-top:0.25rem;">
-                  <input id="restaurant-digipin" name="digipin" type="text" placeholder="e.g. DGP-560038-A1" style="flex:1;" />
-                  <button type="button" id="btn-detect-rest-gps" style="width:auto; padding:0 1rem; font-size:0.75rem; min-height:2.6rem; border-radius:9999px;" onclick="detectRestaurantGPS()">📍 GPS Pin</button>
+                  <input id="restaurant-digipin" name="digipin" type="text" placeholder="e.g. F2R-6FT-F55C or DGP-560038-A1" style="flex:1;" />
+                  <button type="button" id="btn-detect-rest-gps" style="width:auto; padding:0 1rem; font-size:0.75rem; min-height:2.6rem; border-radius:9999px;" onclick="resolveRestaurantDigipin()">📍 Resolve</button>
                 </div>
                 <small id="rest-helper-note" style="color:var(--muted); font-size:0.75rem; display:block; margin-top:0.3rem;">
                   Used for order pickup by delivery riders. Each restaurant will receive a unique <strong>&lt;name&gt;/restaurantId</strong>.
@@ -277,6 +283,60 @@
           </p>
         </div>
       </section>
+
+      <!-- INSTANT DIGIPIN LOCATION PICKER MODAL -->
+      <div id="index-digipin-picker-modal" style="display:none; position:fixed; inset:0; z-index:999999; background:rgba(0,0,0,0.5); place-items:center; padding:1rem;" onclick="if(event.target === this) closeIndexDigipinPickerModal()">
+        <div style="max-width:520px; width:100%; padding:1.5rem; border-radius:16px; box-shadow:0 25px 65px rgba(0,0,0,0.35); border:1px solid var(--line); background:#ffffff;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; border-bottom:1px solid var(--line); padding-bottom:0.5rem;">
+            <div>
+              <h3 style="font-size:1.2rem; font-weight:800; color:var(--ink); margin:0;">📍 Instant DigiPIN Location Selector</h3>
+              <p style="font-size:0.78rem; color:var(--muted); margin:0.2rem 0 0;">Select your store hub or generate official India Post DigiPIN offline — No Mappls login required!</p>
+            </div>
+            <button type="button" onclick="closeIndexDigipinPickerModal()" style="font-size:1.1rem; line-height:1; padding:0.2rem 0.6rem; border-radius:50%; border:1px solid var(--line); background:none; cursor:pointer;">✕</button>
+          </div>
+
+          <div style="margin-bottom:1rem;">
+            <label style="font-size:0.8rem; font-weight:700; color:var(--tomato); text-transform:uppercase; display:block; margin-bottom:0.4rem;">
+              ⚡ Quick Hubs (1-Click Selection)
+            </label>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:0.4rem;">
+              <button type="button" style="text-align:left; padding:0.5rem 0.7rem; font-size:0.8rem; border:1px solid var(--line); border-radius:8px; background:#fff; cursor:pointer;" onclick="applyIndexDigipinSelection('F2R-6FT-F55C', 18.5707, 73.6908)">
+                <strong>🏢 Pune - Hinjewadi</strong>
+                <span style="color:var(--muted); font-size:0.72rem; display:block; font-family:monospace;">F2R-6FT-F55C (PIN: 411057)</span>
+              </button>
+              <button type="button" style="text-align:left; padding:0.5rem 0.7rem; font-size:0.8rem; border:1px solid var(--line); border-radius:8px; background:#fff; cursor:pointer;" onclick="applyIndexDigipinSelection('878-265-K6K5', 26.6471, 84.9085)">
+                <strong>🌾 Motihari - Main Bazar</strong>
+                <span style="color:var(--muted); font-size:0.72rem; display:block; font-family:monospace;">878-265-K6K5 (PIN: 845401)</span>
+              </button>
+              <button type="button" style="text-align:left; padding:0.5rem 0.7rem; font-size:0.8rem; border:1px solid var(--line); border-radius:8px; background:#fff; cursor:pointer;" onclick="applyIndexDigipinSelection('FR7-6C5-J834', 12.9716, 77.5946)">
+                <strong>🏙️ Bengaluru - MG Road</strong>
+                <span style="color:var(--muted); font-size:0.72rem; display:block; font-family:monospace;">FR7-6C5-J834 (PIN: 560001)</span>
+              </button>
+              <button type="button" style="text-align:left; padding:0.5rem 0.7rem; font-size:0.8rem; border:1px solid var(--line); border-radius:8px; background:#fff; cursor:pointer;" onclick="applyIndexDigipinSelection('FR7-68M-T88C', 12.9780, 77.6408)">
+                <strong>☕ Bengaluru - Indiranagar</strong>
+                <span style="color:var(--muted); font-size:0.72rem; display:block; font-family:monospace;">FR7-68M-T88C (PIN: 560038)</span>
+              </button>
+            </div>
+          </div>
+
+          <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:0.8rem; margin-bottom:1rem;">
+            <label style="font-size:0.78rem; font-weight:700; color:#334155; text-transform:uppercase; display:block; margin-bottom:0.3rem;">
+              📐 Custom Location DigiPIN
+            </label>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.4rem; margin-bottom:0.5rem;">
+              <input id="index-modal-pincode" type="text" maxlength="6" placeholder="Pincode e.g. 560038" style="padding:0.4rem; font-size:0.8rem;" />
+              <input id="index-modal-coords" type="text" placeholder="lat, lng" style="padding:0.4rem; font-size:0.8rem;" />
+            </div>
+            <button type="button" style="width:100%; padding:0.4rem; font-weight:700; background:var(--tomato); color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:0.82rem;" onclick="calculateIndexCustomDigipin()">
+              ⚡ Calculate &amp; Set DigiPIN
+            </button>
+          </div>
+
+          <div style="display:flex; justify-content:flex-end;">
+            <button type="button" onclick="closeIndexDigipinPickerModal()" style="padding:0.4rem 0.8rem; font-size:0.8rem; border:1px solid var(--line); background:#f1f5f9; border-radius:6px; cursor:pointer;">Cancel</button>
+          </div>
+        </div>
+      </div>
     </main>
 
     <script src="./javascript/security.js"></script>

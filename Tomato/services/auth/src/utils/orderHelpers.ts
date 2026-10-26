@@ -3,7 +3,11 @@ import Restaurant from '../model/Restaurant.js';
 import Rider from '../model/Rider.js';
 import Employee from '../model/Employee.js';
 import notificationService from '../modules/notification/notificationService.js';
-import { resolveLocationFromDigipinOrPincode } from './bankHelpers.js';
+import {
+  resolveLocationFromDigipinOrPincode,
+  resolveCoordinatesFromDigipin,
+  resolveCoordinatesFromPincode,
+} from './bankHelpers.js';
 
 /**
  * Formats a date into YYYYMMDD string according to Indian Standard Time (IST / Asia/Kolkata).
@@ -163,8 +167,25 @@ export const buildOrderLiveTrackingData = async (orderId: string) => {
     isOnline: boolean;
   } | null = null;
 
-  if (order.riderId && !isTrackingClosed) {
-    const rider = await Rider.findById(order.riderId).lean();
+  if ((order.riderId || order.riderPhone) && !isTrackingClosed) {
+    let rider: any = null;
+    // Live location of the rider is tracked based on his phone number or mobile number
+    const riderPhone = order.riderPhone || (order as any).riderMobile || '';
+    if (riderPhone) {
+      const searchPhone = String(riderPhone).trim();
+      const cleanPhone = searchPhone.replace(/[^\d+]/g, '');
+      const last10 = cleanPhone.replace(/[^\d]/g, '').slice(-10);
+      rider = await Rider.findOne({
+        $or: [
+          { phone: searchPhone },
+          { phone: cleanPhone },
+          ...(last10 ? [{ phone: new RegExp(last10 + '$') }] : []),
+        ],
+      }).lean();
+    }
+    if (!rider && order.riderId) {
+      rider = await Rider.findById(order.riderId).lean();
+    }
     if (rider) {
       const riderIdStr = rider.riderId || '';
       const loc = rider.currentLocation || { lat: 12.9716, lng: 77.5946 };
@@ -173,7 +194,7 @@ export const buildOrderLiveTrackingData = async (orderId: string) => {
         riderId: riderIdStr,
         name: rider.name,
         displayName: rider.name,
-        phone: rider.phone || '',
+        phone: rider.phone || riderPhone || '',
         currentLocation: loc,
         location: loc,
         lastLocationUpdated: rider.lastLocationUpdated || new Date(),
@@ -278,21 +299,61 @@ export const buildOrderLiveTrackingData = async (orderId: string) => {
 
   const custDigipin = order.deliveryAddress?.digipin || (order as any).digipin || '';
   const custPincode = order.deliveryAddress?.postalCode || order.serviceablePincode || '';
-  const fallbackCustCoords =
-    order.deliveryAddress?.coordinates &&
-    Array.isArray(order.deliveryAddress.coordinates) &&
-    order.deliveryAddress.coordinates.length >= 2
-      ? {
-          lng: Number(order.deliveryAddress.coordinates[0]),
-          lat: Number(order.deliveryAddress.coordinates[1]),
-        }
-      : undefined;
-
-  const custCoords = resolveLocationFromDigipinOrPincode(
-    custDigipin,
-    custPincode,
-    fallbackCustCoords,
+  const hasCustomerSharedLiveGps = Boolean(
+    order.customerLocationMode === 'customer_live_gps_shared' ||
+    (order as any).customerSharedLocation?.lat !== undefined ||
+    (order.deliveryAddress as any)?.isCurrentDeliveryLocation
   );
+  const fallbackCustCoords =
+    (order as any).customerSharedLocation?.lat !== undefined
+      ? {
+          lat: Number((order as any).customerSharedLocation.lat),
+          lng: Number((order as any).customerSharedLocation.lng),
+        }
+      : order.deliveryAddress?.coordinates &&
+        Array.isArray(order.deliveryAddress.coordinates) &&
+        order.deliveryAddress.coordinates.length >= 2
+        ? {
+            lng: Number(order.deliveryAddress.coordinates[0]),
+            lat: Number(order.deliveryAddress.coordinates[1]),
+          }
+        : undefined;
+
+  let custCoords: { lat: number; lng: number };
+  let custLocSource: 'digipin' | 'gps' = 'gps';
+
+  // If customer explicitly shared current delivery GPS location, prioritize live GPS!
+  if (hasCustomerSharedLiveGps && fallbackCustCoords && (fallbackCustCoords.lat !== 0 || fallbackCustCoords.lng !== 0)) {
+    custCoords = fallbackCustCoords;
+    custLocSource = 'gps';
+  } else if (custDigipin) {
+    // Primary: customer delivery address location derived strictly from DigiPin
+    const dgp = resolveCoordinatesFromDigipin(custDigipin);
+    if (dgp) {
+      custCoords = dgp;
+      custLocSource = 'digipin';
+    } else {
+      custCoords = resolveLocationFromDigipinOrPincode(
+        custDigipin,
+        custPincode,
+        fallbackCustCoords,
+      );
+      custLocSource = 'digipin';
+    }
+  } else {
+    // Requirement: If digipin is NOT set, ONLY then search for GPS location for customer by rider
+    if (fallbackCustCoords && (fallbackCustCoords.lat !== 0 || fallbackCustCoords.lng !== 0)) {
+      custCoords = fallbackCustCoords;
+      custLocSource = 'gps';
+    } else if (custPincode) {
+      const pinC = resolveCoordinatesFromPincode(custPincode);
+      custCoords = pinC || { lat: 12.9716, lng: 77.5946 };
+      custLocSource = 'gps';
+    } else {
+      custCoords = { lat: 12.9716, lng: 77.5946 };
+      custLocSource = 'gps';
+    }
+  }
 
   if (riderData) {
     const dLat = (custCoords.lat - riderData.currentLocation.lat) * (Math.PI / 180);
@@ -347,11 +408,19 @@ export const buildOrderLiveTrackingData = async (orderId: string) => {
       phone: order.customerPhone || '',
       address: order.deliveryAddress || { line1: 'Delivery Address', city: 'Bengaluru' },
       location: custCoords,
+      locationSource: custLocSource,
       digipin: custDigipin,
       pincode: custPincode,
+      isLiveGpsShared: hasCustomerSharedLiveGps,
     },
     telemetry: {
       trackingMode: 'websocket_live_gps',
+      riderTrackingMode: 'phone_mobile_number',
+      riderPhone: riderData?.phone || order.riderPhone || '',
+      customerLocationMode: hasCustomerSharedLiveGps
+        ? 'customer_live_gps_shared'
+        : (custLocSource === 'digipin' ? 'digipin_verified' : 'gps_search_fallback'),
+      customerLocationSource: custLocSource,
       isLiveOnline: riderData ? riderData.isOnline : false,
       riderToRestaurantDistanceKm: isTrackingClosed ? 0 : (distanceToPickupKm ?? 0.85),
       riderToCustomerDistanceKm: isTrackingClosed ? 0 : (distanceToDeliveryKm ?? 1.45),

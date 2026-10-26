@@ -41,25 +41,27 @@ async function loadCustomerMenuSection() {
 
     let custLat = null;
     let custLng = null;
-    if (defaultAddr?.location?.coordinates && Array.isArray(defaultAddr.location.coordinates) && defaultAddr.location.coordinates.length >= 2) {
+    // Requirement: Customer uses digipin for address location in place of GPS location
+    if (defaultAddr?.digipin) {
+      const dgpCoords = resolveFrontendCoordinatesFromDigipin(defaultAddr.digipin);
+      if (dgpCoords) {
+        custLat = dgpCoords.lat;
+        custLng = dgpCoords.lng;
+      }
+    }
+    if ((custLat === null || custLng === null) && customerPin) {
+      const pinCoords = resolveFrontendCoordinatesFromPincode(customerPin);
+      if (pinCoords) {
+        custLat = pinCoords.lat;
+        custLng = pinCoords.lng;
+      }
+    }
+    if ((custLat === null || custLng === null) && defaultAddr?.location?.coordinates && Array.isArray(defaultAddr.location.coordinates) && defaultAddr.location.coordinates.length >= 2) {
       const cLng = Number(defaultAddr.location.coordinates[0]);
       const cLat = Number(defaultAddr.location.coordinates[1]);
       if (!isNaN(cLat) && !isNaN(cLng) && (cLat !== 0 || cLng !== 0)) {
         custLat = cLat;
         custLng = cLng;
-      }
-    }
-    if ((custLat === null || custLng === null) && window.currentUserLat && window.currentUserLng) {
-      custLat = window.currentUserLat;
-      custLng = window.currentUserLng;
-    }
-
-    // If customer's default address is Pune (411057) or Motihari (845401) but coordinates were legacy Bengaluru:
-    if (customerPin && customerPin !== '560001') {
-      const pinCoords = resolveFrontendCoordinatesFromPincode(customerPin);
-      if (pinCoords && (custLat === null || custLng === null || (Math.abs(custLat - 12.9716) < 0.001 && Math.abs(custLng - 77.5946) < 0.001))) {
-        custLat = pinCoords.lat;
-        custLng = pinCoords.lng;
       }
     }
 
@@ -3300,9 +3302,66 @@ async function fetchCustomerServiceablePincodes() {
   return cachedServiceablePincodes;
 }
 
+var DIGIPIN_CHARS = window.DIGIPIN_CHARS || '23456789CFJKMPRT';
+
+function encodeIndiaPostDigipin(lat, lng) {
+  let minLat = 2.5;
+  let maxLat = 38.5;
+  let minLng = 63.5;
+  let maxLng = 99.5;
+  let code = '';
+  for (let i = 0; i < 10; i++) {
+    const latSpan = (maxLat - minLat) / 4;
+    const lngSpan = (maxLng - minLng) / 4;
+    let row = Math.floor((maxLat - lat) / latSpan);
+    let col = Math.floor((lng - minLng) / lngSpan);
+    if (row < 0) row = 0;
+    if (row > 3) row = 3;
+    if (col < 0) col = 0;
+    if (col > 3) col = 3;
+    const char = DIGIPIN_CHARS[row * 4 + col];
+    if (char) code += char;
+    maxLat = maxLat - row * latSpan;
+    minLat = maxLat - latSpan;
+    minLng = minLng + col * lngSpan;
+    maxLng = minLng + lngSpan;
+  }
+  return `${code.slice(0, 3)}-${code.slice(3, 6)}-${code.slice(6, 10)}`;
+}
+window.encodeIndiaPostDigipin = encodeIndiaPostDigipin;
+
+function decodeIndiaPostDigipin(code) {
+  if (!code || typeof code !== 'string') return null;
+  const clean = code.replace(/[^23456789CFJKMPRT]/gi, '').toUpperCase();
+  if (clean.length < 8) return null;
+  let minLat = 2.5, maxLat = 38.5;
+  let minLng = 63.5, maxLng = 99.5;
+  for (let i = 0; i < clean.length; i++) {
+    const idx = DIGIPIN_CHARS.indexOf(clean[i]);
+    if (idx === -1) return null;
+    const row = Math.floor(idx / 4);
+    const col = idx % 4;
+    const latSpan = (maxLat - minLat) / 4;
+    const lngSpan = (maxLng - minLng) / 4;
+    const newMinLat = minLat + (3 - row) * latSpan;
+    const newMaxLat = newMinLat + latSpan;
+    const newMinLng = minLng + col * lngSpan;
+    const newMaxLng = newMinLng + lngSpan;
+    minLat = newMinLat; maxLat = newMaxLat;
+    minLng = newMinLng; maxLng = newMaxLng;
+  }
+  return {
+    lat: Number(((minLat + maxLat) / 2).toFixed(6)),
+    lng: Number(((minLng + maxLng) / 2).toFixed(6)),
+  };
+}
+window.decodeIndiaPostDigipin = decodeIndiaPostDigipin;
+
 function resolveFrontendCoordinatesFromDigipin(digipin) {
   if (!digipin || typeof digipin !== 'string') return null;
   const clean = digipin.trim().toUpperCase();
+
+  // 1. Synthetic Tomato format: DGP-XXXX-YYYY (e.g., DGP-1298-7764)
   const dgpMatch = clean.match(/DGP-(\d{3,4})-(\d{3,4})/i);
   if (dgpMatch && dgpMatch[1] && dgpMatch[2]) {
     const latVal = parseInt(dgpMatch[1], 10) / 100;
@@ -3311,12 +3370,21 @@ function resolveFrontendCoordinatesFromDigipin(digipin) {
       return { lat: latVal, lng: lngVal };
     }
   }
+
+  // 2. Embedded 6-digit Pincode (e.g. DGP-411057 or 411057-D02)
   const pinMatch = clean.match(/\b\d{6}\b/);
   if (pinMatch) {
-    return resolveFrontendCoordinatesFromPincode(pinMatch[0]);
+    const fromPin = resolveFrontendCoordinatesFromPincode(pinMatch[0]);
+    if (fromPin) return fromPin;
   }
+
+  // 3. Official India Post DIGIPIN 10-char alphanumeric grid code (e.g. 284-969-9J8K)
+  const official = decodeIndiaPostDigipin(clean);
+  if (official) return official;
+
   return null;
 }
+window.resolveFrontendCoordinatesFromDigipin = resolveFrontendCoordinatesFromDigipin;
 
 function resolveFrontendCoordinatesFromPincode(pin) {
   if (!pin) return null;
@@ -3324,11 +3392,24 @@ function resolveFrontendCoordinatesFromPincode(pin) {
   if (clean === '411057') return { lat: 18.5707, lng: 73.6908 };
   if (clean === '845401') return { lat: 26.6471, lng: 84.9085 };
   if (clean === '560001') return { lat: 12.9716, lng: 77.5946 };
+  if (clean === '560038') return { lat: 12.9780, lng: 77.6408 };
+  if (clean === '560008') return { lat: 12.9719, lng: 77.6200 };
+  if (clean === '560066') return { lat: 12.9698, lng: 77.7499 };
   return null;
 }
+window.resolveFrontendCoordinatesFromPincode = resolveFrontendCoordinatesFromPincode;
 
 function getAddressCoordinates(addr) {
   if (!addr) return null;
+  // Requirement: Customer uses digipin for address location in place of GPS location
+  if (addr.digipin) {
+    const dgp = resolveFrontendCoordinatesFromDigipin(addr.digipin);
+    if (dgp) return dgp;
+  }
+  const pin = resolveFrontendAddressPincode(addr);
+  const fromPin = resolveFrontendCoordinatesFromPincode(pin);
+  if (fromPin) return fromPin;
+
   if (Array.isArray(addr.location?.coordinates) && addr.location.coordinates.length >= 2) {
     const lng = Number(addr.location.coordinates[0]);
     const lat = Number(addr.location.coordinates[1]);
@@ -3339,16 +3420,25 @@ function getAddressCoordinates(addr) {
     const lng = Number(addr.lng);
     if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
   }
-  if (addr.digipin) {
-    const dgp = resolveFrontendCoordinatesFromDigipin(addr.digipin);
-    if (dgp) return dgp;
-  }
-  const pin = resolveFrontendAddressPincode(addr);
-  return resolveFrontendCoordinatesFromPincode(pin);
+  return null;
 }
 
 function getStoreFrontendCoordinates(store) {
   if (!store) return null;
+  const pin = store.pincode || store.postalCode || resolveFrontendAddressPincode({ line1: store.restaurantAddress || store.shopAddress || store.address || '' });
+  const fromPin = resolveFrontendCoordinatesFromPincode(pin);
+
+  // Requirement: Restaurant/Shop uses digipin for address location in place of GPS location
+  if (store.digipin) {
+    const dgp = resolveFrontendCoordinatesFromDigipin(store.digipin);
+    if (dgp) {
+      if (!fromPin || (typeof calculateFrontendDistanceKm === 'function' ? calculateFrontendDistanceKm(dgp.lat, dgp.lng, fromPin.lat, fromPin.lng) <= 50 : true)) {
+        return dgp;
+      }
+    }
+  }
+  if (fromPin) return fromPin;
+
   if (store.location && typeof store.location.lat === 'number' && typeof store.location.lng === 'number') {
     return { lat: store.location.lat, lng: store.location.lng };
   }
@@ -3357,12 +3447,7 @@ function getStoreFrontendCoordinates(store) {
     const lat = Number(store.location.coordinates[1]);
     if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) return { lat, lng };
   }
-  if (store.digipin) {
-    const dgp = resolveFrontendCoordinatesFromDigipin(store.digipin);
-    if (dgp) return dgp;
-  }
-  const pin = store.pincode || store.postalCode || resolveFrontendAddressPincode({ line1: store.restaurantAddress || store.shopAddress || store.address || '' });
-  return resolveFrontendCoordinatesFromPincode(pin);
+  return null;
 }
 
 function resolveCurrentCartStore() {
@@ -4321,6 +4406,7 @@ function renderCustomerOrdersList(orders) {
             <span class="badge badge-${escapeHtml(o.status || '')}">${escapeHtml(String(o.status || '').replace(/_/g, ' '))}</span>
             ${!['delivered', 'cancelled'].includes(String(o.status || '').toLowerCase()) ? `
               <button class="btn btn-outline btn-sm" style="background:#f0fdf4; border-color:#86efac; color:#15803d; font-weight:600;" onclick="openOrderLiveTrackingModal('${o._id}', 'customer')">📍 Live Tracking</button>
+              <button class="btn btn-outline btn-sm" style="background:#eff6ff; border-color:#93c5fd; color:#1d4ed8; font-weight:600;" onclick="shareCustomerLiveDeliveryLocation('${o._id}')">📍 Share Live GPS</button>
             ` : ''}
             <button class="btn btn-outline btn-sm" onclick="viewOrderBill('${o._id}')">🧾 View Bill</button>
           </div>
@@ -5201,17 +5287,171 @@ function editAddress(id) {
   const digipinInput = document.getElementById('addr-digipin');
   if (digipinInput) digipinInput.value = addr.digipin || '';
   document.getElementById('addr-default').checked = Boolean(addr.isDefault);
+
+  const latInput = document.getElementById('addr-lat');
+  const lngInput = document.getElementById('addr-lng');
+  const isLiveGpsInput = document.getElementById('addr-is-live-gps');
+  const gpsStatus = document.getElementById('addr-gps-status');
+
+  if (Array.isArray(addr.location?.coordinates) && addr.location.coordinates.length >= 2) {
+    if (latInput) latInput.value = addr.location.coordinates[1];
+    if (lngInput) lngInput.value = addr.location.coordinates[0];
+    if (isLiveGpsInput) isLiveGpsInput.value = 'true';
+    if (gpsStatus) {
+      gpsStatus.style.display = 'inline';
+      gpsStatus.style.color = '#15803d';
+      gpsStatus.textContent = `📍 Saved GPS: ${addr.location.coordinates[1]}, ${addr.location.coordinates[0]}`;
+    }
+  } else {
+    if (latInput) latInput.value = '';
+    if (lngInput) lngInput.value = '';
+    if (isLiveGpsInput) isLiveGpsInput.value = 'false';
+    if (gpsStatus) {
+      gpsStatus.style.display = 'none';
+      gpsStatus.textContent = '';
+    }
+  }
+
   document.getElementById('address-edit-form').style.display = 'block';
   document.getElementById('addr-line1').focus();
 }
 
 function cancelAddressEdit() {
   document.getElementById('address-edit-form').style.display = 'none';
+  const gpsStatus = document.getElementById('addr-gps-status');
+  if (gpsStatus) {
+    gpsStatus.style.display = 'none';
+    gpsStatus.textContent = '';
+  }
 }
+
+function shareCurrentDeliveryLocationGps() {
+  const statusEl = document.getElementById('addr-gps-status');
+  if (!navigator.geolocation) {
+    if (typeof showToastNotification === 'function') {
+      showToastNotification('Geolocation is not supported by your browser.', 'error');
+    } else {
+      alert('Geolocation is not supported by your browser.');
+    }
+    return;
+  }
+
+  if (statusEl) {
+    statusEl.style.display = 'inline';
+    statusEl.style.color = '#0284c7';
+    statusEl.textContent = '⏳ Capturing current GPS delivery location...';
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const lat = Number(pos.coords.latitude.toFixed(6));
+      const lng = Number(pos.coords.longitude.toFixed(6));
+
+      const latInput = document.getElementById('addr-lat');
+      const lngInput = document.getElementById('addr-lng');
+      const isLiveGpsInput = document.getElementById('addr-is-live-gps');
+      const line1Input = document.getElementById('addr-line1');
+      const digipinInput = document.getElementById('addr-digipin');
+
+      if (latInput) latInput.value = lat;
+      if (lngInput) lngInput.value = lng;
+      if (isLiveGpsInput) isLiveGpsInput.value = 'true';
+
+      if (line1Input && !line1Input.value.trim()) {
+        line1Input.value = `Current Delivery Location (${lat}, ${lng})`;
+      }
+
+      if (digipinInput && !digipinInput.value.trim() && typeof encodeIndiaPostDigipin === 'function') {
+        digipinInput.value = encodeIndiaPostDigipin(lat, lng);
+      }
+
+      if (statusEl) {
+        statusEl.style.display = 'inline';
+        statusEl.style.color = '#15803d';
+        statusEl.textContent = `✓ Current GPS Location Shared: ${lat}, ${lng}`;
+      }
+
+      if (typeof showToastNotification === 'function') {
+        showToastNotification(`✓ Current delivery GPS location captured (${lat}, ${lng})!`, 'success');
+      }
+    },
+    (err) => {
+      console.warn('Share current delivery location error:', err);
+      if (statusEl) {
+        statusEl.style.display = 'inline';
+        statusEl.style.color = '#dc2626';
+        statusEl.textContent = '✕ Location access denied or unavailable.';
+      }
+      if (typeof showToastNotification === 'function') {
+        showToastNotification('Location access denied or unavailable. Please enter address manually.', 'error');
+      }
+    },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+}
+window.shareCurrentDeliveryLocationGps = shareCurrentDeliveryLocationGps;
+
+async function shareCustomerLiveDeliveryLocation(orderId) {
+  if (!orderId) return;
+  if (!navigator.geolocation) {
+    if (typeof showToastNotification === 'function') {
+      showToastNotification('Geolocation is not supported by your browser.', 'error');
+    }
+    return;
+  }
+
+  if (typeof showToastNotification === 'function') {
+    showToastNotification('Capturing your current GPS location to share with delivery rider...', 'info');
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      const lat = Number(pos.coords.latitude.toFixed(6));
+      const lng = Number(pos.coords.longitude.toFixed(6));
+      try {
+        await apiFetch(`/api/customer/orders/${orderId}/share-gps`, {
+          method: 'POST',
+          body: JSON.stringify({ lat, lng }),
+        });
+
+        if (window.TomatoWS && typeof window.TomatoWS.sendCustomerLocationShare === 'function') {
+          window.TomatoWS.sendCustomerLocationShare(orderId, lat, lng);
+        }
+
+        if (typeof showToastNotification === 'function') {
+          showToastNotification(`✓ Current delivery GPS location (${lat}, ${lng}) shared with delivery rider!`, 'success');
+        }
+
+        if (typeof refreshOrderLiveTracking === 'function') {
+          refreshOrderLiveTracking();
+        }
+        if (typeof loadCustomerOrders === 'function') {
+          loadCustomerOrders();
+        }
+      } catch (err) {
+        if (typeof showToastNotification === 'function') {
+          showToastNotification(`Failed to share GPS location: ${err.message}`, 'error');
+        }
+      }
+    },
+    (err) => {
+      console.warn('GPS location share error:', err);
+      if (typeof showToastNotification === 'function') {
+        showToastNotification('Location permission denied. Unable to share current GPS spot.', 'error');
+      }
+    },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+}
+window.shareCustomerLiveDeliveryLocation = shareCustomerLiveDeliveryLocation;
 
 async function saveCustomerAddress(e) {
   e.preventDefault();
   const id = document.getElementById('addr-id').value;
+  const latVal = Number(document.getElementById('addr-lat')?.value);
+  const lngVal = Number(document.getElementById('addr-lng')?.value);
+  const isLiveGps = document.getElementById('addr-is-live-gps')?.value === 'true';
+
   const payload = {
     label: document.getElementById('addr-label').value.trim(),
     phone: document.getElementById('addr-phone').value.trim(),
@@ -5222,6 +5462,11 @@ async function saveCustomerAddress(e) {
     postalCode: document.getElementById('addr-pincode').value.trim(),
     digipin: (document.getElementById('addr-digipin')?.value || '').trim().toUpperCase(),
     isDefault: document.getElementById('addr-default').checked,
+    ...(isLiveGps && !isNaN(latVal) && !isNaN(lngVal) ? {
+      coordinates: [lngVal, latVal],
+      isCurrentDeliveryLocation: true,
+      isLiveGps: true,
+    } : {}),
   };
 
   try {

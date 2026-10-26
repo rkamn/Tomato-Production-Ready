@@ -60,12 +60,13 @@ const createRiderRouter = () => {
   });
 
   // Update Rider live GPS location & online status (and broadcast over WebSocket to active order trackers)
+  // Tracked based on rider ID and phone/mobile number
   router.put('/location', async (req: Request, res: Response) => {
     try {
       const user = (req as AuthenticatedRequest).user;
       if (!user?.userId)
         return res.status(401).json({ message: 'Authentication required' });
-      const { lat, lng, isOnline } = req.body;
+      const { lat, lng, isOnline, phone, mobile } = req.body;
       const numLat = Number(lat);
       const numLng = Number(lng);
       if (!Number.isFinite(numLat) || !Number.isFinite(numLng)) {
@@ -74,8 +75,12 @@ const createRiderRouter = () => {
           .json({ message: 'Valid lat and lng coordinates are required' });
       }
 
+      const riderPhone = (phone || mobile || (user as any).phone || '').trim();
+
       const updated: any = await handleRiderLocationRealtimeUpdate({
         riderUserId: user.userId,
+        phone: riderPhone || undefined,
+        mobile: riderPhone || undefined,
         lat: numLat,
         lng: numLng,
         isOnline: isOnline !== undefined ? Boolean(isOnline) : true,
@@ -88,6 +93,7 @@ const createRiderRouter = () => {
         message: 'Live GPS location updated',
         riderId: riderIdStr,
         displayName,
+        phone: updated?.phone || riderPhone || '',
         currentLocation: { lat: numLat, lng: numLng },
         isOnline: updated?.isOnline ?? true,
         lastLocationUpdated: updated?.lastLocationUpdated || new Date(),
@@ -97,6 +103,44 @@ const createRiderRouter = () => {
       return res
         .status(500)
         .json({ message: 'Unable to update rider location' });
+    }
+  });
+
+  // Track rider live location based on phone number or mobile number
+  router.get('/track-by-phone/:phone', async (req: Request, res: Response) => {
+    try {
+      const rawPhone = String(req.params.phone || '').trim();
+      if (!rawPhone) {
+        return res.status(400).json({ message: 'Valid phone number is required' });
+      }
+      const cleanPhone = rawPhone.replace(/[^\d+]/g, '');
+      const last10 = cleanPhone.replace(/[^\d]/g, '').slice(-10);
+      const rider = await Rider.findOne({
+        $or: [
+          { phone: rawPhone },
+          { phone: cleanPhone },
+          ...(last10 ? [{ phone: new RegExp(last10 + '$') }] : []),
+        ],
+      })
+        .select('name riderId phone deliveryVehicle currentLocation isOnline lastLocationUpdated')
+        .lean();
+
+      if (!rider) {
+        return res.status(404).json({ message: `No rider found registered with phone number ${rawPhone}` });
+      }
+
+      return res.json({
+        trackedBy: 'phone',
+        phone: rider.phone,
+        riderId: rider.riderId || '',
+        displayName: rider.name,
+        currentLocation: rider.currentLocation || { lat: 12.9716, lng: 77.5946 },
+        isOnline: rider.isOnline ?? true,
+        lastLocationUpdated: rider.lastLocationUpdated || new Date(),
+      });
+    } catch (error) {
+      console.error('Track rider by phone failed:', error);
+      return res.status(500).json({ message: 'Unable to track rider by phone number' });
     }
   });
 

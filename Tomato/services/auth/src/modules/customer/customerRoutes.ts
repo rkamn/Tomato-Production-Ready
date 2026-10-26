@@ -2413,6 +2413,7 @@ const createCustomerRouter = () => {
         quantity: number;
         price: number;
         totalPrice: number;
+        variant?: string;
       }
 
       const sanitizedItems: SanitizedOrderItem[] = rawItems
@@ -2423,6 +2424,7 @@ const createCustomerRouter = () => {
           const name = typeof entry.name === 'string' ? entry.name.trim() : '';
           const quantity = Number(entry.quantity ?? 1);
           const price = Number(entry.price ?? 0);
+          const variant = typeof entry.variant === 'string' ? entry.variant.trim() : '';
           return {
             foodItemId: mongoose.isValidObjectId(foodItemId)
               ? new mongoose.Types.ObjectId(foodItemId)
@@ -2431,6 +2433,7 @@ const createCustomerRouter = () => {
             quantity,
             price,
             totalPrice: quantity * price,
+            variant,
           };
         })
         .filter(
@@ -2442,6 +2445,40 @@ const createCustomerRouter = () => {
         return res
           .status(400)
           .json({ message: 'Valid food items are required' });
+      }
+
+      // Check for finished / out-of-stock items and variants
+      const foodItemIds = sanitizedItems
+        .map((it) => it.foodItemId)
+        .filter((id) => mongoose.isValidObjectId(id));
+      if (foodItemIds.length > 0) {
+        const foundFoodItems = await FoodItem.find({ _id: { $in: foodItemIds } }).lean();
+        const foodItemMap = new Map(foundFoodItems.map((f) => [String(f._id), f]));
+
+        for (const orderItem of sanitizedItems) {
+          const dbItem = foodItemMap.get(String(orderItem.foodItemId));
+          if (dbItem) {
+            if (dbItem.isActive === false) {
+              return res.status(400).json({
+                message: `"${orderItem.name}" is currently unavailable.`,
+                code: 'ITEM_UNAVAILABLE',
+              });
+            }
+            if (orderItem.variant && Array.isArray(dbItem.variants) && dbItem.variants.length > 0) {
+              const matchedVar = dbItem.variants.find(
+                (v) => String(v.name).trim().toLowerCase() === String(orderItem.variant).trim().toLowerCase(),
+              );
+              if (matchedVar) {
+                if (matchedVar.isAvailable === false || Number(matchedVar.quantity || 0) <= 0) {
+                  return res.status(400).json({
+                    message: `Selected variant "${orderItem.variant}" for "${orderItem.name}" is finished / out of stock.`,
+                    code: 'VARIANT_OUT_OF_STOCK',
+                  });
+                }
+              }
+            }
+          }
+        }
       }
 
       const subtotal = sanitizedItems.reduce<number>(

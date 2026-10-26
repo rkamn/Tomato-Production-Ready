@@ -2070,6 +2070,11 @@ function renderMenuItems() {
       const ratingScore = item.rating ? Number(item.rating).toFixed(1) : 'New';
       const reviewCount = item.reviewCount || 0;
 
+      const varList = Array.isArray(item.variants) && item.variants.length > 0 ? item.variants : [];
+      const defaultVar = varList.length > 0 ? (varList.find(v => v.isDefault) || varList[0]) : null;
+      const initialPrice = defaultVar ? Number(defaultVar.price) : Number(item.price);
+      const isInitialFinished = defaultVar ? (defaultVar.isAvailable === false || Number(defaultVar.quantity || 0) <= 0) : false;
+
       return `
         <div class="food-card full-image-item-tile" style="position:relative; overflow:hidden; min-height:225px; border-radius:14px; display:flex; flex-direction:column; justify-content:space-between; padding:1.1rem; color:#ffffff; border:1px solid ${isShopClosed ? '#fca5a5' : 'rgba(255,255,255,0.18)'}; background-color:#1e293b; box-shadow:0 8px 20px rgba(15,23,42,0.18); ${isShopClosed ? 'opacity:0.85;' : ''}">
           ${renderFullTileBackdropHtml(item.image)}
@@ -2098,14 +2103,51 @@ function renderMenuItems() {
           </div>
           <div style="z-index:1; position:relative; margin-top:auto; padding-top:0.5rem;">
             <p class="food-desc" style="margin:0 0 0.4rem 0; font-size:0.83rem; color:#f1f5f9; line-height:1.35; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-shadow:0 1px 3px rgba(0,0,0,0.9);" title="${escapeHtml(item.description || '')}">${escapeHtml(item.description || 'Quality retail item from local store.')}</p>
-            <div class="food-bottom" style="background:rgba(15,23,42,0.32); backdrop-filter:blur(2px); border:1px solid rgba(255,255,255,0.28); border-radius:10px; padding:0.55rem 0.75rem; margin-top:0;">
-              <span class="food-price" style="color:#4ade80; font-weight:800; text-shadow:0 1px 3px rgba(0,0,0,0.85);">₹${Number(item.price).toFixed(2)}</span>
+            <div class="food-bottom" style="background:rgba(15,23,42,0.32); backdrop-filter:blur(2px); border:1px solid rgba(255,255,255,0.28); border-radius:10px; padding:0.55rem 0.75rem; margin-top:0; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.4rem;">
+              <div style="display:flex; align-items:center; gap:0.45rem; flex-wrap:wrap;">
+                <span id="price-${itemIdStr}" class="food-price" style="color:#4ade80; font-weight:800; text-shadow:0 1px 3px rgba(0,0,0,0.85);">₹${initialPrice.toFixed(2)}</span>
+                ${varList.length > 0 ? `
+                  <select
+                    id="variant-select-${itemIdStr}"
+                    class="item-variant-select"
+                    onchange="handleItemVariantSelectChange('${itemIdStr}', this, '${item.restaurantId}', 'shop')"
+                    style="background-color:rgba(15,23,42,0.92); background-image:url(&quot;data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%23ffffff'%3E%3Cpath fill-rule='evenodd' d='M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z' clip-rule='evenodd'/%3E%3C/svg%3E&quot;); background-repeat:no-repeat; background-position:right 0.35rem center; background-size:0.68rem; -webkit-appearance:none; -moz-appearance:none; appearance:none; color:#ffffff; border:1px solid rgba(255,255,255,0.38); border-radius:5px; padding:0.15rem 1.25rem 0.15rem 0.4rem; font-size:0.7rem; font-weight:700; cursor:pointer; max-width:110px; height:25px; outline:none; text-overflow:ellipsis; white-space:nowrap; overflow:hidden;"
+                    title="Select Variant"
+                  >
+                    ${varList.map((v, vIdx) => {
+                      const isFin = v.isAvailable === false || Number(v.quantity || 0) <= 0;
+                      const isDef = defaultVar ? defaultVar.name === v.name : vIdx === 0;
+                      const isSel = isDef;
+                      const formattedPrice = Number(v.price) % 1 === 0 ? Number(v.price).toFixed(0) : Number(v.price).toFixed(2);
+                      const optionLabel = `${escapeHtml(v.name)} - ₹${formattedPrice}${isFin ? ' (Finished)' : ''}`;
+                      return `
+                        <option
+                          value="${escapeHtml(v.name)}"
+                          data-price="${Number(v.price)}"
+                          data-available="${!isFin}"
+                          data-is-default="${isDef}"
+                          ${isSel ? 'selected' : ''}
+                          ${isFin ? 'disabled' : ''}
+                          style="${isFin ? 'color:#94a3b8; background:#1e293b; font-style:italic;' : 'color:#ffffff; background:#0f172a;'}"
+                        >
+                          ${optionLabel}
+                        </option>
+                      `;
+                    }).join('')}
+                  </select>
+                ` : ''}
+              </div>
               ${isShopClosed
                 ? `<button class="btn btn-outline btn-sm" disabled style="opacity:0.75; cursor:not-allowed; border-color:#f87171; color:#fca5a5;" title="Shop is closed and not taking orders">
                     Closed
                   </button>`
-                : `<button class="btn btn-primary btn-sm" style="background:rgba(217,75,53,0.78); border:1px solid rgba(255,255,255,0.35);" onclick="addToCart('${item._id || item.id}', '${escapeHtml(item.name)}', ${Number(item.price)}, '${item.restaurantId}', 'shop')">
-                    + Add to Cart
+                : `<button
+                    id="add-btn-${itemIdStr}"
+                    class="btn btn-primary btn-sm"
+                    ${isInitialFinished ? 'disabled style="opacity:0.6; cursor:not-allowed; background:#64748b;"' : 'style="background:rgba(217,75,53,0.78); border:1px solid rgba(255,255,255,0.35); cursor:pointer;"'}
+                    onclick="handleAddToCartWithVariant('${itemIdStr}', '${escapeHtml(item.name)}', '${item.restaurantId}', 'shop')"
+                  >
+                    ${isInitialFinished ? 'Finished' : '+ Add to Cart'}
                   </button>`
               }
             </div>
@@ -2213,6 +2255,11 @@ function renderMenuItems() {
       ${isNonVeg ? 'NON-VEG' : 'VEG'}
     </span>`;
 
+    const varList = Array.isArray(item.variants) && item.variants.length > 0 ? item.variants : [];
+    const defaultVar = varList.length > 0 ? (varList.find(v => v.isDefault) || varList[0]) : null;
+    const initialPrice = defaultVar ? Number(defaultVar.price) : Number(item.price);
+    const isInitialFinished = defaultVar ? (defaultVar.isAvailable === false || Number(defaultVar.quantity || 0) <= 0) : false;
+
     return `
       <div class="food-card full-image-item-tile" style="position:relative; overflow:hidden; min-height:225px; border-radius:14px; display:flex; flex-direction:column; justify-content:space-between; padding:1.1rem; color:#ffffff; border:1px solid ${isRestClosed ? '#fca5a5' : 'rgba(255,255,255,0.18)'}; background-color:#1e293b; box-shadow:0 8px 20px rgba(15,23,42,0.18); ${isRestClosed ? 'opacity:0.85;' : ''}">
         ${renderFullTileBackdropHtml(item.image)}
@@ -2241,14 +2288,51 @@ function renderMenuItems() {
         </div>
         <div style="z-index:1; position:relative; margin-top:auto; padding-top:0.5rem;">
           <p class="food-desc" style="margin:0 0 0.4rem 0; font-size:0.83rem; color:#f1f5f9; line-height:1.35; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-shadow:0 1px 3px rgba(0,0,0,0.9);" title="${escapeHtml(item.description || '')}">${escapeHtml(item.description || 'Deliciously prepared with authentic ingredients.')}</p>
-          <div class="food-bottom" style="background:rgba(15,23,42,0.32); backdrop-filter:blur(2px); border:1px solid rgba(255,255,255,0.28); border-radius:10px; padding:0.55rem 0.75rem; margin-top:0;">
-            <span class="food-price" style="color:#4ade80; font-weight:800; text-shadow:0 1px 3px rgba(0,0,0,0.85);">₹${Number(item.price).toFixed(2)}</span>
+          <div class="food-bottom" style="background:rgba(15,23,42,0.32); backdrop-filter:blur(2px); border:1px solid rgba(255,255,255,0.28); border-radius:10px; padding:0.55rem 0.75rem; margin-top:0; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.4rem;">
+            <div style="display:flex; align-items:center; gap:0.45rem; flex-wrap:wrap;">
+              <span id="price-${itemIdStr}" class="food-price" style="color:#4ade80; font-weight:800; text-shadow:0 1px 3px rgba(0,0,0,0.85);">₹${initialPrice.toFixed(2)}</span>
+              ${varList.length > 0 ? `
+                <select
+                  id="variant-select-${itemIdStr}"
+                  class="item-variant-select"
+                  onchange="handleItemVariantSelectChange('${itemIdStr}', this, '${item.restaurantId}', 'restaurant')"
+                  style="background-color:rgba(15,23,42,0.92); background-image:url(&quot;data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%23ffffff'%3E%3Cpath fill-rule='evenodd' d='M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z' clip-rule='evenodd'/%3E%3C/svg%3E&quot;); background-repeat:no-repeat; background-position:right 0.35rem center; background-size:0.68rem; -webkit-appearance:none; -moz-appearance:none; appearance:none; color:#ffffff; border:1px solid rgba(255,255,255,0.38); border-radius:5px; padding:0.15rem 1.25rem 0.15rem 0.4rem; font-size:0.7rem; font-weight:700; cursor:pointer; max-width:110px; height:25px; outline:none; text-overflow:ellipsis; white-space:nowrap; overflow:hidden;"
+                  title="Select Variant"
+                >
+                  ${varList.map((v, vIdx) => {
+                    const isFin = v.isAvailable === false || Number(v.quantity || 0) <= 0;
+                    const isDef = defaultVar ? defaultVar.name === v.name : vIdx === 0;
+                    const isSel = isDef;
+                    const formattedPrice = Number(v.price) % 1 === 0 ? Number(v.price).toFixed(0) : Number(v.price).toFixed(2);
+                    const optionLabel = `${escapeHtml(v.name)} - ₹${formattedPrice}${isFin ? ' (Finished)' : ''}`;
+                    return `
+                      <option
+                        value="${escapeHtml(v.name)}"
+                        data-price="${Number(v.price)}"
+                        data-available="${!isFin}"
+                        data-is-default="${isDef}"
+                        ${isSel ? 'selected' : ''}
+                        ${isFin ? 'disabled' : ''}
+                        style="${isFin ? 'color:#94a3b8; background:#1e293b; font-style:italic;' : 'color:#ffffff; background:#0f172a;'}"
+                      >
+                        ${optionLabel}
+                      </option>
+                    `;
+                  }).join('')}
+                </select>
+              ` : ''}
+            </div>
             ${isRestClosed
               ? `<button class="btn btn-outline btn-sm" disabled style="opacity:0.75; cursor:not-allowed; border-color:#f87171; color:#fca5a5;" title="Restaurant is closed and not taking orders">
                   Closed
                 </button>`
-              : `<button class="btn btn-primary btn-sm" style="background:rgba(217,75,53,0.78); border:1px solid rgba(255,255,255,0.35);" onclick="addToCart('${item._id || item.id}', '${escapeHtml(item.name)}', ${Number(item.price)}, '${item.restaurantId}', 'restaurant')">
-                  + Add to Cart
+              : `<button
+                  id="add-btn-${itemIdStr}"
+                  class="btn btn-primary btn-sm"
+                  ${isInitialFinished ? 'disabled style="opacity:0.6; cursor:not-allowed; background:#64748b;"' : 'style="background:rgba(217,75,53,0.78); border:1px solid rgba(255,255,255,0.35); cursor:pointer;"'}
+                  onclick="handleAddToCartWithVariant('${itemIdStr}', '${escapeHtml(item.name)}', '${item.restaurantId}', 'restaurant')"
+                >
+                  ${isInitialFinished ? 'Finished' : '+ Add to Cart'}
                 </button>`
             }
           </div>
@@ -2300,8 +2384,82 @@ function renderMenuItems() {
   grid.innerHTML = cardsHtml;
 }
 
+// Variant Selection Handlers
+function handleItemVariantSelectChange(itemId, selectEl, restaurantId, storeType) {
+  if (!selectEl) return;
+  const selectedOption = selectEl.options[selectEl.selectedIndex];
+  if (!selectedOption) return;
+
+  const price = parseFloat(selectedOption.getAttribute('data-price') || '0');
+  const isAvailable = selectedOption.getAttribute('data-available') === 'true';
+
+  const priceEl = document.getElementById(`price-${itemId}`);
+  if (priceEl) {
+    priceEl.textContent = `₹${price.toFixed(2)}`;
+  }
+
+  const addBtn = document.getElementById(`add-btn-${itemId}`);
+  if (addBtn) {
+    if (!isAvailable) {
+      addBtn.disabled = true;
+      addBtn.textContent = 'Finished';
+      addBtn.style.opacity = '0.6';
+      addBtn.style.cursor = 'not-allowed';
+      addBtn.style.background = '#64748b';
+    } else {
+      addBtn.disabled = false;
+      addBtn.textContent = '+ Add to Cart';
+      addBtn.style.opacity = '1';
+      addBtn.style.cursor = 'pointer';
+      addBtn.style.background = 'rgba(217,75,53,0.78)';
+    }
+  }
+}
+window.handleItemVariantSelectChange = handleItemVariantSelectChange;
+
+function handleAddToCartWithVariant(itemId, name, restaurantId, storeType) {
+  const selectEl = document.getElementById(`variant-select-${itemId}`);
+  let variant = '';
+  let price = 0;
+
+  const sourceList = storeType === 'shop' ? allShopItems : allMenuItems;
+  const item = sourceList.find((m) => String(m.id || m._id) === String(itemId));
+
+  if (selectEl && selectEl.options.length > 0) {
+    const selectedOption = selectEl.options[selectEl.selectedIndex];
+    if (selectedOption) {
+      const isAvail = selectedOption.getAttribute('data-available') === 'true';
+      if (!isAvail) {
+        alert('This variant is finished and out of stock.');
+        return;
+      }
+      variant = selectedOption.value;
+      price = parseFloat(selectedOption.getAttribute('data-price') || (item ? item.price : 0));
+    }
+  } else if (item) {
+    if (Array.isArray(item.variants) && item.variants.length > 0) {
+      const defVar = item.variants.find((v) => v.isDefault) || item.variants[0];
+      if (defVar) {
+        if (defVar.isAvailable === false || Number(defVar.quantity || 0) <= 0) {
+          alert('This variant is finished and out of stock.');
+          return;
+        }
+        variant = defVar.name;
+        price = Number(defVar.price);
+      } else {
+        price = Number(item.price);
+      }
+    } else {
+      price = Number(item.price);
+    }
+  }
+
+  addToCart(itemId, name, price, restaurantId, storeType, variant);
+}
+window.handleAddToCartWithVariant = handleAddToCartWithVariant;
+
 // Cart management
-function addToCart(itemId, name, price, restaurantId, storeType = 'restaurant') {
+function addToCart(itemId, name, price, restaurantId, storeType = 'restaurant', variant = '') {
   let isClosed = false;
   let storeName = 'Store';
   let targetStore = null;
@@ -2379,7 +2537,8 @@ function addToCart(itemId, name, price, restaurantId, storeType = 'restaurant') 
   const storeLoc = targetStore?.location || null;
   const storeAddr = targetStore?.restaurantAddress || targetStore?.shopAddress || targetStore?.address || '';
 
-  const existing = cart.find((i) => i.itemId === itemId);
+  const cleanVariant = (variant || '').trim();
+  const existing = cart.find((i) => String(i.itemId) === String(itemId) && (i.variant || '').trim() === cleanVariant);
   if (existing) {
     existing.quantity += 1;
     if (!existing.category && itemCategory) existing.category = itemCategory;
@@ -2393,6 +2552,7 @@ function addToCart(itemId, name, price, restaurantId, storeType = 'restaurant') 
       name,
       price,
       quantity: 1,
+      variant: cleanVariant,
       restaurantId,
       storeType,
       category: itemCategory,
@@ -2415,9 +2575,11 @@ function addToCart(itemId, name, price, restaurantId, storeType = 'restaurant') 
   }
   updateCartUI();
 }
+window.addToCart = addToCart;
 
-function updateCartQuantity(itemId, delta) {
-  const item = cart.find((i) => i.itemId === itemId);
+function updateCartQuantity(itemId, delta, variant = '') {
+  const cleanVariant = (variant || '').trim();
+  const item = cart.find((i) => String(i.itemId) === String(itemId) && (i.variant || '').trim() === cleanVariant);
   if (!item) return;
   item.quantity += delta;
   if (item.quantity <= 0) {
@@ -2426,24 +2588,27 @@ function updateCartQuantity(itemId, delta) {
   }
   updateCartUI();
 }
+window.updateCartQuantity = updateCartQuantity;
 
 function clearCart() {
   cart.length = 0;
   if (typeof resetAppliedCouponsState === 'function') resetAppliedCouponsState();
   updateCartUI();
 }
+window.clearCart = clearCart;
 
 function renderCartRowsHtml() {
   return cart.map((item) => `
     <div class="cart-row">
       <div>
         <strong>${escapeHtml(item.name)}</strong>
+        ${item.variant ? `<div style="display:inline-block; margin-left:0.35rem; padding:0.12rem 0.45rem; font-size:0.72rem; font-weight:700; border-radius:4px; background:#e0f2fe; color:#0369a1; border:1px solid #7dd3fc;">${escapeHtml(item.variant)}</div>` : ''}
         <div style="font-size:0.75rem; color:var(--muted);">₹${item.price.toFixed(2)} each</div>
       </div>
       <div class="cart-qty-ctrl">
-        <button class="qty-btn" type="button" onclick="updateCartQuantity('${item.itemId}', -1)">-</button>
+        <button class="qty-btn" type="button" onclick="updateCartQuantity('${item.itemId}', -1, '${escapeHtml(item.variant || '')}')">-</button>
         <span style="font-weight:700; width:1.4rem; text-align:center;">${item.quantity}</span>
-        <button class="qty-btn" type="button" onclick="updateCartQuantity('${item.itemId}', 1)">+</button>
+        <button class="qty-btn" type="button" onclick="updateCartQuantity('${item.itemId}', 1, '${escapeHtml(item.variant || '')}')">+</button>
       </div>
       <div style="font-weight:700; min-width:65px; text-align:right;">₹${(item.price * item.quantity).toFixed(2)}</div>
     </div>
@@ -3678,6 +3843,7 @@ async function placeOrderAfterPayment(txnId, method, chosenAddr) {
       quantity: i.quantity,
       price: i.price,
       category: i.category || '',
+      variant: i.variant || '',
     })),
     couponCodes: Array.isArray(appliedCouponCodes) ? appliedCouponCodes.slice(0, 1) : [],
     paymentMethod: method,
@@ -4186,7 +4352,7 @@ function renderCustomerOrdersList(orders) {
                 const canRate = o.status !== 'cancelled';
                 return `
                   <span style="display:inline-flex; align-items:center; gap:0.4rem; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:0.25rem 0.55rem; font-size:0.82rem;">
-                    <span><strong>${escapeHtml(i.name)}</strong> × ${i.quantity}</span>
+                    <span><strong>${escapeHtml(i.name)}</strong>${i.variant ? ` <span style="font-size:0.75rem; color:#0284c7; background:#e0f2fe; padding:0.1rem 0.35rem; border-radius:4px; font-weight:600;">(${escapeHtml(i.variant)})</span>` : ''} × ${i.quantity}</span>
                     ${canRate ? `
                       <button type="button" class="btn-rate-item" data-mode="write" data-item-id="${escapeHtml(itmId)}" data-item-name="${escapeHtml(i.name)}" onclick="handleOrderReviewButtonClick(this)" title="Rate & Review this product">
                         ⭐ Review

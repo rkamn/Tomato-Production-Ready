@@ -17,6 +17,7 @@ import {
   buildOrderLiveTrackingData,
 } from '../../utils/orderHelpers.js';
 import { productImageUpload } from '../../middleware/upload.js';
+import { getCatalogVariants, sanitizeItemVariants } from '../../utils/variantHelpers.js';
 import {
   validateBankAndPanDetails,
   resolvePartnerPincode,
@@ -278,6 +279,18 @@ const createRestaurantRouter = () => {
     }
   });
 
+  router.get('/menu/variants', async (req: Request, res: Response) => {
+    try {
+      const name = typeof req.query.name === 'string' ? req.query.name : '';
+      const category = typeof req.query.category === 'string' ? req.query.category : '';
+      const variants = await getCatalogVariants(name, category);
+      return res.json({ variants });
+    } catch (error) {
+      console.error('Restaurant variant suggestions failed:', error);
+      return res.status(500).json({ message: 'Unable to fetch variant suggestions', variants: [] });
+    }
+  });
+
   router.get('/menu', async (req: Request, res: Response) => {
     try {
       const user = (req as AuthenticatedRequest).user;
@@ -318,13 +331,21 @@ const createRestaurantRouter = () => {
       const price = Number(req.body?.price ?? 0);
       const image =
         typeof req.body?.image === 'string' ? req.body.image.trim() : '';
+      const variants = sanitizeItemVariants(req.body?.variants);
+      const defaultVariant = variants.find((v) => v.isDefault)?.name || (variants[0] ? variants[0].name : '');
+      const effectivePrice = variants.length > 0 && variants[0]
+        ? (variants.find((v) => v.isDefault)?.price ?? variants[0].price)
+        : price;
+      const effectiveQuantity = variants.length > 0
+        ? variants.reduce((sum, v) => sum + (v.quantity || 0), 0)
+        : quantity;
 
       if (
         !name ||
-        !Number.isFinite(quantity) ||
-        quantity < 0 ||
-        !Number.isFinite(price) ||
-        price < 0
+        !Number.isFinite(effectiveQuantity) ||
+        effectiveQuantity < 0 ||
+        !Number.isFinite(effectivePrice) ||
+        effectivePrice < 0
       ) {
         return res.status(400).json({
           message: 'Valid food item name, quantity, and price are required',
@@ -340,9 +361,11 @@ const createRestaurantRouter = () => {
         category,
         description,
         dietary,
-        quantity,
-        price,
+        quantity: effectiveQuantity,
+        price: effectivePrice,
         image,
+        variants,
+        defaultVariant,
         isActive: true,
       });
 
@@ -350,7 +373,7 @@ const createRestaurantRouter = () => {
         userId: user.userId,
         role: 'restaurant',
         title: 'Menu item added',
-        message: `${name} (${category}) is now available at ₹${price}.`,
+        message: `${name} (${category}) is now available at ₹${effectivePrice}${variants.length ? ` with ${variants.length} variants` : ''}.`,
         type: 'menu',
         entityId: String(item._id),
       });
@@ -405,6 +428,19 @@ const createRestaurantRouter = () => {
         updates.isActive = Boolean(req.body.isActive);
       if (typeof req.body.image === 'string')
         updates.image = req.body.image.trim();
+      if (req.body.variants !== undefined) {
+        const variants = sanitizeItemVariants(req.body.variants);
+        updates.variants = variants;
+        if (variants.length > 0) {
+          const defVar = variants.find((v) => v.isDefault) || variants[0];
+          if (defVar) {
+            updates.defaultVariant = defVar.name;
+            if (req.body.price === undefined) {
+              updates.price = defVar.price;
+            }
+          }
+        }
+      }
 
       const updated = await FoodItem.findOneAndUpdate(
         {

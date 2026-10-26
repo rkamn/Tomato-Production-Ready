@@ -3713,6 +3713,45 @@
               <input id="mi-quantity" type="number" min="0" placeholder="20" required />
             </div>
           </div>
+
+          <!-- Item Variants & Dynamic Pricing -->
+          <div class="form-group" style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:10px; padding:0.85rem; margin-top:0.5rem; margin-bottom:1rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.4rem;">
+              <div style="display:flex; align-items:center; gap:0.45rem;">
+                <label style="margin:0; font-size:0.88rem; font-weight:800; color:#1e293b;">
+                  Variants &amp; Custom Pricing
+                </label>
+                <span class="badge" style="background:#eff6ff; color:#2563eb; font-size:0.7rem; font-weight:700;">Optional</span>
+              </div>
+              <button
+                type="button"
+                id="btn-add-mi-variant"
+                class="btn btn-sm btn-outline"
+                onclick="addVariantRow('restaurant')"
+                style="padding:0.25rem 0.65rem; font-size:0.78rem; font-weight:700; border-radius:6px; display:inline-flex; align-items:center; gap:0.3rem;"
+                title="Add new size, portion or volume variant (e.g. 250ml, 500ml, 1L, Half, Full)"
+              >
+                <span>➕</span> Add Variant
+              </button>
+            </div>
+            <div style="font-size:0.75rem; color:var(--muted); line-height:1.4; margin-bottom:0.6rem;">
+              Map multiple sizes or portions with distinct prices (e.g., <strong>250ml, 500ml, 1L</strong>, or <strong>Half, Full</strong>). Select a default variant. Finished/out-of-stock variants will appear faded and cannot be ordered by customers.
+            </div>
+
+            <!-- Suggestion Pills from catalog / other partners -->
+            <div id="mi-variant-suggestions-box" style="display:none; margin-bottom:0.65rem; background:#fff; border:1px dashed #93c5fd; border-radius:8px; padding:0.45rem 0.65rem;">
+              <div style="font-size:0.72rem; font-weight:700; color:#1d4ed8; margin-bottom:0.35rem;">
+                💡 Suggested variants from other restaurants/shops for this item:
+              </div>
+              <div id="mi-variant-suggestions-list" style="display:flex; flex-wrap:wrap; gap:0.35rem;"></div>
+            </div>
+
+            <div id="mi-variants-list" style="display:flex; flex-direction:column; gap:0.5rem;">
+              <!-- Dynamic variant rows injected here -->
+            </div>
+            <datalist id="mi-variant-datalist"></datalist>
+          </div>
+
           <div class="form-group">
             <label>Description</label>
             <textarea id="mi-desc" rows="2" placeholder="Brief mouth-watering description..."></textarea>
@@ -3782,6 +3821,45 @@
               <input id="si-quantity" type="number" min="0" placeholder="50" required />
             </div>
           </div>
+
+          <!-- Product Variants & Dynamic Pricing -->
+          <div class="form-group" style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:10px; padding:0.85rem; margin-top:0.5rem; margin-bottom:1rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.4rem;">
+              <div style="display:flex; align-items:center; gap:0.45rem;">
+                <label style="margin:0; font-size:0.88rem; font-weight:800; color:#1e293b;">
+                  Variants &amp; Custom Pricing
+                </label>
+                <span class="badge" style="background:#eff6ff; color:#2563eb; font-size:0.7rem; font-weight:700;">Optional</span>
+              </div>
+              <button
+                type="button"
+                id="btn-add-si-variant"
+                class="btn btn-sm btn-outline"
+                onclick="addVariantRow('shop')"
+                style="padding:0.25rem 0.65rem; font-size:0.78rem; font-weight:700; border-radius:6px; display:inline-flex; align-items:center; gap:0.3rem;"
+                title="Add new pack size, weight or volume variant (e.g. 250ml, 500ml, 1L, 1kg, 5kg)"
+              >
+                <span>➕</span> Add Variant
+              </button>
+            </div>
+            <div style="font-size:0.75rem; color:var(--muted); line-height:1.4; margin-bottom:0.6rem;">
+              Map multiple sizes or weights with distinct prices (e.g., <strong>250ml, 500ml, 1L</strong>, or <strong>500g, 1kg, 5kg</strong>). Select a default variant. Finished/out-of-stock variants will appear faded and cannot be ordered by customers.
+            </div>
+
+            <!-- Suggestion Pills from catalog / other partners -->
+            <div id="si-variant-suggestions-box" style="display:none; margin-bottom:0.65rem; background:#fff; border:1px dashed #93c5fd; border-radius:8px; padding:0.45rem 0.65rem;">
+              <div style="font-size:0.72rem; font-weight:700; color:#1d4ed8; margin-bottom:0.35rem;">
+                💡 Suggested variants from other shops/restaurants for this item:
+              </div>
+              <div id="si-variant-suggestions-list" style="display:flex; flex-wrap:wrap; gap:0.35rem;"></div>
+            </div>
+
+            <div id="si-variants-list" style="display:flex; flex-direction:column; gap:0.5rem;">
+              <!-- Dynamic variant rows injected here -->
+            </div>
+            <datalist id="si-variant-datalist"></datalist>
+          </div>
+
           <div class="form-group">
             <label>Description</label>
             <textarea id="si-desc" rows="2" placeholder="Product details, ingredients, expiry or pack information..."></textarea>

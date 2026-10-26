@@ -64,7 +64,7 @@ async function fetchAvailableRiderOrders() {
           </div>
 
           <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.85rem; border-top:1px dashed var(--line); padding-top:0.8rem;">
-            <div>Dishes: ${(o.items || []).map((i) => `${i.name} (x${i.quantity})`).join(', ')}</div>
+            <div>Dishes: ${(o.items || []).map((i) => `${i.name}${i.variant ? ' (' + i.variant + ')' : ''} (x${i.quantity})`).join(', ')}</div>
             <div>Payment: <strong>${o.paymentMethod === 'cod' ? '💵 COLLECT ₹' + o.totalAmount + ' COD' : '✓ PREPAID ONLINE'}</strong></div>
           </div>
         </div>
@@ -190,7 +190,7 @@ async function fetchActiveRiderOrders() {
           </div>
 
           <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px dashed var(--line); padding-top:0.8rem;">
-            <div>Dishes: ${(o.items || []).map((i) => `${i.name} (x${i.quantity})`).join(', ')}</div>
+            <div>Dishes: ${(o.items || []).map((i) => `${i.name}${i.variant ? ' (' + i.variant + ')' : ''} (x${i.quantity})`).join(', ')}</div>
             <div style="font-weight:700; font-size:1.05rem;">
               ${o.paymentMethod === 'cod' ? '<span style="color:var(--tomato-dark);">💵 Collect Cash on Delivery: ₹' + o.totalAmount + '</span>' : '<span style="color:var(--green);">✓ Paid Online via Gateway</span>'}
             </div>

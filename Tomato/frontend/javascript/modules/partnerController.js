@@ -216,7 +216,7 @@ function renderRestaurantOrdersTable(orders) {
                 ${o.riderName ? `<br><small style="color:#0369a1; font-weight:600;">🚴 Rider: ${escapeHtml(o.riderName)}</small>` : ''}
               </td>
               <td>
-                ${(o.items || []).map((i) => `<div>${escapeHtml(i.name)} <span style="color:var(--muted); font-size:0.75rem;">x${i.quantity}</span></div>`).join('')}
+                ${(o.items || []).map((i) => `<div>${escapeHtml(i.name)}${i.variant ? ` <span style="font-size:0.72rem; color:#0284c7; background:#e0f2fe; padding:0.1rem 0.3rem; border-radius:3px; font-weight:600;">(${escapeHtml(i.variant)})</span>` : ''} <span style="color:var(--muted); font-size:0.75rem;">x${i.quantity}</span></div>`).join('')}
               </td>
               <td><strong style="color:var(--green);">₹${Number(o.totalAmount).toFixed(2)}</strong></td>
               <td><span class="badge ${o.paymentStatus === 'paid' ? 'badge-delivered' : 'badge-placed'}">${o.paymentMethod?.toUpperCase()} (${o.paymentStatus})</span></td>
@@ -527,7 +527,7 @@ function renderShopOrdersTable(orders) {
                 ${o.riderName ? `<br><small style="color:#0369a1; font-weight:600;">🚴 Rider: ${escapeHtml(o.riderName)}</small>` : ''}
               </td>
               <td>
-                ${(o.items || []).map((i) => `<div>${escapeHtml(i.name)} <span style="color:var(--muted); font-size:0.75rem;">x${i.quantity}</span></div>`).join('')}
+                ${(o.items || []).map((i) => `<div>${escapeHtml(i.name)}${i.variant ? ` <span style="font-size:0.72rem; color:#0284c7; background:#e0f2fe; padding:0.1rem 0.3rem; border-radius:3px; font-weight:600;">(${escapeHtml(i.variant)})</span>` : ''} <span style="color:var(--muted); font-size:0.75rem;">x${i.quantity}</span></div>`).join('')}
               </td>
               <td><strong style="color:var(--green);">₹${Number(o.totalAmount).toFixed(2)}</strong></td>
               <td><span class="badge ${o.paymentStatus === 'paid' ? 'badge-delivered' : 'badge-placed'}">${o.paymentMethod?.toUpperCase()} (${o.paymentStatus})</span></td>
@@ -641,6 +641,174 @@ async function viewShopOrderBill(orderId) {
 window.viewShopOrderBill = viewShopOrderBill;
 
 // =========================================================================
+// PARTNER: ITEM VARIANTS & CATALOG CROSS-STORE SUGGESTIONS
+// =========================================================================
+let cachedRestaurantMenu = [];
+let cachedShopItems = [];
+let variantSuggestTimeout = null;
+
+function addVariantRow(type, initial = {}) {
+  const prefix = type === 'shop' ? 'si' : 'mi';
+  const listEl = document.getElementById(`${prefix}-variants-list`);
+  if (!listEl) return;
+
+  const row = document.createElement('div');
+  row.className = 'variant-row';
+  row.style.cssText = 'display:flex; align-items:center; gap:0.45rem; background:#ffffff; border:1px solid #cbd5e1; border-radius:8px; padding:0.45rem 0.6rem; box-shadow:0 1px 3px rgba(0,0,0,0.03); flex-wrap:wrap;';
+
+  const defaultChecked = Boolean(initial.isDefault);
+  const availableChecked = initial.isAvailable !== undefined ? Boolean(initial.isAvailable) : true;
+  const initialQty = initial.quantity !== undefined ? Number(initial.quantity) : 20;
+  const initialPrice = initial.price !== undefined ? initial.price : '';
+  const initialName = initial.name || '';
+
+  row.innerHTML = `
+    <div style="flex:2; min-width:110px;">
+      <input type="text" class="v-name" placeholder="Variant (e.g. 250ml, 1L, Half)" list="${prefix}-variant-datalist" value="${escapeHtml(String(initialName))}" required style="padding:0.35rem 0.55rem; font-size:0.82rem; width:100%; border:1px solid var(--line); border-radius:6px;" />
+    </div>
+    <div style="flex:1.2; min-width:85px; display:flex; align-items:center; gap:3px;">
+      <span style="font-size:0.8rem; font-weight:700; color:var(--muted);">₹</span>
+      <input type="number" class="v-price" min="0" step="0.5" placeholder="Price" value="${initialPrice !== '' ? Number(initialPrice) : ''}" required style="padding:0.35rem 0.55rem; font-size:0.82rem; width:100%; border:1px solid var(--line); border-radius:6px;" />
+    </div>
+    <div style="flex:1; min-width:70px;">
+      <input type="number" class="v-qty" min="0" placeholder="Stock" value="${initialQty}" style="padding:0.35rem 0.55rem; font-size:0.82rem; width:100%; border:1px solid var(--line); border-radius:6px;" title="Stock Available" />
+    </div>
+    <label style="display:inline-flex; align-items:center; gap:0.25rem; margin:0; cursor:pointer; font-size:0.75rem; color:#1e293b; font-weight:600;" title="Default selected variant for customers">
+      <input type="radio" name="${prefix}-default-variant" class="v-default" ${defaultChecked ? 'checked' : ''} style="cursor:pointer;" />
+      Default
+    </label>
+    <label style="display:inline-flex; align-items:center; gap:0.25rem; margin:0; cursor:pointer; font-size:0.75rem; color:#1e293b; font-weight:600;" title="Uncheck if this variant is finished / out of stock">
+      <input type="checkbox" class="v-available" ${availableChecked ? 'checked' : ''} style="cursor:pointer;" />
+      In Stock
+    </label>
+    <button type="button" class="btn-remove-variant" onclick="this.closest('.variant-row').remove()" style="background:transparent; border:none; color:#ef4444; font-size:1.15rem; line-height:1; cursor:pointer; padding:2px 6px; border-radius:4px;" title="Remove this variant">&times;</button>
+  `;
+
+  listEl.appendChild(row);
+
+  const anyDefault = listEl.querySelector(`input[name="${prefix}-default-variant"]:checked`);
+  if (!anyDefault) {
+    const radio = row.querySelector('.v-default');
+    if (radio) radio.checked = true;
+  }
+}
+window.addVariantRow = addVariantRow;
+
+function collectVariants(type) {
+  const prefix = type === 'shop' ? 'si' : 'mi';
+  const listEl = document.getElementById(`${prefix}-variants-list`);
+  if (!listEl) return [];
+
+  const rows = Array.from(listEl.querySelectorAll('.variant-row'));
+  const variants = [];
+  let hasDefault = false;
+
+  for (const row of rows) {
+    const nameInput = row.querySelector('.v-name');
+    const priceInput = row.querySelector('.v-price');
+    const qtyInput = row.querySelector('.v-qty');
+    const defaultRadio = row.querySelector('.v-default');
+    const availCheck = row.querySelector('.v-available');
+
+    const name = (nameInput?.value || '').trim();
+    if (!name) continue;
+
+    const price = Math.max(0, Number(priceInput?.value || 0));
+    const quantity = Math.max(0, Number(qtyInput?.value || 10));
+    const isDefault = Boolean(defaultRadio?.checked);
+    const isAvailable = Boolean(availCheck?.checked);
+
+    variants.push({
+      name,
+      price,
+      quantity,
+      isDefault,
+      isAvailable,
+    });
+
+    if (isDefault) hasDefault = true;
+  }
+
+  if (variants.length > 0 && !hasDefault) {
+    variants[0].isDefault = true;
+  }
+
+  return variants;
+}
+window.collectVariants = collectVariants;
+
+async function fetchCatalogVariantSuggestions(type, itemName, category) {
+  const prefix = type === 'shop' ? 'si' : 'mi';
+  const datalist = document.getElementById(`${prefix}-variant-datalist`);
+  const suggestionsBox = document.getElementById(`${prefix}-variant-suggestions-box`);
+  const suggestionsList = document.getElementById(`${prefix}-variant-suggestions-list`);
+  if (!datalist) return;
+
+  if (variantSuggestTimeout) clearTimeout(variantSuggestTimeout);
+  variantSuggestTimeout = setTimeout(async () => {
+    try {
+      const endpoint = type === 'shop' ? '/api/shop/items/variants' : '/api/restaurant/menu/variants';
+      const q = new URLSearchParams();
+      if (itemName) q.set('name', itemName);
+      if (category) q.set('category', category);
+
+      const res = await apiFetch(`${endpoint}?${q.toString()}`);
+      const variants = Array.isArray(res.variants) ? res.variants : [];
+
+      datalist.innerHTML = variants
+        .map((v) => `<option value="${escapeHtml(v.name)}">${v.price != null && v.price > 0 ? `₹${v.price}` : ''}</option>`)
+        .join('');
+
+      if (suggestionsBox && suggestionsList) {
+        if (variants.length > 0) {
+          suggestionsBox.style.display = 'block';
+          suggestionsList.innerHTML = variants.slice(0, 8).map((v) => {
+            const priceText = v.price != null && v.price > 0 ? ` (₹${v.price})` : '';
+            return `
+              <button
+                type="button"
+                class="variant-pill-btn"
+                onclick="applyVariantSuggestion('${type}', '${escapeHtml(v.name)}', ${v.price != null ? v.price : 'null'})"
+                style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:999px; padding:0.18rem 0.55rem; font-size:0.74rem; font-weight:700; cursor:pointer; display:inline-flex; align-items:center; gap:0.25rem; transition:all 0.15s ease;"
+                title="Click to add this variant to your item"
+              >
+                <span>+</span> ${escapeHtml(v.name)}${priceText}
+              </button>
+            `;
+          }).join('');
+        } else {
+          suggestionsBox.style.display = 'none';
+          suggestionsList.innerHTML = '';
+        }
+      }
+    } catch (e) {
+      console.debug('Failed to fetch variant suggestions:', e);
+    }
+  }, 250);
+}
+window.fetchCatalogVariantSuggestions = fetchCatalogVariantSuggestions;
+
+function applyVariantSuggestion(type, name, price) {
+  const prefix = type === 'shop' ? 'si' : 'mi';
+  const listEl = document.getElementById(`${prefix}-variants-list`);
+  if (!listEl) return;
+
+  const existingNames = Array.from(listEl.querySelectorAll('.v-name')).map((inp) => (inp.value || '').trim().toLowerCase());
+  if (existingNames.includes(name.toLowerCase())) {
+    return;
+  }
+
+  addVariantRow(type, {
+    name,
+    price: price != null ? price : '',
+    quantity: 20,
+    isDefault: existingNames.length === 0,
+    isAvailable: true,
+  });
+}
+window.applyVariantSuggestion = applyVariantSuggestion;
+
+// =========================================================================
 // SHOP: INVENTORY & ITEM MANAGEMENT
 // =========================================================================
 async function fetchShopItems() {
@@ -657,6 +825,7 @@ async function fetchShopItems() {
   try {
     const data = await apiFetch('/api/shop/items');
     const items = data.items || [];
+    cachedShopItems = items;
 
     if (!items.length) {
       container.innerHTML = '<p style="color:var(--muted); padding:1rem 0;">No items added to shop inventory yet. Click "+ Add New Shop Item" above.</p>';
@@ -678,32 +847,40 @@ async function fetchShopItems() {
             </tr>
           </thead>
           <tbody>
-            ${items.map((it) => `
-              <tr>
-                <td>
-                  <div style="display:flex; align-items:center; gap:0.65rem;">
-                    <div style="width:38px; height:38px; border-radius:50%; border:2px solid #2563eb; overflow:hidden; display:flex; align-items:center; justify-content:center; background:#eff6ff; flex-shrink:0;">
-                      <img src="${it.image && it.image.trim() ? escapeHtml(resolveImageUrl(it.image)) : DEFAULT_TOMATO_SVG_URI}" alt="${escapeHtml(it.name)}" style="width:100%; height:100%; object-fit:cover; border-radius:50%;" onerror="this.onerror=null; this.src=DEFAULT_TOMATO_SVG_URI;" />
+            ${items.map((it) => {
+              const varList = Array.isArray(it.variants) ? it.variants : [];
+              return `
+                <tr>
+                  <td>
+                    <div style="display:flex; align-items:center; gap:0.65rem;">
+                      <div style="width:38px; height:38px; border-radius:50%; border:2px solid #2563eb; overflow:hidden; display:flex; align-items:center; justify-content:center; background:#eff6ff; flex-shrink:0;">
+                        <img src="${it.image && it.image.trim() ? escapeHtml(resolveImageUrl(it.image)) : DEFAULT_TOMATO_SVG_URI}" alt="${escapeHtml(it.name)}" style="width:100%; height:100%; object-fit:cover; border-radius:50%;" onerror="this.onerror=null; this.src=DEFAULT_TOMATO_SVG_URI;" />
+                      </div>
+                      <div>
+                        <strong>${escapeHtml(it.name)}</strong>
+                        ${it.description ? `<br><small style="color:var(--muted);">${escapeHtml(it.description)}</small>` : ''}
+                        ${varList.length > 0 ? `
+                          <div style="font-size:0.73rem; color:#2563eb; margin-top:0.25rem; display:flex; flex-wrap:wrap; gap:0.25rem;">
+                            ${varList.map(v => `<span style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:4px; padding:1px 5px; font-weight:600; ${v.isAvailable === false ? 'color:#94a3b8; text-decoration:line-through;' : ''}">${escapeHtml(v.name)}: ₹${Number(v.price).toFixed(0)}${v.isDefault ? ' ★' : ''}${v.isAvailable === false ? ' (out)' : ''}</span>`).join('')}
+                          </div>
+                        ` : ''}
+                      </div>
                     </div>
-                    <div>
-                      <strong>${escapeHtml(it.name)}</strong>
-                      ${it.description ? `<br><small style="color:var(--muted);">${escapeHtml(it.description)}</small>` : ''}
+                  </td>
+                  <td>${escapeHtml(it.category || 'General')}</td>
+                  <td>${escapeHtml(it.unit || '1 unit')}</td>
+                  <td><strong style="color:var(--green);">₹${Number(it.price).toFixed(2)}</strong></td>
+                  <td>${it.quantity} in stock</td>
+                  <td><span class="badge ${it.isActive ? 'badge-delivered' : 'badge-cancelled'}">${it.isActive ? 'Active' : 'Hidden'}</span></td>
+                  <td>
+                    <div style="display:flex; gap:0.4rem;">
+                      <button class="btn btn-outline btn-sm" onclick="editShopItem('${it._id}', '${escapeHtml(it.name)}', '${escapeHtml(it.category || '')}', '${escapeHtml(it.unit || '')}', '${escapeHtml(it.description || '')}', ${it.price}, ${it.quantity}, ${Boolean(it.isActive)}, '${escapeHtml(it.image || '')}')">Edit</button>
+                      <button class="btn btn-danger btn-sm" onclick="deleteShopItem('${it._id}')">Delete</button>
                     </div>
-                  </div>
-                </td>
-                <td>${escapeHtml(it.category || 'General')}</td>
-                <td>${escapeHtml(it.unit || '1 unit')}</td>
-                <td><strong style="color:var(--green);">₹${Number(it.price).toFixed(2)}</strong></td>
-                <td>${it.quantity} in stock</td>
-                <td><span class="badge ${it.isActive ? 'badge-delivered' : 'badge-cancelled'}">${it.isActive ? 'Active' : 'Hidden'}</span></td>
-                <td>
-                  <div style="display:flex; gap:0.4rem;">
-                    <button class="btn btn-outline btn-sm" onclick="editShopItem('${it._id}', '${escapeHtml(it.name)}', '${escapeHtml(it.category || '')}', '${escapeHtml(it.unit || '')}', '${escapeHtml(it.description || '')}', ${it.price}, ${it.quantity}, ${Boolean(it.isActive)}, '${escapeHtml(it.image || '')}')">Edit</button>
-                    <button class="btn btn-danger btn-sm" onclick="deleteShopItem('${it._id}')">Delete</button>
-                  </div>
-                </td>
-              </tr>
-            `).join('')}
+                  </td>
+                </tr>
+              `;
+            }).join('')}
           </tbody>
         </table>
       </div>
@@ -731,6 +908,11 @@ function openAddShopItemModal() {
   document.getElementById('si-desc').value = '';
   document.getElementById('si-active').checked = true;
 
+  const vList = document.getElementById('si-variants-list');
+  if (vList) vList.innerHTML = '';
+  const sBox = document.getElementById('si-variant-suggestions-box');
+  if (sBox) sBox.style.display = 'none';
+
   const siImgUrl = document.getElementById('si-image-url');
   const siImgFile = document.getElementById('si-image-file');
   const siImgPreview = document.getElementById('si-image-preview');
@@ -742,6 +924,16 @@ function openAddShopItemModal() {
   if (siImgPh) siImgPh.style.display = 'inline-block';
   if (siImgSt) { siImgSt.textContent = 'Upload product image now or replace anytime.'; siImgSt.style.color = 'var(--muted)'; }
 
+  // Dynamic listener for catalog variant suggestions
+  const nameInput = document.getElementById('si-name');
+  if (nameInput && !nameInput.dataset.variantListener) {
+    nameInput.dataset.variantListener = 'true';
+    nameInput.addEventListener('input', (e) => {
+      fetchCatalogVariantSuggestions('shop', e.target.value, document.getElementById('si-category')?.value);
+    });
+  }
+
+  fetchCatalogVariantSuggestions('shop', '', 'Groceries');
   openModal('shop-item-modal');
 }
 window.openAddShopItemModal = openAddShopItemModal;
@@ -756,6 +948,14 @@ function editShopItem(id, name, category, unit, desc, price, qty, isActive, imag
   document.getElementById('si-quantity').value = qty;
   document.getElementById('si-desc').value = desc;
   document.getElementById('si-active').checked = isActive;
+
+  const vList = document.getElementById('si-variants-list');
+  if (vList) vList.innerHTML = '';
+
+  const targetItem = (cachedShopItems || []).find((s) => String(s._id || s.id) === String(id));
+  if (targetItem && Array.isArray(targetItem.variants) && targetItem.variants.length > 0) {
+    targetItem.variants.forEach((v) => addVariantRow('shop', v));
+  }
 
   const siImgUrl = document.getElementById('si-image-url');
   const siImgFile = document.getElementById('si-image-file');
@@ -774,6 +974,16 @@ function editShopItem(id, name, category, unit, desc, price, qty, isActive, imag
     if (siImgSt) { siImgSt.textContent = 'No image uploaded yet. You can upload one now.'; siImgSt.style.color = 'var(--muted)'; }
   }
 
+  // Dynamic listener for catalog variant suggestions
+  const nameInput = document.getElementById('si-name');
+  if (nameInput && !nameInput.dataset.variantListener) {
+    nameInput.dataset.variantListener = 'true';
+    nameInput.addEventListener('input', (e) => {
+      fetchCatalogVariantSuggestions('shop', e.target.value, document.getElementById('si-category')?.value);
+    });
+  }
+
+  fetchCatalogVariantSuggestions('shop', name, category);
   openModal('shop-item-modal');
 }
 window.editShopItem = editShopItem;
@@ -781,15 +991,26 @@ window.editShopItem = editShopItem;
 async function saveShopItem(e) {
   e.preventDefault();
   const id = document.getElementById('shop-item-id').value;
+  const variants = collectVariants('shop');
+  let basePrice = Number(document.getElementById('si-price').value);
+  let baseQty = Number(document.getElementById('si-quantity').value);
+
+  if (variants.length > 0) {
+    const defVar = variants.find((v) => v.isDefault) || variants[0];
+    if (defVar) basePrice = defVar.price;
+    baseQty = variants.reduce((sum, v) => sum + (v.quantity || 0), 0);
+  }
+
   const payload = {
     name: document.getElementById('si-name').value.trim(),
     category: document.getElementById('si-category').value.trim(),
     unit: document.getElementById('si-unit').value.trim(),
-    price: Number(document.getElementById('si-price').value),
-    quantity: Number(document.getElementById('si-quantity').value),
+    price: basePrice,
+    quantity: baseQty,
     description: document.getElementById('si-desc').value.trim(),
     image: document.getElementById('si-image-url')?.value?.trim() || '',
     isActive: document.getElementById('si-active').checked,
+    variants,
   };
 
   try {
@@ -905,7 +1126,7 @@ function renderBillModalWithCoupons(bill, orderId, isShopBill = false) {
         <tbody>
           ${(bill.items || []).map((i) => `
             <tr>
-              <td>${escapeHtml(i.name)}</td>
+              <td>${escapeHtml(i.name)}${i.variant ? ` <span style="font-size:0.75rem; color:#0284c7; font-weight:600;">(${escapeHtml(i.variant)})</span>` : ''}</td>
               <td style="text-align:center;">${i.quantity}</td>
               <td style="text-align:right;">₹${Number(i.price).toFixed(2)}</td>
               <td style="text-align:right;">₹${Number(i.totalPrice || i.price * i.quantity).toFixed(2)}</td>
@@ -1068,6 +1289,7 @@ async function fetchRestaurantMenu() {
   try {
     const data = await apiFetch('/api/restaurant/menu');
     const menu = data.menu || [];
+    cachedRestaurantMenu = menu;
 
     if (!menu.length) {
       container.innerHTML = '<p style="color:var(--muted); padding:1rem 0;">No dishes added yet. Click "+ Add New Food Item" above.</p>';
@@ -1089,7 +1311,9 @@ async function fetchRestaurantMenu() {
             </tr>
           </thead>
           <tbody>
-            ${menu.map((m) => `
+            ${menu.map((m) => {
+              const varList = Array.isArray(m.variants) ? m.variants : [];
+              return `
               <tr>
                 <td>
                   <div style="display:flex; align-items:center; gap:0.65rem;">
@@ -1099,6 +1323,11 @@ async function fetchRestaurantMenu() {
                     <div>
                       <strong>${escapeHtml(m.name)}</strong>
                       ${m.description ? `<br><small style="color:var(--muted);">${escapeHtml(m.description)}</small>` : ''}
+                      ${varList.length > 0 ? `
+                        <div style="font-size:0.73rem; color:#2563eb; margin-top:0.25rem; display:flex; flex-wrap:wrap; gap:0.25rem;">
+                          ${varList.map(v => `<span style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:4px; padding:1px 5px; font-weight:600; ${v.isAvailable === false ? 'color:#94a3b8; text-decoration:line-through;' : ''}">${escapeHtml(v.name)}: ₹${Number(v.price).toFixed(0)}${v.isDefault ? ' ★' : ''}${v.isAvailable === false ? ' (out)' : ''}</span>`).join('')}
+                        </div>
+                      ` : ''}
                     </div>
                   </div>
                 </td>
@@ -1114,7 +1343,8 @@ async function fetchRestaurantMenu() {
                   </div>
                 </td>
               </tr>
-            `).join('')}
+              `;
+            }).join('')}
           </tbody>
         </table>
       </div>
@@ -1419,6 +1649,11 @@ function openAddMenuItemModal() {
   document.getElementById('mi-desc').value = '';
   document.getElementById('mi-active').checked = true;
 
+  const vList = document.getElementById('mi-variants-list');
+  if (vList) vList.innerHTML = '';
+  const sBox = document.getElementById('mi-variant-suggestions-box');
+  if (sBox) sBox.style.display = 'none';
+
   const miImgUrl = document.getElementById('mi-image-url');
   const miImgFile = document.getElementById('mi-image-file');
   const miImgPreview = document.getElementById('mi-image-preview');
@@ -1430,6 +1665,16 @@ function openAddMenuItemModal() {
   if (miImgPh) miImgPh.style.display = 'inline-block';
   if (miImgSt) { miImgSt.textContent = 'Upload dish image now or replace anytime.'; miImgSt.style.color = 'var(--muted)'; }
 
+  // Dynamic listener for catalog variant suggestions
+  const nameInput = document.getElementById('mi-name');
+  if (nameInput && !nameInput.dataset.variantListener) {
+    nameInput.dataset.variantListener = 'true';
+    nameInput.addEventListener('input', (e) => {
+      fetchCatalogVariantSuggestions('restaurant', e.target.value, document.getElementById('mi-category')?.value);
+    });
+  }
+
+  fetchCatalogVariantSuggestions('restaurant', '', 'Chinese');
   closeCategoryDropdown();
   fetchRestaurantMenuCategories();
   openModal('menu-item-modal');
@@ -1445,6 +1690,14 @@ function editMenuItem(id, name, category, desc, price, qty, dietary, isActive, i
   document.getElementById('mi-quantity').value = qty;
   document.getElementById('mi-desc').value = desc;
   document.getElementById('mi-active').checked = isActive;
+
+  const vList = document.getElementById('mi-variants-list');
+  if (vList) vList.innerHTML = '';
+
+  const targetItem = (cachedRestaurantMenu || []).find((m) => String(m._id || m.id) === String(id));
+  if (targetItem && Array.isArray(targetItem.variants) && targetItem.variants.length > 0) {
+    targetItem.variants.forEach((v) => addVariantRow('restaurant', v));
+  }
 
   const miImgUrl = document.getElementById('mi-image-url');
   const miImgFile = document.getElementById('mi-image-file');
@@ -1463,6 +1716,16 @@ function editMenuItem(id, name, category, desc, price, qty, dietary, isActive, i
     if (miImgSt) { miImgSt.textContent = 'No image uploaded yet. You can upload one now.'; miImgSt.style.color = 'var(--muted)'; }
   }
 
+  // Dynamic listener for catalog variant suggestions
+  const nameInput = document.getElementById('mi-name');
+  if (nameInput && !nameInput.dataset.variantListener) {
+    nameInput.dataset.variantListener = 'true';
+    nameInput.addEventListener('input', (e) => {
+      fetchCatalogVariantSuggestions('restaurant', e.target.value, document.getElementById('mi-category')?.value);
+    });
+  }
+
+  fetchCatalogVariantSuggestions('restaurant', name, category);
   closeCategoryDropdown();
   fetchRestaurantMenuCategories();
   openModal('menu-item-modal');
@@ -1477,15 +1740,26 @@ async function saveMenuItem(e) {
   );
   const categoryVal = matchedExisting || inputCategory;
 
+  const variants = collectVariants('restaurant');
+  let basePrice = Number(document.getElementById('mi-price').value);
+  let baseQty = Number(document.getElementById('mi-quantity').value);
+
+  if (variants.length > 0) {
+    const defVar = variants.find((v) => v.isDefault) || variants[0];
+    if (defVar) basePrice = defVar.price;
+    baseQty = variants.reduce((sum, v) => sum + (v.quantity || 0), 0);
+  }
+
   const payload = {
     name: document.getElementById('mi-name').value.trim(),
     category: categoryVal,
     dietary: document.getElementById('mi-dietary').value,
-    price: Number(document.getElementById('mi-price').value),
-    quantity: Number(document.getElementById('mi-quantity').value),
+    price: basePrice,
+    quantity: baseQty,
     description: document.getElementById('mi-desc').value.trim(),
     image: document.getElementById('mi-image-url')?.value?.trim() || '',
     isActive: document.getElementById('mi-active').checked,
+    variants,
   };
 
   if (categoryVal && !allMenuCategories.some((c) => String(c || '').trim().toLowerCase() === categoryVal.toLowerCase())) {
